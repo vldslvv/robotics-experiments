@@ -18,7 +18,7 @@ def _contract():
     from robotics_experiments.rl import PolicyContract, PolicyInterface
 
     return PolicyContract(
-        policy_interface=PolicyInterface.PRESS_APPROACH,
+        policy_interface=PolicyInterface.PRESS,
         obs_schema_version=1,
         obs_dim=34,
         policy_rate_hz=20.0,
@@ -93,9 +93,12 @@ def _goal():
     return SimpleNamespace(
         range_min_m=0.40,
         range_max_m=0.42,
-        alignment_error_max_m=0.03,
-        linear_speed_max_mps=0.10,
+        alignment_error_max_m=0.01,
+        relative_attitude_error_max_rad=0.017453292519943295,
+        linear_speed_max_mps=0.03,
+        angular_speed_max_radps=0.05,
         body_z_alignment_min=0.965926,
+        stable_steps=100,
         velocity_reference=SimpleNamespace(
             range_center_m=0.41,
             wall_normal_prediction_horizon_s=0.4,
@@ -115,39 +118,69 @@ def test_approach_evaluation_aggregation() -> None:
         summarize_press_approach_episodes,
     )
 
+    common = {
+        "range_pass_rate": 0.8,
+        "alignment_pass_rate": 0.7,
+        "attitude_pass_rate": 0.9,
+        "linear_speed_pass_rate": 0.6,
+        "angular_speed_pass_rate": 0.85,
+        "contact_clear_pass_rate": 0.95,
+        "complete_goal_pass_rate": 0.5,
+        "mean_normalized_pose_error": 0.4,
+        "terminal_range_cost": 0.2,
+        "trajectory_alignment_cost": 0.3,
+        "relative_attitude_error_cost": 0.4,
+        "velocity_tracking_cost": 0.5,
+        "angular_velocity_cost": 0.6,
+        "upright_error_cost": 0.7,
+        "action_delta_cost": 0.8,
+        "completion_time_fraction": 0.5,
+    }
     summary = summarize_press_approach_episodes(
         episodes=(
             PressApproachEpisodeMetrics(
-                True, False, False, False, False, False, 0.405, 1.0, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5
+                approach_success=True,
+                collision=False,
+                body_collision=False,
+                pusher_collision=False,
+                other_flight_failure=False,
+                range_undershoot=False,
+                timeout=False,
+                max_stable_goal_fraction=1.0,
+                closest_range_m=0.405,
+                completion_time_s=1.0,
+                **common,
             ),
             PressApproachEpisodeMetrics(
-                False, True, True, False, False, False, 0.39, None, 1.0, 0.2, 0.3, 0.4, 0.5, 1.0
-            ),
-            PressApproachEpisodeMetrics(
-                False, True, False, True, False, False, 0.40, None, 0.5, 0.3, 0.4, 0.5, 0.6, 1.0
-            ),
-            PressApproachEpisodeMetrics(
-                False, False, False, False, True, False, 0.44, None, 1.0, 0.4, 0.5, 0.6, 0.7, 1.0
-            ),
-            PressApproachEpisodeMetrics(
-                False, False, False, False, False, True, 0.43, None, 0.5, 0.5, 0.6, 0.7, 0.8, 1.0
+                approach_success=False,
+                collision=True,
+                body_collision=True,
+                pusher_collision=False,
+                other_flight_failure=False,
+                range_undershoot=True,
+                timeout=False,
+                max_stable_goal_fraction=0.2,
+                closest_range_m=0.39,
+                completion_time_s=None,
+                **common,
             ),
         )
     )
-    assert summary.episodes == 5
-    assert summary.approach_success_rate == 0.2
-    assert summary.collision_rate == 0.4
-    assert summary.body_collision_rate == 0.2
-    assert summary.pusher_collision_rate == 0.2
-    assert summary.other_flight_failure_rate == 0.2
-    assert summary.timeout_rate == 0.2
-    assert summary.mean_closest_range_m == pytest.approx(0.413)
+    assert summary.episodes == 2
+    assert summary.approach_success_rate == 0.5
+    assert summary.collision_rate == 0.5
+    assert summary.body_collision_rate == 0.5
+    assert summary.range_undershoot_rate == 0.5
+    assert summary.maximum_stable_goal_fraction == 1.0
+    assert summary.mean_closest_range_m == pytest.approx(0.3975)
     assert summary.min_closest_range_m == pytest.approx(0.39)
     assert summary.median_completion_time_s == 1.0
-    assert summary.mean_terminal_range_cost == pytest.approx(0.6)
+    assert summary.mean_terminal_range_cost == pytest.approx(0.2)
     assert summary.mean_trajectory_alignment_cost == pytest.approx(0.3)
-    assert summary.mean_velocity_tracking_cost == pytest.approx(0.4)
-    assert summary.mean_completion_time_fraction == pytest.approx(0.9)
+    assert summary.mean_relative_attitude_error_cost == pytest.approx(0.4)
+    assert summary.mean_velocity_tracking_cost == pytest.approx(0.5)
+    assert summary.mean_angular_velocity_cost == pytest.approx(0.6)
+    assert summary.mean_completion_time_fraction == pytest.approx(0.5)
 
 
 def test_trajectory_cost_tracks_full_contact_frame_target_velocity() -> None:
@@ -165,14 +198,14 @@ def test_trajectory_cost_tracks_full_contact_frame_target_velocity() -> None:
         goal_config=_goal(),
     )
 
-    assert costs[1].item() == pytest.approx(0.0, abs=1.0e-6)
+    assert costs[2].item() == pytest.approx(0.0, abs=1.0e-6)
     observation[:, 12] = -0.02
     mismatched = press_evaluation._trajectory_costs(  # noqa: SLF001
         observation=observation,
         action=torch.zeros((1, 4)),
         goal_config=_goal(),
     )
-    assert mismatched[1].item() == pytest.approx(1.0)
+    assert mismatched[2].item() == pytest.approx(1.0)
 
 
 def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
@@ -199,7 +232,10 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         def reset(self, *, seed):
             self.seeds.append(seed)
             self.step_count = 0
-            return {"policy": torch.zeros((2, 34))}, {}
+            observation = torch.zeros((2, 34))
+            observation[:, 6] = 1.0
+            observation[:, 19] = 1.0
+            return {"policy": observation}, {}
 
         def step(self, _action):
             self.step_count += 1
@@ -209,22 +245,35 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
             self.press_approach_result = SimpleNamespace(
                 state=SimpleNamespace(
                     closest_range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
-                    previous_range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
+                    normalized_pose_error=torch.tensor([0.0, 2.0]),
+                    stable_goal_steps=torch.tensor([100 if first else 0, 0]),
                 ),
+                range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
+                range_error_m=torch.tensor([0.0, 0.04 if first else 0.02]),
+                alignment_error_m=torch.zeros(2),
+                attitude_error_rad=torch.zeros(2),
+                linear_speed_mps=torch.zeros(2),
+                angular_speed_radps=torch.zeros(2),
+                contact_clear=torch.ones(2, dtype=torch.bool),
+                strict_goal=torch.tensor([first, False]),
                 termination=SimpleNamespace(
                     success=success,
                     collision=torch.zeros(2, dtype=torch.bool),
                     body_collision=torch.zeros(2, dtype=torch.bool),
                     pusher_collision=torch.zeros(2, dtype=torch.bool),
                     flight_failure=torch.zeros(2, dtype=torch.bool),
+                    range_undershoot=torch.zeros(2, dtype=torch.bool),
                     time_out=timeout,
                 ),
                 rewards=SimpleNamespace(**{name: torch.ones(2) for name in reward_names}),
             )
             terminated = success
             truncated = timeout
+            observation = torch.zeros((2, 34))
+            observation[:, 6] = 1.0
+            observation[:, 19] = 1.0
             return (
-                {"policy": torch.zeros((2, 34))},
+                {"policy": observation},
                 torch.zeros(2),
                 terminated,
                 truncated,
@@ -239,6 +288,7 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         seeds=(202,),
         episodes_per_seed=2,
         goal_config=_goal(),
+        hold_steps=100,
         report=reports.append,
         trace_worst_episode=True,
     )
@@ -258,11 +308,14 @@ def _config():
     return SimpleNamespace(
         rl=SimpleNamespace(
             training=SimpleNamespace(task_id="press-task"),
+            policy_rate_hz=20.0,
             press=SimpleNamespace(
-                curriculum_stage="approach",
+                selected_stage=lambda: SimpleNamespace(name="approach", hold_s=5.0),
                 goal=_goal(),
+                termination=SimpleNamespace(range_undershoot_min_m=0.40),
                 evaluation=SimpleNamespace(
-                    seeds=(101, 202, 303),
+                    validation_seeds=(101, 202, 303),
+                    test_seeds=(404, 505, 606),
                     episodes_per_seed=1,
                     success_rate_min=0.95,
                     collision_rate_max=0.01,
@@ -270,9 +323,12 @@ def _config():
                     flight_failure_penalty=3.0,
                     timeout_penalty=2.0,
                     non_success_penalty=1.0,
+                    dwell_progress_weight=2.0,
                     terminal_range_weight=0.25,
                     trajectory_alignment_weight=0.2,
+                    relative_attitude_error_weight=0.1,
                     velocity_tracking_weight=0.2,
+                    angular_velocity_weight=0.1,
                     upright_error_weight=0.1,
                     action_delta_weight=0.1,
                     completion_time_weight=0.15,
@@ -313,7 +369,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
         return env, SimpleNamespace(
             observation_schema_version=1,
             observation_space=34,
-            policy_interface="press-approach",
+            policy_interface="press",
         )
 
     monkeypatch.setattr(
@@ -329,18 +385,31 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
             body_collision_rate=0.0,
             pusher_collision_rate=0.0,
             other_flight_failure_rate=0.0,
+            range_undershoot_rate=0.0,
             timeout_rate=0.0,
+            range_pass_rate=1.0,
+            alignment_pass_rate=1.0,
+            attitude_pass_rate=1.0,
+            linear_speed_pass_rate=1.0,
+            angular_speed_pass_rate=1.0,
+            contact_clear_pass_rate=1.0,
+            complete_goal_pass_rate=1.0,
+            mean_normalized_pose_error=0.0,
+            mean_max_stable_goal_fraction=1.0,
+            maximum_stable_goal_fraction=1.0,
             mean_closest_range_m=0.41,
             min_closest_range_m=0.405,
             median_completion_time_s=1.0,
             mean_terminal_range_cost=0.0,
             mean_trajectory_alignment_cost=0.1,
+            mean_relative_attitude_error_cost=0.1,
             mean_velocity_tracking_cost=0.1,
+            mean_angular_velocity_cost=0.1,
             mean_upright_error_cost=0.1,
             mean_action_delta_cost=0.1,
             mean_completion_time_fraction=0.1,
         ),
-        reward_means=(RewardMean(name="success", mean=1.0),),
+        reward_means=(RewardMean(name="terminal_outcome", mean=1.0),),
     )
 
     def fake_evaluate(**kwargs):
@@ -348,19 +417,36 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
         return result
 
     monkeypatch.setattr(workflow, "evaluate_press_approach_policy", fake_evaluate)
+    policy_bytes = b"policy"
+    import hashlib
+
+    digest = hashlib.sha256(policy_bytes).hexdigest()
     monkeypatch.setattr(
         evaluator,
         "validate_policy_artifact",
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
-            values={"selected_checkpoint_iteration": 10},
+            flight_envelope=object(),
+            values={
+                "selected_checkpoint_iteration": 10,
+                "selected_policy_digest": digest,
+                "test_evaluation": {
+                    "policy_digest": digest,
+                    "workload": {
+                        "role": "test",
+                        "seeds": [404, 505, 606],
+                        "episodes_per_seed": 1,
+                        "episode_count": 3,
+                    },
+                },
+            },
         ),
     )
     monkeypatch.setattr(evaluator.torch.jit, "load", lambda *_args, **_kwargs: policy)
     artifact_dir = tmp_path / "artifact"
     artifact_dir.mkdir()
-    (artifact_dir / "policy.pt").write_bytes(b"policy")
+    (artifact_dir / "policy.pt").write_bytes(policy_bytes)
 
     observed = evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
         config=_config(),
@@ -368,7 +454,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
     )
     assert observed == result
     assert len(factory_calls) == 1
-    assert evaluation_calls[0]["seeds"] == (101, 202, 303)
+    assert evaluation_calls[0]["seeds"] == (404, 505, 606)
     assert evaluation_calls[0]["env"] is env
     assert policy.eval_count == 1
     assert env.close_count == 1
@@ -388,7 +474,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
             SimpleNamespace(
                 observation_schema_version=1,
                 observation_space=34,
-                policy_interface="press-approach",
+                policy_interface="press",
             ),
         ),
     )
@@ -398,6 +484,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
+            flight_envelope=object(),
             values={"selected_checkpoint_iteration": 10},
         ),
     )

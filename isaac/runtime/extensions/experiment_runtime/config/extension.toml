@@ -1,5 +1,5 @@
 [package]
-version = "1.1.0"
+version = "1.2.0"
 category = "Simulation"
 title = "ExperimentRuntime"
 description = "Live Kit shell hosting the host-agnostic fleet runtime orchestrator (scene, settings, fleet spawn, PX4 lockstep, and routine drivers)"

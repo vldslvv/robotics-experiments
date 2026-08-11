@@ -12,9 +12,15 @@ RL_TENSORBOARD_HOST ?= 127.0.0.1
 RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 RL_TENSORBOARD_LOGDIR ?= .build/training
+RL_TENSORBOARD_SCALAR_SAMPLES ?= 1000000
+PRESS_NAVIGATION_MEASUREMENT_RUNS ?= 10
+PRESS_NAVIGATION_POSITION_MARGIN_M ?= 0.005
+PRESS_NAVIGATION_ROTATION_MARGIN_RAD ?= 0.004363323129985824
+PRESS_NAVIGATION_MEASUREMENT_ROOT ?= .build/benchmarks/press-navigation-handoff-campaigns
+PRESS_NAVIGATION_MEASUREMENT_RUNNER = make/scripts/run_press_navigation_handoff_measurement.sh
 
-# One process trains, evaluates at phase cadence, selects the lowest-cost
-# checkpoint, applies final acceptance, and publishes the completed run.
+# One campaign validates up to three scratch attempts, freshly tests the first
+# eligible immutable actor, and publishes only after final acceptance.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 train-rl: generate-drone-usd
@@ -57,7 +63,10 @@ tensorboard-rl:
 	    -m tensorboard.main \
 	    --logdir '$(ISAAC_PROJECT_DIR)/$(RL_TENSORBOARD_LOGDIR)' \
 	    --host '$(RL_TENSORBOARD_HOST)' \
-	    --port '$(RL_TENSORBOARD_PORT)'
+	    --port '$(RL_TENSORBOARD_PORT)' \
+	    --reload_interval 5 \
+	    --samples_per_plugin 'scalars=$(RL_TENSORBOARD_SCALAR_SAMPLES)' \
+	    --load_fast=false
 
 .PHONY: test-integration-press-hover-goto
 test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
@@ -70,7 +79,7 @@ test-integration-press-hover-goto: generate-drone-usd
 
 .PHONY: test-integration-press-contact-chain
 test-integration-press-contact-chain: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-contact-chain: HYDRA_CONFIG = configs/train_press_approach_quad.yaml
+test-integration-press-contact-chain: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
 test-integration-press-contact-chain: ISAAC_TEST_EXTRA_ARGS = --contact-chain --num-envs 1
 test-integration-press-contact-chain: generate-drone-usd
 	@TEST_TARGET='test-integration-press-contact-chain' \
@@ -107,6 +116,31 @@ test-integration-press-approach-routine: generate-drone-usd
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
+
+.PHONY: test-integration-press-navigation-handoff-sample
+test-integration-press-navigation-handoff-sample: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-navigation-handoff-sample: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
+test-integration-press-navigation-handoff-sample: SCENE = @config
+test-integration-press-navigation-handoff-sample:
+	@TEST_TARGET='test-integration-press-navigation-handoff-sample' \
+	    HOST_ISAAC_LOG_BASENAME='test_px4_press_navigation_handoff_sample.log' \
+	    HOST_PX4_LOG_BASENAME='test_px4_press_navigation_handoff_sample_px4.log' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST)' \
+	    PRESS_NAVIGATION_MEASUREMENT_OUTPUT='$(PRESS_NAVIGATION_MEASUREMENT_OUTPUT_CONTAINER)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-navigation-handoff-sample' \
+	    STRICT='1' \
+	    $(PX4_INTEGRATION_COMMON_ENV) \
+	    bash "$(PX4_INTEGRATION_RUNNER)"
+
+.PHONY: measure-press-navigation-handoff
+measure-press-navigation-handoff:
+	@MAKE_COMMAND='$(MAKE)' \
+	    PRESS_NAVIGATION_MEASUREMENT_ROOT='$(PRESS_NAVIGATION_MEASUREMENT_ROOT)' \
+	    PRESS_NAVIGATION_MEASUREMENT_RUNS='$(PRESS_NAVIGATION_MEASUREMENT_RUNS)' \
+	    PRESS_NAVIGATION_POSITION_MARGIN_M='$(PRESS_NAVIGATION_POSITION_MARGIN_M)' \
+	    PRESS_NAVIGATION_ROTATION_MARGIN_RAD='$(PRESS_NAVIGATION_ROTATION_MARGIN_RAD)' \
+	    bash "$(PRESS_NAVIGATION_MEASUREMENT_RUNNER)"
 
 # Physical warehouse trained-policy acceptance remains downstream of alignment
 # and never fits or publishes controller settings.

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.0]
+- Extend the immutable runtime snapshot with routine, motion, navigation,
+  switch-relative handoff, policy, and transmitted-setpoint telemetry built
+  only from values already consumed by the control tick.
+
 ## [1.1.0]
 - Expose the active extension and its immutable runtime snapshot to dependent
   Kit plugins while preserving the forgiving live-runtime behavior.

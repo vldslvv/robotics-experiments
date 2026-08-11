@@ -17,6 +17,14 @@ The standalone Isaac test scripts these targets run live under
 `isaac/runtime/standalone/tests/`; see that directory's `README.md` for
 scenario-specific notes.
 
+Inside the container, `run_isaac_test_in_container.sh` launches the Python test
+as a distinct process group while a separate pipeline filters and persists its
+output. Container HUP, INT, and TERM signals are forwarded to that complete
+Python process group as SIGINT, and the runner waits for it before exiting with
+the corresponding shell status. This lets campaign parents and workers finish
+their atomic interruption reports instead of leaving a live-looking partial
+report when a host wrapper is canceled.
+
 `make/integration-tests.mk` owns the general integration harness variables,
 aggregate suite, and non-RL target definitions. `make/rl.mk` owns merged
 training/evaluation, independent press evaluation, and all press/Isaac Lab task
@@ -27,6 +35,18 @@ fit/publication, and the alignment target-envelope gate.
 `make/rl.mk` when the aggregate runs.
 
 ## Targets
+
+`make measure-flight-envelope` is an owning campaign rather than part of the
+aggregate integration suite. It invokes the internal
+`test-integration-flight-parameters-sample` target once per configured trial.
+Each invocation uses the ordinary strict PX4/Isaac harness with isolated
+processes and run artifacts, then copies its single ULog beside the raw
+ground-truth pose candidate and bridge log. The host-safe `flight_parameters`
+coordinator decodes that ULog, rejects any trial that does not prove the PX4
+hover mode/control/goal contract, and writes the selected neutral trace and
+verification record. After every configured trial succeeds, it derives and
+validates the immutable hover-envelope bundle and atomically advances its
+relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
 
 - `make test-integration` runs `test-integration-isaac` and
   `test-integration-px4-takeoff`.
@@ -56,8 +76,11 @@ fit/publication, and the alignment target-envelope gate.
   forward-pad contact and pusher/button displacement, advances the production
   N-step latch, verifies exactly one lamp transition, and retreats within the
   stability envelope. A test-local no-dones environment keeps these physical
-  measurements independent of Stage 1's contact-failure termination. It is
-  part of `test-integration-all` and requires no PX4 container or trained policy.
+  measurements independent of Stage 1's contact-failure termination. The gate
+  selects the production press experiment config so its scripted post-contact
+  ramp retains the authority required to cross the real latch threshold; it
+  does not load or execute the policy named by that config. It is part of
+  `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
   Isaac Lab image. It needs the automatically published artifact from
   `make train-rl`, so it is deliberately not part of
@@ -68,14 +91,33 @@ fit/publication, and the alignment target-envelope gate.
 - `make test-integration-press-approach-routine` runs the Stage 1 deployment
   flight from `configs/policy_press_approach_quad.yaml`: takeoff, settle at a
   safe staging point about 0.59 m from the switch at a requested 0.5 m/s, make
-  the short move into the 0.48 m handoff range at 0.08 m/s, execute the
-  artifact-selected approach policy, return at 0.5 m/s to the landing point,
-  land, and disarm. It requires stable contact-free approach completion and no
-  lamp transition. Like the hover artifact gate, it is excluded from
+  the short move to the unchanged 0.47 m handoff waypoint at 0.08 m/s, settle
+  for two seconds, and enter the artifact-selected approach policy. It passes
+  only after the unchanged handoff predicate latches, real artifact inference
+  returns a valid action, and the resulting first policy setpoint is actually
+  transmitted. It then ends the isolated invocation smoke test without judging
+  later actor behavior, return navigation, landing, contact rate, or task
+  success. Like the hover artifact gate, it is excluded from
   `test-integration-all` because it needs an independently accepted artifact
   declaring `policy_interface: press-approach` and `curriculum_stage: approach`.
-  Advisory selection failure does not block `latest` publication, but this
-  integration target remains an independent workflow gate.
+  Accepted training advances `latest` after the immutable selected actor passes
+  the disjoint final test. An operator-selected diagnostic `latest` may be flown
+  by this target, but that execution is diagnostic and does not become policy
+  qualification evidence; this integration target remains an independent
+  workflow gate. Policy quality remains owned by held-out evaluation and
+  `test-integration-press-policy-transfer`.
+- `make measure-press-navigation-handoff` runs at least ten independent copies
+  of that exact production config through the final waypoint and settle, ending
+  each before handoff gating can bias the pose sample. It writes schema-2 raw
+  samples and a summary beneath
+  `.build/benchmarks/press-navigation-handoff-campaigns/`. The summary records
+  the identical final route, switch-relative position extrema, normalized
+  relative quaternions, maximum quaternion-geodesic attitude error, and the
+  configured 0.005 m / 0.25 degree margins required of the shared
+  Lab-reset/live-handoff envelope.
+  Re-run it whenever the sensor models, PX4 estimator/navigation behavior,
+  controller, routine, or warehouse geometry changes. Its internal one-sample
+  target is harness plumbing, not a public acceptance gate.
 - `make test-integration-alignment-target` runs the analytic hover/goto
   stability envelope with the selected alignment `best` artifact. It is owned
   by `make/alignment.mk` and excluded from `test-integration-all` because it

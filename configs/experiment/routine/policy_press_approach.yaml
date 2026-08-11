@@ -1,8 +1,10 @@
 defaults:
   - default
 
-# Stop at a safe staging point before the short move into the 0.48 m actor
-# handoff range. The long navigation leg must not use the handoff point as its
+# Stop at a safe staging point before the short move to the 0.60 m actor-entry
+# target. The final completion radius covers the measured PX4 waypoint error;
+# the policy handoff and training reset cover the measured post-settle position
+# distribution. The long navigation leg must not use the handoff point as its
 # braking target because PX4 position-control overshoot can consume the
 # pusher-to-wall clearance.
 takeoff_timeout_s: 20.0
@@ -16,7 +18,7 @@ steps:
     hold_s: 2.0
   - kind: goto
     x: 0.0
-    y: 17.40
+    y: 17.24
     z: 2.5
     ground_speed_m_s: 0.5
     position_tol_m: 0.05
@@ -25,18 +27,20 @@ steps:
     hold_s: 2.0
   - kind: goto
     x: 0.0
-    y: 17.51
+    y: 17.39
     z: 2.5
     ground_speed_m_s: 0.08
-    position_tol_m: 0.02
-    timeout_s: 10.0
+    position_tol_m: 0.06
+    timeout_s: 20.0
   - kind: hover
-    hold_s: 1.0
+    hold_s: 2.0
   - kind: policy
     label: press-approach
+    # `latest` is the active operator deployment and is not itself an
+    # acceptance claim; inspect the originating campaign report when needed.
     artifact: .build/training/press-approach/latest
     switch_index: 0
-    timeout_s: 20.0
+    timeout_s: 45.0
   - kind: goto
     x: 0.0
     y: 14.0

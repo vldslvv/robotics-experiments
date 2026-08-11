@@ -163,6 +163,14 @@ def _profiles() -> tuple[ProbeProfile, ...]:
                 ),
             )
         )
+    profiles.append(
+        ProbeProfile(
+            name="stability-hover-pose",
+            split="stability",
+            axis="combined",
+            commands=(ProbeCommand(_ZERO3, 0.0, 0.0, _ZERO3, 0.1),),
+        )
+    )
     return tuple(profiles)
 
 
@@ -343,6 +351,7 @@ def _definition(
         controller_schema_version=1,
         backend=backend,
         experiment_config=str(experiment),
+        flight_envelope_artifact=str(REPO_ROOT / "tests/fixtures/flight_envelope"),
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,

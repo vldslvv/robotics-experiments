@@ -40,6 +40,9 @@ Read area docs on demand when a task touches that area:
 - Controller alignment: `docs/SIM_TO_SIM_ALIGNMENT.md` for the host-safe
   alignment package, task-neutral PX4/Isaac Lab probes, artifact publication,
   controller settings, metric registry, and training provenance.
+- Flight parameters: `docs/FLIGHT_PARAMETERS.md` for task-neutral flight
+  configs, repeated hover evidence, strict envelope artifacts, publication, and
+  alignment/RL consumers.
 - Integration tests: `docs/INTEGRATION_TEST_ARCHITECTURE.md` for integration
   target mechanics, harness scripts, caching, artifacts, concurrency, and
   multi-instance PX4.
@@ -77,6 +80,10 @@ the current contents and the intended home for that kind of code.
 - `src/robotics_experiments/alignment/` -> Host-safe probe definitions, generic
   candidate fitting/ranking, alignment evidence, and controller publication.
   Upstream of RL; no Isaac, Kit, PX4-container, or RL dependency.
+- `src/robotics_experiments/flight_parameters/` -> Host-safe task-neutral
+  flight config, trace, envelope derivation/evaluation, and strict artifact
+  publication. Shared by alignment and RL; no Isaac, Kit, PX4-container,
+  alignment, or RL dependency.
 - `src/robotics_experiments/runtime/` -> Host-agnostic fleet runtime: frozen
   `FleetState` lifecycle transitions (the one runtime pipeline) and the PX4
   `BridgeHost` /
@@ -146,6 +153,7 @@ the current contents and the intended home for that kind of code.
   Docker environment; keep those workarounds in Isaac-only lazy leaf modules so
   core imports still work on the host.
 - Package layering runs `config -> controller -> {alignment, rl} -> workflows`
+  with the independent `flight_parameters -> {alignment, rl}` evidence boundary
   for controller alignment and learning, alongside `config -> domain (drone / environment /
   simulation / px4_bridge) -> Isaac extensions`; `import robotics_experiments`
   (plus its subpackages) must succeed with Isaac absent. A domain leaf module that is
@@ -223,16 +231,29 @@ the current contents and the intended home for that kind of code.
   that embedded record. Policy artifacts without alignment provenance are
   unsupported. Controller and policy artifacts are strict v1 contracts; older
   schemas and compatibility migrations are unsupported. A training invocation
-  always starts one new runner and optimizer. Ordered Hydra phases may change
-  the learning schedule and reset mixture inside that single scratch lineage;
-  checkpoint initialization, resume, and post-run fine-tuning are unsupported.
-  `make train-rl` is one merged phase/evaluation loop. Each phase declares its
-  maximum updates and held-out cadence; one persistent evaluator returns raw
-  named metrics, while the Hydra-owned plateau rule reads exactly one named
-  scalar and never reads acceptance gates. After all phases end, the run-wide
-  best scalar selects the policy and the existing press gates are applied once
-  to that stored evaluation. `latest` always advances, while `best` advances
-  only for a strictly better comparable metric within one fingerprint.
+  is one campaign of configured independent attempt seeds; every attempt starts
+  in a distinct Isaac process with a new environment, runner, actor, critic,
+  and optimizer. The first ordered press curriculum stage starts from scratch;
+  a later stage restores the complete accepted checkpoint from the immediately
+  preceding stage, derived only from list order. Curriculum config has no
+  parent/child links. The coordinator retains reports and checkpoint references but
+  never owns a training environment. Later Hydra phases restore that attempt's
+  complete validation-selected learner checkpoint, apply the new schedule/reset
+  mixture, and reset the environments before collecting rollouts. Other external
+  checkpoint initialization, process resume, and post-run fine-tuning are
+  unsupported. Every checkpoint uses one fixed
+  validation workload. The evaluator returns raw named metrics, the Hydra-owned
+  plateau rule reads exactly one named scalar, and validation gates establish
+  selection eligibility only. A completed validation-passing attempt freezes
+  its exact exported actor and runs one fresh, uncached, disjoint test workload.
+  Acceptance reads only that test `PolicyEvaluation`; failure ends the campaign
+  without retry or automatic publication. `best` advances only after acceptance
+  and always points to exact tested actor bytes. `latest` is the active
+  operator-selected deployment label: an accepted campaign advances it
+  automatically, while an explicit operator deployment may point it at any
+  strict policy artifact. Such an override does not create test evidence,
+  acceptance, or a `best` candidate, and its failed or unavailable qualification
+  evidence must remain visible.
 - Alignment invariants: read `docs/SIM_TO_SIM_ALIGNMENT.md` before touching
   `src/robotics_experiments/controller/`,
   `src/robotics_experiments/alignment/`, controller definitions, alignment Make
@@ -246,10 +267,26 @@ the current contents and the intended home for that kind of code.
   audit and per-profile controller-boundary replay. `latest` and `best` advance
   only after those acceptance checks; `best` compares only within one
   fingerprint.
+- Flight-parameter invariants: read `docs/FLIGHT_PARAMETERS.md` before touching
+  `src/robotics_experiments/flight_parameters/`, flight configs, hover capture,
+  or envelope consumers. Schema 1 supports hover only. The envelope is
+  task-neutral position/pose evidence and must not acquire switch, wall,
+  actuator, or reward fields. Complete bundles use immutable run directories,
+  an exact manifest, and an atomically advanced relative `latest` symlink.
+  PX4 hover evidence must be decoded from the completed ULog inside
+  `flight_parameters` and prove the mode, control, airborne, and held-goal
+  states for the selected interval. A routine label, elapsed time, or low
+  velocity is not proof of hover, and this evidence-only decoding does not
+  broaden the shared commanding GCS port.
+  Alignment and RL must match the exact envelope fingerprint; a consumer must
+  not resolve a newer artifact implicitly after recording provenance.
 - When launching an RL training run for the user, provide a run-scoped
   monitoring path (TensorBoard by default) and report the local URL and log
   directory. Keep monitoring available while the run is active unless the user
-  asks otherwise.
+  asks otherwise. TensorBoard smoothing is one browser-global setting: require
+  zero smoothing for every metric namespace so raw validation, acceptance, and
+  training values remain visible; `training_report.json` is the exact
+  validation-value audit source.
 - PX4 bridge invariants: read
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` before
   touching bridge code. Keep the interface contract, frame conversions, motor

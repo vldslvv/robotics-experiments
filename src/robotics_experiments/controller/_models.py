@@ -78,6 +78,7 @@ class ControllerArtifact:
     command_rate_hz: float
     certified_control_modes: tuple[str, ...]
     probe_suite_fingerprint: str
+    flight_envelope_fingerprint: str
     selected_settings: ControllerSettings
     settings_fingerprint: str
     advisory_quality_passed: bool

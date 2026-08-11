@@ -166,14 +166,22 @@ the entire fleet cycle.
   `press-approach` consumes the injected exact 34-value `PressObservation`;
   `curriculum_stage` selects the stage-specific adapter. The implemented
   `approach` adapter waits for the configured handoff gate, fails on contact or
-  invalid observation, and completes after five stable contact-free approach
-  samples with a zero terminal setpoint. It does not require `hold_s`.
+  invalid observation, and completes after 100 continuous strict-goal samples
+  (five seconds at 20 Hz) with a zero terminal setpoint. The shared predicate
+  requires 0.40-0.42 m range, at most 0.01 m combined lateral/vertical error,
+  at most 1 degree full relative-attitude error, at most 0.03 m/s linear speed,
+  at most 0.05 rad/s angular speed, and no contact. It does not require
+  `hold_s`.
   Stage-less and unknown-stage press artifacts fail preflight. Policy
   completion never advances before PX4 accepts OFFBOARD. A policy timeout
   reports the adapter's final opaque state rather than goto-specific text. The
-  retained approach state exposes handoff, stable-goal count, initial/closest
+  retained approach state exposes the exact first policy-step observation,
+  handoff, valid actor-evaluation count, stable-goal count, initial/closest
   range, completion, and contact failure while commanding remains unaware of
-  those fields.
+  those fields. Generic OFFBOARD progress separately numbers cached policy
+  generations and the latest generation actually transmitted, allowing an
+  invocation smoke test to distinguish policy entry or `handoff_wait` from a
+  real actor result that reached the command port.
   An adapter failure becomes `FailureKind.COMMAND`; a bad flight still fails as
   `FailureKind.ENVELOPE` through the unchanged flight gates. Follow a policy
   step with an explicit-command step (e.g. `land`), not a command-less verifier:
@@ -304,11 +312,16 @@ installs the PhysX control subscription.
 
 The live shell also exposes an immutable status snapshot for dependent Kit
 plugins. It reports each vehicle label, simulated time, completed-step count,
-driver phase, failure/recovery outcome, and bridge status, without exposing or
-mutating `DriverContext`,
-`RoutineDriverState`, or `FleetState`; observation does not create a second
-executor path. The existing runtime failure field is the authoritative signal
-that a forgiving driver stopped early.
+driver phase, failure/recovery outcome, bridge status, active step, latest
+already-consumed motion/task observation, navigation progress, and policy
+progress. OFFBOARD state retains both the newest actor generation and the last
+setpoint predicted to have reached the port; because the imperative driver only
+commits the successor after the send succeeds, live snapshots never present a
+pending actor output as transmitted. Snapshot reads do not expose or mutate
+`DriverContext`, `RoutineDriverState`, or `FleetState`, perform another sensor
+read, invoke an actor, or send a command. Observation therefore does not create
+a second executor path. The existing runtime failure field is the authoritative
+signal that a forgiving driver stopped early.
 
 Every routine step emits machine-readable `ROUTINE_STAGE` JSON records for its
 `start` and `complete` boundaries (or `failed` instead of `complete`), carrying

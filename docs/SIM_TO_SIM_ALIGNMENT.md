@@ -13,9 +13,17 @@ reference. `robotics_experiments.alignment` owns probe definitions, generic
 candidate search, metrics, evidence bundles, and publication. RL depends only
 on the controller artifact and never imports alignment.
 
+`robotics_experiments.flight_parameters` separately owns the task-neutral
+hover envelope described in `docs/FLIGHT_PARAMETERS.md`. Both controller
+definitions resolve the same published envelope. The selected target settings
+are replayed through the 30-second `stability-hover-pose` profile and must keep
+position and attitude within its bounds. The exact envelope fingerprint enters
+the comparison fingerprint and strict controller artifact.
+
 The dependency direction is:
 
-`config -> controller -> {alignment, rl} -> workflows`
+`config -> controller -> {alignment, rl} -> workflows`, with the independent
+`flight_parameters -> {alignment, rl}` evidence boundary.
 
 The only supported controller and alignment artifact contract is schema 1.
 There are no artifact migrations, compatibility sentinels, alternate plant
@@ -271,11 +279,12 @@ The campaign runs the authoritative integration gate against its run-local
 preserves diagnostic evidence without advancing `latest` or `best`.
 
 `controller.json` is the downstream product. It contains complete controller
-settings and the control modes certified by the accepted probe-family list;
+settings, the control modes certified by the accepted probe-family list, and
+the exact flight-envelope fingerprint used by its hover-pose qualification;
 policy-owned normalized action scales are not alignment fields. Candidate traces and ULogs are
 valuable reproducibility evidence, but policy training consumes only the
-controller artifact. `latest` and comparable `best` links advance only for a
-fully accepted bundle.
+controller artifact and the independently published matching flight envelope.
+`latest` and comparable `best` links advance only for a fully accepted bundle.
 
 ## Change policy
 

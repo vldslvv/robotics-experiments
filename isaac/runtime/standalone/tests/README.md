@@ -38,6 +38,17 @@ ends with the probe policy and lets teardown stop the ephemeral simulator;
 landing and auto-disarm are outside this controller target. It is not a
 press-policy scenario and adds no commanding routine kind.
 
+`flight_parameters_capture.py` is the isolated hover-evidence leaf owned by
+`make measure-flight-envelope`. Each fresh PX4/Isaac invocation uses the
+ordinary arm, takeoff, and hover routine and records a long raw simulator
+ground-truth pose candidate at the configured cadence. It does not infer hover
+from the routine cursor or kinematics. The host coordinator decodes the
+corresponding completed PX4 ULog inside `flight_parameters`, proves the PX4
+mode/control/goal contract, and only then selects the settled measurement
+window. The raw trace, ULog, verification record, selected trace, and bridge
+log remain together as trial evidence. Envelope derivation and publication
+remain in the host-safe `robotics_experiments.flight_parameters` module.
+
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
 gate, invoked by `make test-integration-press-contact-chain` with one
 environment. It spawns the real paired switch/lamp, orients the switch into the
@@ -128,13 +139,26 @@ completion.
 `make test-integration-press-approach-routine` runs the artifact-dependent
 Stage 1 mission in `configs/policy_press_approach_quad.yaml`: takeoff, navigate
 to a safe 0.59 m staging point at a requested 0.5 m/s, settle, make the short
-move into the 0.48 m handoff range at 0.08 m/s, execute the `press-approach` /
-`approach` artifact through the generic `policy` step, return at 0.5 m/s, land,
-and disarm. The strict hook requires stable contact-free completion and no lamp
-transition. Run it only after selection
-within `make train-rl` publishes `.build/training/press-approach/latest` and
-`make eval-press` independently accepts it; it is excluded from
-`test-integration-all`.
+move to the unchanged 0.47 m handoff waypoint at 0.08 m/s with a measured
+0.06 m completion radius, settle for two seconds, and execute the
+`press-approach` / `approach` artifact through the generic `policy` step. The
+strict hook ends after the handoff latches, one valid real actor evaluation is
+returned, and that evaluation's first setpoint is transmitted. It does not
+require later actor success, contact-free completion, return, landing, or lamp
+state. It requires a strict artifact at
+`.build/training/press-approach/latest`; an accepted campaign normally publishes
+that label, while an operator may select a diagnostic unqualified artifact
+without turning this smoke result into qualification evidence. The target is
+excluded from `test-integration-all`. Policy quality remains a separate
+held-out/transfer contract.
+
+`make measure-press-navigation-handoff` repeats the same production config at
+least ten times but stops on the first exact observation after waypoint settling,
+before actor gating. It summarizes switch-relative entry-position noise beneath
+`.build/benchmarks/press-navigation-handoff-campaigns/`; rerun it after changes
+to navigation sensors, PX4 estimation/navigation, the controller, route, or
+warehouse geometry, then update the Hydra measurement evidence and shared
+training/handoff envelope.
 
 `make test-integration-press-policy-transfer` is the separate post-training PX4
 acceptance in the production warehouse. It runs the trained press actor at

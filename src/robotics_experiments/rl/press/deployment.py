@@ -44,6 +44,8 @@ class PressApproachExecutionState:
 
     previous_action: tuple[float, ...]
     handoff_latched: bool = False
+    entry_observation: tuple[float, ...] = ()
+    actor_evaluations: int = 0
     stable_goal_steps: int = 0
     initial_switch_range_m: float = math.nan
     closest_switch_range_m: float = math.nan
@@ -90,11 +92,6 @@ def _invalid_reason(*, observation: PressObservation, action_dim: int) -> Option
     return None
 
 
-def _body_z_world_z(observation: PressObservation) -> float:
-    x, y = np.asarray(observation.attitude_quat_xyzw, dtype=np.float64)[:2]
-    return float(1.0 - 2.0 * (x * x + y * y))
-
-
 def advance_press_approach_execution(
     *,
     params: PressApproachExecutionParams,
@@ -123,6 +120,12 @@ def advance_press_approach_execution(
             f"(range={switch_range_m:.4f} m, speed={linear_speed_mps:.4f} m/s)",
         )
 
+    observation_vector = to_vector(observation)
+    entry_observation = (
+        state.entry_observation
+        if state.entry_observation
+        else tuple(float(value) for value in observation_vector)
+    )
     switch_range_m = float(observation.relative_switch_pos_m[0])
     first_sample = math.isnan(state.initial_switch_range_m)
     initial_switch_range_m = switch_range_m if first_sample else state.initial_switch_range_m
@@ -135,7 +138,6 @@ def advance_press_approach_execution(
     actor_observation: tuple[float, ...] = ()
     raw_action: tuple[float, ...] = ()
     if handoff_latched:
-        observation_vector = to_vector(observation)
         actor_observation = tuple(float(value) for value in observation_vector)
         action = np.asarray(params.inference(observation_vector), dtype=np.float64)
         raw_action = tuple(float(value) for value in action.reshape(-1))
@@ -153,12 +155,12 @@ def advance_press_approach_execution(
     stable_goal = handoff_latched and bool(
         press_approach_goal_satisfied(
             relative_switch_pos_m=np.asarray(observation.relative_switch_pos_m)[None, :],
+            relative_switch_quat_xyzw=np.asarray(observation.relative_switch_quat_xyzw)[None, :],
             linear_velocity_mps=rotate_vector_wxyz(
                 np.asarray(observation.relative_switch_quat_xyzw)[[3, 0, 1, 2]],
                 np.asarray(observation.body_lin_vel_mps),
             )[None, :],
             angular_velocity_radps=np.asarray(observation.body_ang_vel_radps)[None, :],
-            body_z_world_z=np.asarray([_body_z_world_z(observation)]),
             contact_flag=np.asarray([observation.contact_flag]),
             goal_cfg=params.goal,
         )[0]
@@ -168,6 +170,8 @@ def advance_press_approach_execution(
     successor = PressApproachExecutionState(
         previous_action=tuple(float(value) for value in action),
         handoff_latched=handoff_latched,
+        entry_observation=entry_observation,
+        actor_evaluations=state.actor_evaluations + int(bool(actor_observation)),
         stable_goal_steps=stable_goal_steps,
         initial_switch_range_m=initial_switch_range_m,
         closest_switch_range_m=closest_switch_range_m,

@@ -1,15 +1,18 @@
-"""Host tests for the matched Isaac Lab press-entry reset transform."""
+"""Host tests for the shared full-envelope press-entry reset transform."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 import torch
 
-from robotics_experiments.config import PressApproachTrainingResetConfig
-from robotics_experiments.rl.press import HandoffGate
+from robotics_experiments.flight_parameters import load_flight_envelope
+from robotics_experiments.rl import evaluate_flight_envelope
+from robotics_experiments.rl.press import HandoffGate, quaternion_geodesic_error_rad
 from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
+    _hover_pose_from_unit_samples,
     _press_entry_state_from_unit_samples,
-    _press_training_entry_state_from_unit_samples,
 )
 
 _GATE = HandoffGate(
@@ -21,83 +24,66 @@ _GATE = HandoffGate(
     wall_normal_speed_max_mps=0.02,
     lateral_speed_max_mps=0.02,
     angular_speed_max_radps=0.05,
+    relative_attitude_error_max_rad=0.10,
     body_z_alignment_min=0.965926,
     estimator_health_min=0.80,
 )
-_TRAINING_RESET = PressApproachTrainingResetConfig(
-    hard_case_fraction=0.5,
-    range_min_m=0.45,
-    range_max_m=0.47,
-    tangential_error_min_m=0.06,
-    tangential_error_max_m=0.08,
+_ENVELOPE = load_flight_envelope(
+    Path(__file__).parents[4] / "fixtures/flight_envelope/flight_envelope.json"
 )
 
 
-def test_press_entry_reset_is_deterministic_and_stays_inside_shared_gate() -> None:
+def test_press_entry_reset_is_deterministic_and_covers_shared_gate() -> None:
     unit_samples = torch.tensor(
         [
-            [0.0] * 9,
-            [1.0] * 9,
-            [0.3, 0.8, 0.2, 0.7, 0.6, 0.4, 0.9, 0.1, 0.75],
+            [0.0] * 12,
+            [1.0] * 12,
+            [0.3, 0.8, 0.2, 0.7, 0.6, 0.4, 0.9, 0.1, 0.75, 0.6, 0.3, 0.8],
         ],
         dtype=torch.float64,
     )
-
-    first = _press_entry_state_from_unit_samples(
-        unit_samples=unit_samples,
-        gate=_GATE,
-    )
-    second = _press_entry_state_from_unit_samples(
-        unit_samples=unit_samples.clone(),
-        gate=_GATE,
-    )
-
+    first = _press_entry_state_from_unit_samples(unit_samples=unit_samples, gate=_GATE)
+    second = _press_entry_state_from_unit_samples(unit_samples=unit_samples.clone(), gate=_GATE)
     for first_value, second_value in zip(first, second, strict=True):
         torch.testing.assert_close(first_value, second_value, rtol=0.0, atol=0.0)
 
-    wall_normal, lateral_vertical, linear_velocity, angular_velocity = first
-    assert torch.all(wall_normal >= _GATE.switch_range_min_m)
-    assert torch.all(wall_normal <= _GATE.switch_range_max_m)
+    wall_normal, lateral_vertical, linear_velocity, angular_velocity, relative_quat_wxyz = first
+    assert wall_normal[[0, 1]].tolist() == pytest.approx([0.45, 0.50])
     assert torch.all(torch.linalg.vector_norm(lateral_vertical, dim=-1) <= 0.08 + 1e-12)
     assert torch.all(torch.abs(linear_velocity[:, 0]) <= 0.02 + 1e-12)
     assert torch.all(torch.linalg.vector_norm(linear_velocity[:, 1:3], dim=-1) <= 0.02 + 1e-12)
     assert torch.all(torch.linalg.vector_norm(angular_velocity, dim=-1) <= 0.05 + 1e-12)
-
-
-def test_press_training_reset_mixes_full_envelope_with_area_uniform_annulus() -> None:
-    unit_samples = torch.tensor(
-        [
-            [0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0],
-            [1.0, 1.0, 0.25, 0.5, 0.0, 0.0, 0.0, 0.5, 0.0, 0.49],
-            [1.0, 1.0, 0.25, 0.5, 0.0, 0.0, 0.0, 0.5, 0.0, 0.5],
-        ],
-        dtype=torch.float64,
+    attitude_error = quaternion_geodesic_error_rad(
+        quaternion_xyzw=relative_quat_wxyz[:, [1, 2, 3, 0]]
     )
+    assert torch.all(attitude_error <= 0.10 + 1e-12)
 
-    wall_normal, lateral_vertical, linear_velocity, angular_velocity = (
-        _press_training_entry_state_from_unit_samples(
-            unit_samples=unit_samples,
-            gate=_GATE,
-            training_reset=_TRAINING_RESET,
-            hard_case_fraction=0.5,
-        )
+
+def test_press_entry_reset_rejects_wrong_sample_width() -> None:
+    with pytest.raises(ValueError, match=r"shape \(count, 12\)"):
+        _press_entry_state_from_unit_samples(unit_samples=torch.zeros((1, 13)), gate=_GATE)
+
+
+def test_hover_reset_samples_stay_inside_measured_envelope() -> None:
+    unit_samples = torch.rand((10_000, 6), generator=torch.Generator().manual_seed(42))
+    position_error, attitude_error = _hover_pose_from_unit_samples(
+        unit_samples=unit_samples,
+        envelope=_ENVELOPE,
     )
-
-    torch.testing.assert_close(
-        wall_normal,
-        torch.tensor([0.45, 0.47, 0.50], dtype=torch.float64),
+    evaluation = evaluate_flight_envelope(
+        envelope=_ENVELOPE,
+        position_error_enu_m=position_error,
+        attitude_error_flu_enu_wxyz=attitude_error,
     )
-    radii = torch.linalg.vector_norm(lateral_vertical, dim=-1)
-    torch.testing.assert_close(radii, torch.tensor([0.06, 0.08, 0.08], dtype=torch.float64))
-    torch.testing.assert_close(linear_velocity[:, 0], torch.zeros(3, dtype=torch.float64))
-    torch.testing.assert_close(angular_velocity, torch.zeros((3, 3), dtype=torch.float64))
+    assert torch.all(evaluation.inside)
 
 
-def test_press_training_reset_rejects_wrong_sample_width() -> None:
-    with pytest.raises(ValueError, match=r"shape \(count, 10\)"):
-        _press_training_entry_state_from_unit_samples(
-            unit_samples=torch.zeros((1, 9)),
-            gate=_GATE,
-            training_reset=_TRAINING_RESET,
-            hard_case_fraction=0.5,
-        )
+def test_rotation_sampling_is_volume_uniform() -> None:
+    generator = torch.Generator().manual_seed(42)
+    samples = torch.rand((50_000, 12), generator=generator, dtype=torch.float64)
+    relative_quat_wxyz = _press_entry_state_from_unit_samples(
+        unit_samples=samples,
+        gate=_GATE,
+    )[4]
+    angles = quaternion_geodesic_error_rad(quaternion_xyzw=relative_quat_wxyz[:, [1, 2, 3, 0]])
+    assert float(angles.mean()) == pytest.approx(0.075, abs=5.0e-4)

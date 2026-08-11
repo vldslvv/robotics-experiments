@@ -10,6 +10,7 @@ import gymnasium as gym
 
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.controller import ControllerSettings
+from robotics_experiments.flight_parameters import FlightEnvelope
 from robotics_experiments.rl import PolicyContract, PolicyInterface
 
 __all__ = [
@@ -100,7 +101,7 @@ def make_isaac_lab_env(
     seed: int | None = None,
     num_envs: int | None = None,
     policy_contract: PolicyContract | None = None,
-    use_training_reset_distribution: bool = False,
+    flight_envelope: FlightEnvelope | None = None,
 ) -> tuple[gym.Env, object]:
     """Build a task, optionally interpreting actions through an artifact contract."""
     if not register_isaac_lab_tasks():
@@ -111,7 +112,7 @@ def make_isaac_lab_env(
         raise ValueError(f"unknown robotics-experiments Isaac Lab task {task_id!r}") from exc
     expected_interface = {
         DRONE_HOVER_TASK_ID: PolicyInterface.HOVER,
-        SWITCH_PRESS_TASK_ID: PolicyInterface.PRESS_APPROACH,
+        SWITCH_PRESS_TASK_ID: PolicyInterface.PRESS,
     }[task_id]
     if policy_contract is not None and policy_contract.policy_interface != expected_interface:
         raise ValueError(
@@ -124,18 +125,20 @@ def make_isaac_lab_env(
         "experiment_config": experiment_config,
         "policy_contract": policy_contract,
     }
-    if task_id == SWITCH_PRESS_TASK_ID:
-        factory_kwargs["use_training_reset_distribution"] = use_training_reset_distribution
     env_cfg = factory(**factory_kwargs)
     if seed is not None and hasattr(env_cfg, "seed"):
         env_cfg.seed = seed
     if num_envs is not None:
         env_cfg.scene.num_envs = num_envs
-    env = gym.make(
-        task_id,
-        cfg=env_cfg,
-        experiment_config=experiment_config,
-        policy_contract=policy_contract,
-        controller_settings=controller_settings,
-    ).unwrapped
+    env_kwargs = {
+        "cfg": env_cfg,
+        "experiment_config": experiment_config,
+        "policy_contract": policy_contract,
+        "controller_settings": controller_settings,
+    }
+    if task_id == SWITCH_PRESS_TASK_ID:
+        if flight_envelope is None:
+            raise ValueError("the press task requires a pinned flight envelope")
+        env_kwargs["flight_envelope"] = flight_envelope
+    env = gym.make(task_id, **env_kwargs).unwrapped
     return env, env_cfg

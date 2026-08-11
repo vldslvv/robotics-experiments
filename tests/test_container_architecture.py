@@ -121,6 +121,15 @@ def test_integration_dependencies_are_baked_into_image() -> None:
     assert "kconfiglib==14.1.0 empy==3.3.4 pyros-genmsg==0.5.8" in dockerfile
 
 
+def test_isaac_runner_forwards_interrupts_to_the_python_process_group() -> None:
+    runner = _read("make/scripts/run_isaac_test_in_container.sh")
+
+    assert "setsid /bin/bash -c 'trap - HUP INT TERM; exec \"$@\"'" in runner
+    assert 'kill -INT -- "-${test_pid}"' in runner
+    assert 'wait "${test_pid}" 2>/dev/null' in runner
+    assert 'integration_timing "test_script" "${stage_start_ms}" "interrupted"' in runner
+
+
 def test_isaac_lab_uses_pinned_minimal_dependencies() -> None:
     dockerfile = _read("Dockerfile")
     requirements = _read("isaac/docker/lab-runtime-requirements.txt").splitlines()

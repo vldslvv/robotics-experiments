@@ -83,12 +83,12 @@ def _preflight_policy_artifacts(
                     f"policy artifact {artifact} cadence {contract.policy_rate_hz} Hz "
                     f"exceeds driver.control_rate_hz={config.driver.control_rate_hz}"
                 )
-            if contract.policy_interface is PolicyInterface.PRESS_APPROACH:
-                if contract.curriculum_stage != config.rl.press.curriculum_stage:
+            if contract.policy_interface is PolicyInterface.PRESS:
+                if contract.curriculum_stage != config.rl.press.curriculum.active_stage:
                     raise ValueError(
                         f"press artifact {artifact} stage "
                         f"{contract.curriculum_stage!r} does not match configured "
-                        f"stage {config.rl.press.curriculum_stage!r}"
+                        f"stage {config.rl.press.curriculum.active_stage!r}"
                     )
                 press_rates.add(contract.policy_rate_hz)
             policies.append(
@@ -101,7 +101,7 @@ def _preflight_policy_artifacts(
             )
     if len(press_rates) > 1:
         raise ValueError(
-            "press-approach policy artifacts in one fleet must share one policy_rate_hz; "
+            "press policy artifacts in one fleet must share one policy_rate_hz; "
             f"found {sorted(press_rates)}"
         )
     return _PolicyPreflight(
@@ -151,10 +151,8 @@ def _press_approach_adapter(
     loaded: LoadedPolicy,
 ) -> PolicyAdapter:
     contract = loaded.contract
-    if contract.curriculum_stage != "approach":
-        raise ValueError(
-            "unsupported press-approach curriculum_stage=" f"{contract.curriculum_stage!r}"
-        )
+    if contract.curriculum_stage not in {"hover", "approach"}:
+        raise ValueError("unsupported press curriculum_stage=" f"{contract.curriculum_stage!r}")
     params = PressApproachExecutionParams(
         inference=loaded.inference,
         action_dim=contract.action_dim,
@@ -167,7 +165,7 @@ def _press_approach_adapter(
         task_observation = policy_input.task_observation
         if not isinstance(task_observation, PressObservation):
             failure_reason = (
-                "press-approach policy requires a PressObservation task observation, "
+                "press policy requires a PressObservation task observation, "
                 f"got {type(task_observation).__name__}"
             )
             return PolicyResult(
@@ -239,7 +237,7 @@ def _make_policy_adapter(
     interface = loaded.contract.policy_interface
     if interface is PolicyInterface.HOVER:
         return _hover_adapter(hold_s=hold_s, loaded=loaded)
-    if interface is PolicyInterface.PRESS_APPROACH:
+    if interface is PolicyInterface.PRESS:
         return _press_approach_adapter(config=config, loaded=loaded)
     raise ValueError(
         f"unsupported policy_interface={interface.value!r} in artifact {artifact_path}"

@@ -20,9 +20,13 @@ its stateless lifecycle functions, explicitly rebinding every returned state.
 
 Dependent Kit plugins may call `get_instance().read_status()` for an immutable
 snapshot of scene readiness, the last driver/control failure, and each vehicle's
-label, simulated time, bridge status, completed-step count, driver phase, and
-failure/recovery outcome. The snapshot is the observation boundary used by the
-opt-in flight benchmark; it never exposes mutable `FleetState` resources.
+routine, motion, navigation, press-handoff, policy, transmitted-setpoint,
+failure, and recovery state. The runtime projects telemetry only from the exact
+observation and OFFBOARD progress already produced by the normal control tick;
+status reads never sample Isaac, evaluate an actor, send a command, or advance
+runtime state. The snapshot is the observation boundary used by the opt-in
+flight benchmark and `experiment_runtime_hud`; it never exposes mutable
+`FleetState` resources.
 
 Always forgiving: a routine failure, PX4 failsafe, or phase timeout is logged
 while that drone performs layered landing recovery. The strict counterpart is

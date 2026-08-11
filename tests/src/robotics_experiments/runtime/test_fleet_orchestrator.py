@@ -24,6 +24,7 @@ class _FakeObserver:
         self.articulation_path = articulation_path
         self.rotor_link_paths = rotor_link_paths
         self.shut = False
+        self.read_count = 0
 
     def initialize(self):
         pass
@@ -32,6 +33,7 @@ class _FakeObserver:
         self.shut = True
 
     def read_state(self, *, sim_time_us):
+        self.read_count += 1
         return object()
 
 
@@ -53,6 +55,11 @@ class _FakeDriver:
     def __init__(self):
         self.is_done = False
         self.ticks = 0
+
+
+class _FakeRoutineObservation:
+    def __init__(self, **values):
+        vars(self).update(values)
 
 
 def _import_orchestrator(monkeypatch):
@@ -91,7 +98,7 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.PolicyInput = object
     fake_commanding.PolicyResult = object
     fake_commanding.RoutineDriverState = _FakeDriver
-    fake_commanding.RoutineObservation = object
+    fake_commanding.RoutineObservation = _FakeRoutineObservation
     fake_commanding.VelocitySetpoint = object
     creation_ticks = []
     fake_commanding.create_routine_driver = (
@@ -303,6 +310,40 @@ def test_fleet_driver_log_is_mirrored_to_vehicle_bridge_log(monkeypatch, caplog)
 
     assert messages == ['[drone7] ROUTINE_STAGE {"event":"start","sim_time_us":123000}']
     assert caplog.messages[-1] == messages[-1]
+
+
+def test_fleet_driver_status_reuses_the_existing_observation(monkeypatch):
+    module, _rec = _import_orchestrator(monkeypatch)
+    orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
+    bridge_status = SimpleNamespace(is_connected=True)
+    monkeypatch.setattr(
+        orchestrator,
+        "read_bridge_host_status",
+        lambda *, host: SimpleNamespace(bridge_status=bridge_status),
+    )
+    observer = _FakeObserver(articulation_path="/World/Drone7", rotor_link_paths=[])
+    spawned = module.SpawnedDrone(
+        vehicle=SimpleNamespace(id=7),
+        label="drone7",
+        articulation_path="/World/Drone7",
+        host=object(),
+        observer=observer,
+    )
+    env = module.FleetDriverEnv(
+        spawned,
+        _FakePort(gcs_endpoint="", heartbeat_period_s=1.0, label="drone7"),
+        log=lambda _message: None,
+        on_failure=lambda _kind, _message: None,
+        on_step_advanced=lambda _label: None,
+    )
+
+    observation = env.read_observation(sim_time_us=125_000, last_ack=None)
+    first = env.read_status()
+    second = env.read_status()
+
+    assert first is second
+    assert first.observation is observation
+    assert observer.read_count == 1
 
 
 def test_policy_preflight_fails_before_stage_mutation(monkeypatch):

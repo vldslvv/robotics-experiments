@@ -1,6 +1,6 @@
 # F3 training and parameter-tuning decision log
 
-Status: TRAINING COMPLETE; ACCEPTANCE EVALUATION PAUSED (2026-07-21).
+Status: CLEAN-ROOM QUALIFICATION STOPPED AT VALIDATION (2026-08-12).
 
 This is a chronological record of the decisions made while training the first
 press policy for `Isaac-Switch-Press-Direct-v0`. Each entry first states the intuition for someone learning RL,
@@ -12245,3 +12245,167 @@ alone is pending because the pre-v1 `best` label is unsupported by the strict
 controller loader. Replace unsupported labels atomically without loading or
 migrating their contents, publish this accepted bundle, then proceed to the
 controller/RL/deployment dependency audit before scratch policy training.
+
+### 395. Clean-room qualification stops at policy validation
+
+Date: 2026-08-12.
+
+The monitoring and campaign contracts were implemented and committed before a
+new qualification began. TensorBoard now presents only the lowercase
+`train/`, `val/`, `test/`, and `system/` namespaces, validation and test share
+one ordered semantic metric registry, rates remain fractions, unavailable
+values remain absent, and the monitoring URL pins the primary validation
+charts with zero smoothing. Each worker atomically owns its attempt report and
+telemetry artifact while the campaign parent alone owns `training_report.json`.
+The configured training budget is 180/100/100 updates with validation cadence
+10/5/5, learning rates 1e-4/3e-5/1e-5, entropy 1e-4/0/0, and difficult-reset
+rates 0.0/0.2/0.4.
+
+The from-scratch controller campaign is
+`.build/alignment/x500-px4-v1/qualification-20260812T051417Z`. It used clean
+source commit `2833cc58835444a2f8ed6c95df0cbe573b38a0cf`, captured fresh PX4
+evidence, evaluated 135 unique candidates, and passed advisory quality, the
+22-profile actuator audit, all 22 controller-boundary replays, and the live
+integration gate. Its exact run-local `controller.json` has SHA-256
+`fa32081cbce39da9a2c82dee8a67dd1f4db937f901373ed4e6a31156e8b8b30d`,
+settings fingerprint
+`d8eaadea73b9a95b05904b7b53a48431f69a164b88c7624b17cd77e110b17235`,
+and comparison fingerprint
+`8e4418b73d78b6189f4789b559653e2fb33615afb30b844f0761b57b475121bd`.
+Search GPU utilization averaged 0.320, reached p95 0.490 and peak 0.520, and
+therefore did not meet the diagnostic 0.95 target. No artificial work was
+added to raise it.
+
+Policy campaign `20260812T054123Z.124480` loaded that exact controller and ran
+three isolated scratch attempts with training seeds 42, 43, and 44 and fixed
+validation seeds 101, 202, and 303. Seed 42 completed phase budgets 180/55/100,
+restoring learner iterations 180 and 230; seed 43 completed 180/95/100,
+restoring 130 and 175; seed 44 completed 180/85/100, restoring 120 and 155.
+Every later phase applied its new configuration and reset the environments.
+The actual PPO update counts were 335, 375, and 365. The selected checkpoint
+iterations and actor digests were 280/
+`27404e9a664aa0c863ea23b25056b3f4fffd355f7e27fc65b330252372b26979`,
+260/`91e6bec7d2a0aea21f07a7033b99966788b90bd4a2387ed82bdeef8af8b6cbc2`,
+and 210/`d045bcf97aef593d2619c02f83f8596caa90a59752bbda273b5aecef38d97e53`.
+
+All three attempts failed validation. Seed 42 reached success 0.906667,
+collision 0, minimum closest range 0.398629 m, other-flight-failure rate
+0.093333, and task cost 0.712906. Seed 43 reached 0.880000, 0, 0.398767 m,
+0.120000, and 0.839458. Seed 44 was best by the gate-first rule at success
+0.956667 and collision 0, but its 0.398083 m minimum range missed the 0.400 m
+gate and its 0.043333 other-flight-failure rate missed the exact-zero gate;
+its task cost was 0.513296. The campaign ended nonzero with status
+`validation_failed`, no selected campaign actor, and no publication.
+
+The three attempt telemetry artifacts contain 321 complete intervals: 161
+training and 160 validation intervals backed by 13,076 raw one-second samples.
+Across intervals, mean training GPU utilization was 0.768332 and mean
+validation utilization was 0.473944. Peak GPU memory was 17.6582 GiB, peak
+training-process resident memory was 9.8383 GiB, and peak temperature was
+62 C. Every interval identified GPU utilization below the diagnostic 0.95
+target; telemetry remained excluded from policy decisions. No sampler error
+occurred.
+
+An independent TensorBoard audit found 72 tags in every attempt, 18 validation
+tags, no test tags, no legacy namespaces, and strictly increasing steps per
+tag. It matched all 2,947 finite report values bit-for-bit to event values and
+confirmed that five unavailable values were absent. That audit also exposed
+that ignored RSL `/time` tags had advanced the shared presentation step before
+being discarded, doubling the reported attempted-update coordinates to
+670/750/730. The writer now discards those tags before opening a step and marks
+each update at the production training-chunk boundary. Procedural GPU smoke
+`monitoring-axis-smoke-verified-20260812` then completed all three attempts in
+distinct processes with exactly one update in each phase. Every attempt reports
+three attempted updates and TensorBoard steps 1/2/3. Attempt 1 deliberately
+restored learner iteration 1 before phase 3, so its learner positions 1/2/2
+also prove that restoration does not rewind or collapse the presentation axis.
+An event-file audit found 71 allowed-namespace tags, 17 validation tags, no
+test tags, and no legacy tags per attempt. All telemetry intervals completed,
+only validation workloads were present, and no label changed. The metric values
+and validation decision from the qualification are unaffected.
+
+Cancellation was also exercised. Pre-fix runs `20260812T052442Z.89266` and
+`20260812T053229Z.107138` retained partial evidence but exposed a signal path
+that left the parent report at `training`. The container wrapper now owns the
+Python process group and forwards termination as an interrupt, and the Python
+entrypoint converts HUP, INT, and TERM into `KeyboardInterrupt` in both parent
+and worker. Live run `interrupt-signal-smoke-20260812d` then exited 130 with
+root status `interrupted`, retained its active-attempt pointer and atomic
+partial attempt report at `initializing`, and changed no publication label.
+
+Because no validation-passing actor exists, test seeds 404, 505, and 606 were
+never used, the fresh final test and independent acceptance audit were not run,
+and `make eval-press`, policy transfer, and the complete approach routine were
+not started. The `latest` label remains
+`20260811T154439Z-scratch-action050-main241`, `best` remains
+`20260811T093944Z-scratch-predictive-reference400ms`, and no `qualification`
+label exists. There is therefore no accepted digest to load or claim for the
+routine driver. This is the required stop: the alignment evidence is accepted,
+but the policy is unqualified and unpublished.
+
+Final implementation verification passed `make check` with 789 tests and one
+skip, the complete all-files pre-commit gate, and all eight targets in
+`make test-integration-all`. The work therefore closes with preserved failure
+evidence and verified infrastructure, not with a qualified policy.
+
+### 396. Explicit operator deployment selects the failed seed-44 candidate
+
+Date: 2026-08-12.
+
+At the operator's explicit request, `latest` changes from an acceptance-only
+publication label to the active deployment label. Automatic campaigns still
+advance it only after the fresh final test passes, while an operator may point it
+at a strict diagnostic policy artifact. `best` remains acceptance-only. An
+operator override preserves and reports the source campaign's qualification
+state and does not synthesize validation, test, acceptance, audit, transfer, or
+routine evidence.
+
+The selected deployment is seed 44's validation-selected checkpoint at learner
+iteration 210 from campaign `20260812T054123Z.124480`, stored under
+`attempt_03_seed_44/evaluated/candidate_046`. Its actor SHA-256 is
+`d045bcf97aef593d2619c02f83f8596caa90a59752bbda273b5aecef38d97e53`.
+The preserved attempt report remains `validation_failed`: success was 0.956667
+and collision was zero, while minimum range was 0.398083 m against 0.400 m and
+other-flight-failure rate was 0.043333 against exactly zero. No final test or
+acceptance exists for this actor. The deployment must therefore be described as
+operator-selected and unqualified even when runtime preflight and execution
+succeed.
+
+### 397. Center manual actor entry inside the training handoff envelope
+
+Date: 2026-08-12.
+
+Five consecutive manual warehouse logs separate actor behavior from actor-entry
+staging. Runs `13_09_25` and `13_10_28` entered the actor at 0.4840 m and
+0.4660 m. The actor reached the target wall-normal band but did not complete the
+combined stable goal. Runs `13_12_04` and `13_13_22` never evaluated the actor:
+all 401 policy samples in each run were `handoff_wait` with reason `too_far`,
+zero velocity was transmitted, and the policy step timed out after 20 seconds.
+The retained timeout state measured approximately 0.506 m, just outside the
+0.50 m actor-entry maximum.
+
+Training resets directly into the shared 0.45-0.50 m handoff distribution with
+bounded wall-normal/lateral speed and angular rate. The manual route instead
+targeted 0.48 m with a 0.02 m three-dimensional waypoint tolerance, placing its
+outer completion boundary at the exact actor-entry maximum before subsequent
+settling error. A live diagnostic run at
+`.build/docker/integration/test-integration-press-approach-routine.20260812T132521Z.249616`
+confirmed that tightening the tolerance to 0.01 m prevents PX4 guided-position
+completion and stops the routine before actor entry. The route therefore keeps
+the proven 0.02 m tolerance, moves the target to 0.47 m, and settles for two
+seconds. With the fixed switch at 17.99 m and the drone target at 17.52 m, the
+complete axial waypoint band is 0.45-0.49 m: inside the same training envelope
+with 10 mm of margin at the farther boundary. This changes only pre-policy
+staging and does not change the actor, its failed qualification status, the
+handoff thresholds, or acceptance.
+
+The revised live routine at
+`.build/docker/integration/test-integration-press-approach-routine.20260812T133104Z.252597`
+completed both guided-position legs and the two-second final settle. The policy
+handoff passed on its first evaluation at 0.489262 m, with the gate latched and
+no handoff failure. This verifies that the production route now enters the same
+accepted state envelope as training. The diagnostic actor subsequently reached
+0.384762 m but accumulated zero stable-goal steps and timed out after 20 seconds.
+That downstream failure is consistent with the explicitly deployed actor's
+failed qualification status; it is not a handoff failure and does not qualify
+the policy for publication.

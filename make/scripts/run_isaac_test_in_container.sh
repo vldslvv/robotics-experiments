@@ -75,13 +75,36 @@ if [ -n "${ISAAC_TEST_EXTRA_ARGS}" ]; then
 fi
 
 trace_capture_pid=""
+test_filter_pid=""
+test_output_dir=""
+test_pid=""
 cleanup_trace_capture() {
     if [ -n "${trace_capture_pid}" ] && kill -0 "${trace_capture_pid}" 2>/dev/null; then
         kill "${trace_capture_pid}" 2>/dev/null || true
         wait "${trace_capture_pid}" 2>/dev/null || true
     fi
 }
-trap cleanup_trace_capture EXIT
+
+cleanup_test_processes() {
+    if [ -n "${test_pid}" ] && kill -0 "${test_pid}" 2>/dev/null; then
+        kill -TERM -- "-${test_pid}" 2>/dev/null || true
+        wait "${test_pid}" 2>/dev/null || true
+    fi
+    if [ -n "${test_filter_pid}" ] && kill -0 "${test_filter_pid}" 2>/dev/null; then
+        kill "${test_filter_pid}" 2>/dev/null || true
+        wait "${test_filter_pid}" 2>/dev/null || true
+    fi
+    if [ -n "${test_output_dir}" ]; then
+        rm -f "${test_output_dir}/stream"
+        rmdir "${test_output_dir}" 2>/dev/null || true
+    fi
+}
+
+cleanup_runtime() {
+    cleanup_test_processes
+    cleanup_trace_capture
+}
+trap cleanup_runtime EXIT
 
 : "${ISAAC_PROFILE_TRACE:=}"
 if [ -n "${ISAAC_PROFILE_TRACE}" ]; then
@@ -100,12 +123,58 @@ cd /isaac-sim
 rm -f "${ISAAC_TEST_LOG}"
 
 stage_start_ms="$(now_ms)"
-if "${ISAAC_PYTHON}" "${ISAAC_TEST_SCRIPT}" --scene "${SCENE}" "${strict_args[@]}" "${extra_args[@]}" \
-    2>&1 | tee -a "${ISAAC_TEST_LOG}" | terminal_control_filter | \
-        grep --line-buffered -E "${ISAAC_TEST_LOG_FILTER}"; then
+interrupted_status=""
+forward_test_interrupt() {
+    interrupted_status="$1"
+    trap - HUP INT TERM
+    if [ -n "${test_pid}" ]; then
+        kill -INT -- "-${test_pid}" 2>/dev/null || true
+    fi
+}
+trap 'forward_test_interrupt 129' HUP
+trap 'forward_test_interrupt 130' INT
+trap 'forward_test_interrupt 143' TERM
+
+test_output_dir="$(mktemp -d /tmp/isaac-test-output.XXXXXX)"
+mkfifo "${test_output_dir}/stream"
+tee -a "${ISAAC_TEST_LOG}" <"${test_output_dir}/stream" | \
+    terminal_control_filter | \
+    grep --line-buffered -E "${ISAAC_TEST_LOG_FILTER}" &
+test_filter_pid=$!
+setsid /bin/bash -c 'trap - HUP INT TERM; exec "$@"' isaac-test-python \
+    "${ISAAC_PYTHON}" "${ISAAC_TEST_SCRIPT}" \
+    --scene "${SCENE}" "${strict_args[@]}" "${extra_args[@]}" \
+    >"${test_output_dir}/stream" 2>&1 &
+test_pid=$!
+
+set +e
+wait "${test_pid}"
+test_status=$?
+if [ -n "${interrupted_status}" ]; then
+    wait "${test_pid}" 2>/dev/null
+    test_status=$?
+fi
+wait "${test_filter_pid}"
+filter_status=$?
+set -e
+trap - HUP INT TERM
+test_pid=""
+test_filter_pid=""
+rm -f "${test_output_dir}/stream"
+rmdir "${test_output_dir}"
+test_output_dir=""
+
+if [ -n "${interrupted_status}" ]; then
+    integration_timing "test_script" "${stage_start_ms}" "interrupted"
+    exit "${interrupted_status}"
+fi
+if [ "${test_status}" -eq 0 ] && [ "${filter_status}" -eq 0 ]; then
     integration_timing "test_script" "${stage_start_ms}"
 else
-    status=$?
+    status="${test_status}"
+    if [ "${status}" -eq 0 ]; then
+        status="${filter_status}"
+    fi
     integration_timing "test_script" "${stage_start_ms}" "fail"
     exit "${status}"
 fi

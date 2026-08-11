@@ -134,6 +134,13 @@ class FleetState:
     switch_events: tuple[SwitchToggleEvent, ...]
 
 
+@dataclass(frozen=True)
+class _FleetDriverEnvStatus:
+    """Latest immutable input already consumed by one routine driver."""
+
+    observation: Optional[RoutineObservation]
+
+
 class FleetDriverEnv:
     """Mutable simulator/resource seam used by a pure driver transition."""
 
@@ -159,6 +166,7 @@ class FleetDriverEnv:
         self._log_fn = log
         self._on_failure_fn = on_failure
         self._on_step_advanced_fn = on_step_advanced
+        self._status = _FleetDriverEnvStatus(observation=None)
 
     def is_bridge_connected(self) -> bool:
         status = read_bridge_host_status(host=self._host).bridge_status
@@ -182,7 +190,7 @@ class FleetDriverEnv:
                 sim_time_s=sim_time_us * 1e-6,
             )
         )
-        return RoutineObservation(
+        observation = RoutineObservation(
             vehicle_state=vehicle_state,
             bridge_status=host_status,
             last_ack=last_ack,
@@ -190,6 +198,12 @@ class FleetDriverEnv:
             sim_time_us=sim_time_us,
             task_observation=task_observation,
         )
+        self._status = _FleetDriverEnvStatus(observation=observation)
+        return observation
+
+    def read_status(self) -> _FleetDriverEnvStatus:
+        """Return telemetry from the existing driver read without sampling again."""
+        return self._status
 
     def log(self, message: str) -> None:
         self._log_fn(message)
@@ -360,17 +374,17 @@ def _prepare_policy_observer(
         (policy.switch_index, policy.metadata.contract)
         for policy in preflight.policies
         if policy.vehicle_label == spawned.label
-        and policy.metadata.contract.policy_interface is PolicyInterface.PRESS_APPROACH
+        and policy.metadata.contract.policy_interface is PolicyInterface.PRESS
     ]
     if not press_descriptors:
         return spawned
     indices = {switch_index for switch_index, _contract in press_descriptors}
     if len(indices) != 1 or next(iter(indices)) < 0:
-        raise ValueError("press-approach policy steps require one shared non-negative switch_index")
+        raise ValueError("press policy steps require one shared non-negative switch_index")
     switch_index = next(iter(indices))
     if switch_index >= state.config.switches.num_switches:
         raise ValueError(
-            f"press-approach switch_index={switch_index} is outside "
+            f"press switch_index={switch_index} is outside "
             f"num_switches={state.config.switches.num_switches}"
         )
     reset = state.config.rl.press.reset

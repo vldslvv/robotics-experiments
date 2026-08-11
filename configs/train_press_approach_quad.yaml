@@ -3,58 +3,29 @@ defaults:
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - _self_
 
-# Stage 1 contact-free approach training selection.
+# Terminal-approach curriculum stage. It restores the accepted hover learner.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
   num_envs: 32768
-  episode_length_s: 10.0
+  episode_length_s: 45.0
   action:
     max_body_velocity_mps: 0.5
   press:
+    curriculum:
+      active_stage: approach
     policy:
       actor:
-        initial_noise_std: 0.12
-    goal:
-      velocity_reference:
-        range_center_m: 0.415
-        wall_normal_max_mps: 0.04
-    reward:
-      range_barrier_margin_m: 0.02
-      flight_failure_weight: 300.0
-      velocity_tracking_weight: 300.0
-      wall_normal_braking_command_weight: 30.0
+        initial_noise_std: 0.03
   training:
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
     policy_name: press-approach
-    # One scratch run keeps a single optimizer lineage while changing the
-    # learning schedule and reset mixture at an explicit curriculum boundary.
-    phases:
-      - max_iterations: 241
-        evaluation_interval: 10
-        learning_rate: 1.0e-4
-        schedule: fixed
-        entropy_coef: 0.0001
-        hard_case_fraction: 0.0
-      - max_iterations: 11
-        evaluation_interval: 5
-        learning_rate: 3.0e-5
-        schedule: fixed
-        entropy_coef: 0.0
-        hard_case_fraction: 0.2
-      - max_iterations: 31
-        evaluation_interval: 5
-        learning_rate: 1.0e-5
-        schedule: fixed
-        entropy_coef: 0.0
-        hard_case_fraction: 0.4
     plateau:
-      metric_name: held_out_task_cost
-      direction: minimize
-      minimum_delta: 0.003
-      patience_evaluations: 30
+      metric_name: mean_normalized_pose_error
     evaluation_worker_timeout_s: 600.0
+    telemetry_sample_interval_s: 1.0
+    gpu_utilization_target_rate: 0.95
     num_steps_per_env: 32
     gamma: 0.995
     lam: 0.95
@@ -64,7 +35,7 @@ rl:
     num_mini_batches: 8
     desired_kl: 0.01
     max_grad_norm: 1.0
-    seed: 42
+    attempt_seeds: [42, 43, 44]
 
 vehicles:
   x500_01:

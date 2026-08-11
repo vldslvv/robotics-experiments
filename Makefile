@@ -8,6 +8,7 @@ include make/tests.mk
 include make/integration-tests.mk
 include make/alignment.mk
 include make/rl.mk
+include make/flight-parameters.mk
 include make/benchmarks.mk
 include make/flight-analysis.mk
 
@@ -52,6 +53,7 @@ help:
 		'  make alignment-sweep-target Replay all declarative Isaac Lab candidates' \
 		'  make alignment-fit         Score candidates and update latest/best links' \
 		'  make test-integration-alignment-target Validate the selected target envelope' \
+		'  make measure-flight-envelope Capture and publish task-neutral hover parameters' \
 		'' \
 		'RL, Isaac Lab, and press workflow targets:' \
 		'' \
@@ -61,7 +63,8 @@ help:
 		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \
 		'  make test-integration-press-policy Run the trained hover-policy PX4 gate' \
 		'  make test-integration-press-policy-transfer Run warehouse press transfer acceptance' \
-		'  make test-integration-press-approach-routine Run the selected approach mission gate' \
+		'  make test-integration-press-approach-routine Verify waypoint-to-actor invocation' \
+		'  make measure-press-navigation-handoff Measure production waypoint entry noise' \
 		'' \
 		'Benchmark targets:' \
 		'' \

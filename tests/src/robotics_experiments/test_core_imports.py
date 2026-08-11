@@ -52,6 +52,19 @@ def test_controller_alignment_rl_dependency_direction():
         )
         for imported in controller_imports
     )
+    flight_parameter_imports = _package_imports("flight_parameters")
+    assert not any(
+        imported.startswith(
+            (
+                "robotics_experiments.alignment",
+                "robotics_experiments.controller",
+                "robotics_experiments.rl",
+                "robotics_experiments.workflows",
+                "robotics_experiments.runtime",
+            )
+        )
+        for imported in flight_parameter_imports
+    )
 
     for package in ("rl", "workflows/isaac_lab"):
         assert not any(
@@ -118,6 +131,26 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "align",
             "load_controller_definition",
         ]
+        flight_parameters = importlib.import_module("robotics_experiments.flight_parameters")
+        assert flight_parameters.__all__ == [
+            "FlightConfig",
+            "FlightEnvelope",
+            "FlightEnvelopeBundle",
+            "FlightTrace",
+            "HoverEnvelopeEvaluation",
+            "derive_flight_envelope",
+            "evaluate_hover_pose",
+            "finalize_flight_envelope_bundle",
+            "flight_envelope_from_payload",
+            "flight_trace_from_payload",
+            "load_flight_config",
+            "load_flight_envelope",
+            "load_flight_envelope_bundle",
+            "load_flight_trace",
+            "publish_flight_envelope",
+            "validate_flight_envelope_bundle",
+            "write_flight_envelope",
+        ]
         # The fleet runtime is an Isaac-coupled leaf package; its lazy __init__
         # must import without carb/omni present.
         runtime = importlib.import_module("robotics_experiments.runtime")
@@ -150,12 +183,14 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         assert rl.__all__ == [
             "HOVER_OBSERVATION_DIM",
             "HOVER_OBSERVATION_SCHEMA_VERSION",
+            "FlightEnvelopeEvaluation",
             "LoadedPolicy",
             "METADATA_FILENAME",
             "POLICY_FILENAME",
             "PolicyContract",
             "PolicyInterface",
             "PolicyMetadata",
+            "evaluate_flight_envelope",
             "hover_observation_from_state",
             "load_policy",
             "load_policy_metadata",
@@ -190,7 +225,9 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "initial_press_approach_state",
             "pack_press_observation",
             "press_approach_goal_satisfied",
+            "press_approach_pose_error",
             "press_approach_target_velocity",
+            "quaternion_geodesic_error_rad",
             "reset_press_approach_state",
             "step_press_approach",
             "to_vector",
@@ -427,8 +464,10 @@ def test_config_eagerly_imports_hydra() -> None:
         "PressApproachGoalConfig",
         "PressApproachRewardConfig",
         "PressApproachTerminationConfig",
-        "PressApproachTrainingResetConfig",
         "PressApproachVelocityReferenceConfig",
+        "PressCurriculumConfig",
+        "PressCurriculumResetSourceConfig",
+        "PressCurriculumStageConfig",
         "PressResetConfig",
         "Px4BridgeConfig",
         "RlActionConfig",

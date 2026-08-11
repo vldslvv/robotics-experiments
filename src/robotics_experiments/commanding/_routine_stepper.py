@@ -116,6 +116,7 @@ def _advance_stream_cadences(
     policy_state = offboard.policy_state
     policy_complete = offboard.policy_complete
     policy_failure_reason = offboard.policy_failure_reason
+    policy_generation = offboard.policy_generation
     diagnostics: tuple[str, ...] = ()
     if spec is not None and spec.policy is not None:
         policy_cadence, policy_due = _advance_cadence(
@@ -136,6 +137,7 @@ def _advance_stream_cadences(
             policy_complete = result.complete
             policy_failure_reason = result.failure_reason
             diagnostics = result.diagnostics
+            policy_generation += 1
     assert cached_setpoint is not None
 
     transmitter_cadence, transmit_due = _advance_cadence(
@@ -144,6 +146,13 @@ def _advance_stream_cadences(
         rate_hz=routine.offboard_setpoint_rate_hz,
     )
     transmissions = offboard.transmissions + int(transmit_due)
+    transmitted_policy_generation = offboard.transmitted_policy_generation
+    transmitted_setpoint = offboard.transmitted_setpoint
+    transmitted_setpoint_sim_time_us = offboard.transmitted_setpoint_sim_time_us
+    if transmit_due:
+        transmitted_policy_generation = policy_generation
+        transmitted_setpoint = cached_setpoint
+        transmitted_setpoint_sim_time_us = int(observation.sim_time_us)
     command_effect = None
     if not retry_deferred and not requested and transmissions >= prime_ticks:
         assert command is not None
@@ -153,7 +162,11 @@ def _advance_stream_cadences(
         policy_cadence=policy_cadence,
         transmitter_cadence=transmitter_cadence,
         transmissions=transmissions,
+        policy_generation=policy_generation,
+        transmitted_policy_generation=transmitted_policy_generation,
         cached_setpoint=cached_setpoint,
+        transmitted_setpoint=transmitted_setpoint,
+        transmitted_setpoint_sim_time_us=transmitted_setpoint_sim_time_us,
         requested=requested,
         accepted=accepted,
         policy_state=policy_state,
@@ -215,7 +228,11 @@ def _enter_stream(
             policy_cadence=policy_cadence,
             transmitter_cadence=transmitter_cadence,
             transmissions=1,
+            policy_generation=int(spec.policy is not None),
+            transmitted_policy_generation=int(spec.policy is not None),
             cached_setpoint=setpoint,
+            transmitted_setpoint=setpoint,
+            transmitted_setpoint_sim_time_us=now_us,
             requested=requested,
             accepted=False,
             policy_state=policy_state,
@@ -242,6 +259,7 @@ def _enter_stream(
             offboard,
             policy_cadence=_anchored_cadence(sim_time_us=now_us),
             cached_setpoint=result.setpoint,
+            policy_generation=offboard.policy_generation + 1,
             policy_state=result.state,
             policy_reference_position_enu=policy_reference_position_enu,
             policy_complete=result.complete,

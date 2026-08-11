@@ -403,6 +403,8 @@ def test_decide_goto_primes_then_engages_offboard_then_reaches():
     assert decision.setpoint is not None
     assert decision.setpoint.yaw_rad == pytest.approx(math.pi / 2.0)
     assert state.offboard.transmissions == 1
+    assert state.offboard.policy_generation == 0
+    assert state.offboard.transmitted_policy_generation == 0
 
     # Two more priming setpoints (no command yet).
     state, decision = decide(routine, state, _far(1))
@@ -1230,6 +1232,51 @@ def test_policy_and_setpoint_cadences_are_independent_exact_averages():
     assert len(policy_advance.inputs) == 20
     assert transmitted == 50
     assert state.offboard.transmissions == 50
+    assert state.offboard.policy_generation == 20
+    assert state.offboard.transmitted_policy_generation == 20
+
+
+def test_policy_generation_is_not_applied_until_its_setpoint_is_transmitted():
+    policy_advance = _FakePolicyAdvance()
+    routine = replace(_policy_routine(policy_advance), offboard_setpoint_rate_hz=10.0)
+    state = RoutineState()
+
+    state, _decision = decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=0),
+    )
+    assert state.offboard.policy_generation == 1
+    assert state.offboard.transmitted_policy_generation == 1
+    first_transmitted = state.offboard.transmitted_setpoint
+    assert first_transmitted is state.offboard.cached_setpoint
+    assert state.offboard.transmitted_setpoint_sim_time_us == 0
+
+    for sim_time_us in (20_000, 40_000, 60_000):
+        state, decision = decide(
+            routine,
+            state,
+            make_routine_observation(sim_time_us=sim_time_us),
+        )
+
+    assert decision.setpoint is None
+    assert state.offboard.policy_generation == 2
+    assert state.offboard.transmitted_policy_generation == 1
+    assert state.offboard.transmitted_setpoint is first_transmitted
+    assert state.offboard.cached_setpoint is not first_transmitted
+    assert state.offboard.transmitted_setpoint_sim_time_us == 0
+
+    for sim_time_us in (80_000, 100_000):
+        state, decision = decide(
+            routine,
+            state,
+            make_routine_observation(sim_time_us=sim_time_us),
+        )
+
+    assert decision.setpoint is not None
+    assert state.offboard.transmitted_policy_generation == state.offboard.policy_generation
+    assert state.offboard.transmitted_setpoint is state.offboard.cached_setpoint
+    assert state.offboard.transmitted_setpoint_sim_time_us == 100_000
 
 
 def test_policy_adapter_owns_its_exact_average_cadence():

@@ -1,3 +1,4 @@
+import json
 import shutil
 from dataclasses import FrozenInstanceError
 from typing import get_type_hints
@@ -235,47 +236,63 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.action.max_body_velocity_mps == 0.5
     assert not config.rl.lab_vehicle.enable_gyroscopic_forces
     assert training.controller_artifact == ".build/alignment/x500-px4-v1/best"
+    assert training.flight_envelope_artifact.endswith("/latest")
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
+    assert config.rl.episode_length_s == 45.0
     assert training.policy_name == "press-approach"
-    assert config.rl.press.curriculum_stage == "approach"
-    assert tuple(phase.max_iterations for phase in training.phases) == (241, 11, 31)
-    assert tuple(phase.learning_rate for phase in training.phases) == (
+    assert tuple(stage.name for stage in config.rl.press.curriculum.stages) == (
+        "hover",
+        "approach",
+    )
+    stage = config.rl.press.selected_stage()
+    assert stage.name == "approach"
+    assert tuple(source.source for source in stage.reset_mix) == (
+        "measured_navigation_handoff",
+        "pinned_flight_envelope",
+    )
+    assert tuple(source.weight for source in stage.reset_mix) == (0.8, 0.2)
+    assert stage.hold_s == 30.0
+    assert stage.training_hold_s == (30.0, 30.0, 30.0)
+    assert tuple(phase.max_iterations for phase in stage.phases) == (50, 30, 100)
+    assert tuple(phase.learning_rate for phase in stage.phases) == (
         1.0e-4,
         3.0e-5,
         1.0e-5,
     )
-    assert tuple(phase.entropy_coef for phase in training.phases) == (
-        0.0001,
-        0.0,
-        0.0,
-    )
-    assert tuple(phase.evaluation_interval for phase in training.phases) == (10, 5, 5)
-    assert training.plateau.metric_name == "held_out_task_cost"
+    assert tuple(phase.entropy_coef for phase in stage.phases) == (0.0, 0.0, 0.0)
+    assert tuple(phase.evaluation_interval for phase in stage.phases) == (10, 5, 5)
+    assert training.plateau.metric_name == "mean_normalized_pose_error"
     assert training.plateau.direction == "minimize"
     assert training.plateau.minimum_delta == 0.003
-    assert training.plateau.patience_evaluations == 30
-    assert tuple(phase.hard_case_fraction for phase in training.phases) == (
-        0.0,
-        0.2,
-        0.4,
-    )
-    assert policy.actor.initial_noise_std == 0.12
+    assert training.plateau.patience_evaluations == 10
+    assert training.telemetry_sample_interval_s == 1.0
+    assert training.gpu_utilization_target_rate == 0.95
+    assert training.attempt_seeds == (42, 43, 44)
+    assert tuple(phase.range_undershoot_min_m for phase in stage.phases) == (0.40, 0.40, 0.40)
+    assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
-    assert reward.range_progress_weight == 50.0
-    assert reward.range_barrier_margin_m == 0.02
-    assert reward.range_barrier_weight == 10.0
-    assert reward.velocity_tracking_weight == 300.0
-    assert reward.wall_normal_braking_command_weight == 30.0
-    assert reward.success_weight == 150.0
-    assert reward.collision_weight == 300.0
-    assert reward.flight_failure_weight == 300.0
-    assert config.rl.press.goal.stable_steps == 5
+    assert reward.stabilization_capture_radius_m == 0.03
+    assert reward.position_progress_weight == 10.0
+    assert reward.stabilization_weight == 1.0
+    assert reward.predictive_barrier_weight == 10.0
+    assert reward.strict_hold_weight == 1.0
+    assert reward.terminal_success_weight == 150.0
+    assert reward.terminal_failure_weight == 300.0
+    assert config.rl.press.evaluation.timeout_penalty == 3.0
+    assert config.rl.press.termination.range_undershoot_min_m == 0.40
+    assert config.rl.press.goal.stable_steps == 600
+    assert config.rl.press.goal.alignment_error_max_m == 0.01
+    assert config.rl.press.goal.relative_attitude_error_max_rad == pytest.approx(
+        0.017453292519943295
+    )
+    assert config.rl.press.goal.linear_speed_max_mps == 0.03
+    assert config.rl.press.goal.angular_speed_max_radps == 0.05
     reference = config.rl.press.goal.velocity_reference
-    assert reference.range_center_m == 0.415
+    assert reference.range_center_m == 0.48
     assert reference.wall_normal_prediction_horizon_s == 0.4
     assert reference.wall_normal_alignment_gate_m == 0.03
     assert reference.wall_normal_gain_per_s == 1.25
@@ -283,25 +300,79 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert reference.wall_normal_max_mps == 0.04
     assert reference.tangential_gain_per_s == 2.0
     assert reference.tangential_speed_max_mps == 0.10
-    assert config.rl.press.handoff.switch_range_min_m == 0.45
-    assert config.rl.press.handoff.switch_range_max_m == 0.50
+    assert config.rl.press.handoff.switch_range_min_m == 0.44
+    assert config.rl.press.handoff.switch_range_max_m == 0.67
     assert config.rl.press.handoff.lateral_align_max_m == 0.08
     assert config.rl.press.handoff.wall_normal_speed_max_mps == 0.02
     assert config.rl.press.handoff.lateral_speed_max_mps == 0.02
     assert config.rl.press.handoff.angular_speed_max_radps == 0.05
+    assert config.rl.press.handoff.relative_attitude_error_max_rad == pytest.approx(
+        0.020702318561895833
+    )
     assert config.rl.press.handoff.body_z_alignment_min == 0.965926
+    navigation_noise = config.rl.press.navigation_noise
+    assert navigation_noise.source == (
+        "benchmarks/press_navigation_handoff/waypoint_settle_20260812.json"
+    )
+    assert navigation_noise.sample_count == 10
+    assert navigation_noise.position_margin_m == 0.005
+    assert navigation_noise.rotation_margin_rad == pytest.approx(0.004363323129985824)
+    assert navigation_noise.switch_range_min_m == pytest.approx(0.46459411621093605)
+    assert navigation_noise.switch_range_max_m == pytest.approx(0.4989912414550766)
+    assert navigation_noise.lateral_align_max_m == pytest.approx(0.03374635443902746)
+    assert navigation_noise.relative_attitude_error_max_rad == pytest.approx(0.01633899543191001)
     assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
     assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
-    assert config.rl.press.training_reset.hard_case_fraction == 0.0
-    assert config.rl.press.training_reset.range_min_m == 0.45
-    assert config.rl.press.training_reset.range_max_m == 0.47
-    assert config.rl.press.training_reset.tangential_error_min_m == 0.06
-    assert config.rl.press.training_reset.tangential_error_max_m == 0.08
     assert config.rl.press.evaluation.success_rate_min == 0.95
-    assert config.rl.press.evaluation.collision_rate_max == 0.01
+    assert config.rl.press.evaluation.collision_rate_max == 0.0
+    assert config.rl.press.evaluation.validation_seeds == (101, 202, 303)
+    assert config.rl.press.evaluation.test_seeds == (404, 505, 606)
+    assert config.rl.press.evaluation.episodes_per_seed == 100
     assert config.rl.press.evaluation.collision_penalty == 4.0
+    assert config.rl.press.evaluation.relative_attitude_error_weight == 0.10
+    assert config.rl.press.evaluation.angular_velocity_weight == 0.10
     assert config.rl.press.evaluation.completion_time_weight == 0.15
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "old", "new", "message"),
+    [
+        (
+            "train_press_approach_quad.yaml",
+            "attempt_seeds: [42, 43, 44]",
+            "attempt_seeds: [42, 42, 44]",
+            "attempt_seeds must be nonempty and unique",
+        ),
+        (
+            "experiment/rl/press/approach.yaml",
+            "validation_seeds: [101, 202, 303]",
+            "validation_seeds: [42, 202, 303]",
+            "mutually disjoint",
+        ),
+        (
+            "experiment/rl/press/approach.yaml",
+            "test_seeds: [404, 505, 606]",
+            "test_seeds: [404, 505]",
+            "exactly three unique seeds",
+        ),
+    ],
+)
+def test_press_campaign_rejects_invalid_seed_workloads(
+    tmp_path,
+    relative_path: str,
+    old: str,
+    new: str,
+    message: str,
+):
+    from robotics_experiments.config import load_config
+
+    root = tmp_path / "configs"
+    shutil.copytree(_ROOT, root)
+    path = root / relative_path
+    path.write_text(path.read_text().replace(old, new))
+    with pytest.raises(ValueError, match=message):
+        load_config(root / "train_press_approach_quad.yaml")
 
 
 def test_training_and_manual_press_configs_share_one_actor_entry_contract():
@@ -328,16 +399,55 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
         "goto",
         "land",
     )
-    assert steps[3]["y"] == 17.40
+    assert steps[3]["y"] == 17.24
     assert steps[3]["ground_speed_m_s"] == 0.5
     assert steps[3]["position_tol_m"] == 0.05
-    assert steps[5]["y"] == 17.51
+    assert steps[5]["y"] == 17.39
     assert steps[5]["ground_speed_m_s"] == 0.08
-    assert steps[5]["position_tol_m"] == 0.02
-    assert steps[5]["timeout_s"] == 10.0
+    assert steps[5]["position_tol_m"] == 0.06
+    assert steps[5]["timeout_s"] == 20.0
+    assert steps[6]["hold_s"] == 2.0
+    switch_y = deployment.switches.spawn_bounds[0].min[1]
+    staged_range_m = switch_y - steps[5]["y"]
+    assert staged_range_m == pytest.approx(0.60)
+    navigation_noise = deployment.rl.press.navigation_noise
+    assert navigation_noise.sample_count >= 10
+    assert navigation_noise.position_margin_m > 0.0
+    assert (
+        deployment.rl.press.handoff.switch_range_min_m
+        <= navigation_noise.switch_range_min_m - navigation_noise.position_margin_m
+    )
+    assert (
+        deployment.rl.press.handoff.switch_range_max_m
+        >= navigation_noise.switch_range_max_m + navigation_noise.position_margin_m
+    )
+    assert (
+        deployment.rl.press.handoff.lateral_align_max_m
+        >= navigation_noise.lateral_align_max_m + navigation_noise.position_margin_m
+    )
     assert steps[8]["ground_speed_m_s"] == 0.5
     assert "ground_speed_m_s" not in steps[2]
-    assert all(float(step.get("timeout_s", 20.0)) <= 20.0 for step in steps)
+    assert all(float(step.get("timeout_s", 20.0)) <= 45.0 for step in steps)
+
+
+def test_press_navigation_noise_config_matches_accepted_measurement_summary():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "policy_press_approach_quad.yaml")
+    noise = config.rl.press.navigation_noise
+    summary = json.loads((REPO_ROOT / noise.source).read_text(encoding="utf-8"))
+    observed = summary["observed"]
+    required = summary["required_handoff_and_training_envelope"]
+
+    assert summary["sample_count"] == noise.sample_count
+    assert summary["position_margin_m"] == noise.position_margin_m
+    assert observed["switch_range_min_m"] == noise.switch_range_min_m
+    assert observed["switch_range_max_m"] == noise.switch_range_max_m
+    assert observed["lateral_align_max_m"] == noise.lateral_align_max_m
+    assert config.rl.press.handoff.switch_range_min_m <= required["switch_range_min_m"]
+    assert config.rl.press.handoff.switch_range_max_m >= required["switch_range_max_m"]
+    assert config.rl.press.handoff.lateral_align_max_m >= required["lateral_align_max_m"]
+    assert summary["route"]["settle_hold_s"] > 0.0
 
 
 def test_policy_transfer_config_uses_distinct_entry_targets():
@@ -421,7 +531,7 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
                                 "learning_rate": 1.0e-4,
                                 "schedule": "unknown",
                                 "entropy_coef": 0.0,
-                                "hard_case_fraction": 0.0,
+                                "range_undershoot_min_m": None,
                             }
                         ]
                     }
@@ -447,12 +557,31 @@ def test_task_policy_validation(tmp_path, override, match):
         load_config(path)
 
 
+def test_active_stage_phase_validation(tmp_path):
+    from robotics_experiments.config import load_config
+
+    root = tmp_path / "configs"
+    shutil.copytree(_ROOT, root)
+    stage_path = root / "experiment/rl/press/approach.yaml"
+    stage_path.write_text(
+        stage_path.read_text().replace(
+            "range_undershoot_min_m: 0.40",
+            "range_undershoot_min_m: 0.0",
+        )
+    )
+    with pytest.raises(ValueError, match="must be positive"):
+        load_config(root / "train_press_approach_quad.yaml")
+
+
 @pytest.mark.parametrize(
     ("override", "match"),
     [
-        ({"rl": {"press": {"curriculum_stage": "future"}}}, "unknown"),
         (
-            {"rl": {"press": {"goal": {"range_min_m": 0.43}}}},
+            {"rl": {"press": {"curriculum": {"active_stage": "future"}}}},
+            "must select exactly one ordered stage",
+        ),
+        (
+            {"rl": {"press": {"goal": {"range_min_m": 0.50}}}},
             "range bounds",
         ),
         (
@@ -474,36 +603,56 @@ def test_task_policy_validation(tmp_path, override, match):
             "wall-normal limits",
         ),
         (
-            {"rl": {"press": {"handoff": {"switch_range_min_m": 0.40}}}},
-            "switch_range_min_m",
+            {"rl": {"press": {"navigation_noise": {"sample_count": 9}}}},
+            "sample_count must be at least 10",
         ),
         (
-            {"rl": {"press": {"training_reset": {"hard_case_fraction": 1.1}}}},
-            "hard_case_fraction",
-        ),
-        (
-            {"rl": {"press": {"training_reset": {"range_min_m": 0.48}}}},
-            "range bounds",
+            {"rl": {"press": {"navigation_noise": {"source": "/tmp/sample.json"}}}},
+            "source must be a repo-relative path",
         ),
         (
             {
                 "rl": {
                     "press": {
-                        "training_reset": {
-                            "tangential_error_min_m": 0.081,
+                        "navigation_noise": {
+                            "switch_range_max_m": 0.80,
                         }
                     }
                 }
             },
-            "tangential bounds",
+            "cover the measured navigation maximum",
         ),
         (
-            {"rl": {"press": {"reward": {"action_delta_weight": -0.1}}}},
+            {
+                "rl": {
+                    "press": {
+                        "navigation_noise": {
+                            "lateral_align_max_m": 0.50,
+                        }
+                    }
+                }
+            },
+            "cover measured navigation alignment",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "navigation_noise": {
+                            "relative_attitude_error_max_rad": 0.50,
+                        }
+                    }
+                }
+            },
+            "cover measured navigation attitude error",
+        ),
+        (
+            {"rl": {"press": {"reward": {"position_progress_weight": -0.1}}}},
             "finite and non-negative",
         ),
         (
-            {"rl": {"press": {"reward": {"range_barrier_margin_m": 0.0}}}},
-            "range_barrier_margin_m must be finite and positive",
+            {"rl": {"press": {"reward": {"stabilization_capture_radius_m": 0.0}}}},
+            "stabilization_capture_radius_m must be positive",
         ),
         (
             {

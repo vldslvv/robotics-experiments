@@ -5,8 +5,8 @@ Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``rsl_rl`` and torch dependencies are eager, while the Isaac Lab adapter stays
 deferred until the application is running. The package-root contract --
 ``build_runner`` / ``configure_phase`` / ``train_chunk`` / ``save_checkpoint`` /
-``load_checkpoint`` / ``deterministic_actor`` / ``initialize_actor_output`` /
-``export_policy`` plus ``TrainingResult``
+``restore_checkpoint`` / ``configure_monitoring`` / ``monitoring_step`` /
+``deterministic_actor`` / ``initialize_actor_output`` / ``export_policy`` plus ``TrainingResult``
 over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
 re-implements.
 """
@@ -32,10 +32,12 @@ __all__ = [
     "TrainingResult",
     "build_runner",
     "configure_phase",
+    "configure_monitoring",
     "deterministic_actor",
     "export_policy",
     "initialize_actor_output",
-    "load_checkpoint",
+    "monitoring_step",
+    "restore_checkpoint",
     "save_checkpoint",
     "train_chunk",
 ]
@@ -62,9 +64,13 @@ class _PolicyRunner(Protocol):
     """The runner surface the adapter contract relies on."""
 
     alg: _Algorithm
-    log_dir: str
+    log_dir: str | None
     save_interval: int
     current_learning_iteration: int
+    logger: Any
+    writer: Any
+    logger_type: str
+    save: Any
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
         """Run the training loop for the given number of iterations."""
@@ -89,6 +95,150 @@ class TrainingResult:
     log_dir: str
 
 
+class _PresentationWriter:
+    """Map RSL-RL logging onto the strict project TensorBoard contract."""
+
+    def __init__(self, *, writer, phase: RlTrainingPhaseConfig, phase_number: int) -> None:
+        self._writer = writer
+        self._phase = phase
+        self._phase_number = phase_number
+        self._last_learner_step: int | None = None
+        self._new_update_pending = False
+        self._presentation_step = 0
+        self._collection_time_s = 0.0
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
+    @property
+    def presentation_step(self) -> int:
+        return self._presentation_step
+
+    def configure_phase(self, *, phase: RlTrainingPhaseConfig, phase_number: int) -> None:
+        self._phase = phase
+        self._phase_number = phase_number
+
+    def begin_update(self) -> None:
+        self._new_update_pending = True
+
+    def _write(self, *, tag: str, value, step: int) -> None:
+        self._writer.add_scalar(
+            tag,
+            value,
+            step,
+            new_style=True,
+            double_precision=True,
+        )
+
+    def _start_step(self, *, learner_step: int) -> None:
+        if not self._new_update_pending and learner_step == self._last_learner_step:
+            return
+        self._new_update_pending = False
+        self._last_learner_step = learner_step
+        self._presentation_step += 1
+        step = self._presentation_step
+        self._write(tag="train/schedule/phase", value=self._phase_number, step=step)
+        self._write(
+            tag="train/optimization/learning_rate",
+            value=self._phase.learning_rate,
+            step=step,
+        )
+        if self._phase.range_undershoot_min_m is not None:
+            self._write(
+                tag="train/schedule/recovery_boundary_m",
+                value=self._phase.range_undershoot_min_m,
+                step=step,
+            )
+        self._write(tag="train/schedule/checkpoint_update", value=learner_step, step=step)
+
+    def add_scalar(self, tag: str, scalar_value, global_step: int, /, *args, **kwargs) -> None:
+        del args, kwargs
+        if tag in {
+            "Loss/learning_rate",
+            "Train/mean_episode_length/time",
+            "Train/mean_reward/time",
+        }:
+            return
+        self._start_step(learner_step=int(global_step))
+        step = self._presentation_step
+        if tag.startswith("train/"):
+            mapped = tag
+        elif tag in {"Loss/value", "Loss/value_function"}:
+            mapped = "train/optimization/value_loss"
+        elif tag == "Loss/surrogate":
+            mapped = "train/optimization/policy_loss"
+        elif tag == "Loss/entropy":
+            mapped = "train/optimization/entropy"
+        elif tag == "Policy/mean_noise_std":
+            mapped = "train/optimization/policy_noise_standard_deviation"
+        elif tag == "Train/mean_reward":
+            mapped = "train/reward/episode_mean"
+        elif tag == "Train/mean_episode_length":
+            mapped = "train/outcome/mean_episode_length_steps"
+        elif tag == "Perf/total_fps":
+            mapped = "train/performance/fps"
+        elif tag in {"Perf/collection_time", "Perf/collection time"}:
+            self._collection_time_s = float(scalar_value)
+            mapped = "train/performance/rollout_time_s"
+        elif tag == "Perf/learning_time":
+            learning_time_s = float(scalar_value)
+            self._write(
+                tag="train/performance/total_update_time_s",
+                value=self._collection_time_s + learning_time_s,
+                step=step,
+            )
+            if torch.cuda.is_available():
+                self._write(
+                    tag="system/train/torch_gpu_memory_allocated_gib_peak",
+                    value=torch.cuda.max_memory_allocated() / 1024.0**3,
+                    step=step,
+                )
+                self._write(
+                    tag="system/train/torch_gpu_memory_reserved_gib_peak",
+                    value=torch.cuda.max_memory_reserved() / 1024.0**3,
+                    step=step,
+                )
+                torch.cuda.reset_peak_memory_stats()
+            mapped = "train/performance/optimizer_update_time_s"
+        else:
+            raise ValueError(f"unregistered RSL-RL metric tag {tag!r}")
+        self._write(tag=mapped, value=scalar_value, step=step)
+
+
+class _MetricLogger:
+    """Retain RSL-RL aggregation/console behavior without its event writer."""
+
+    log_dir = None
+    disable_logs = False
+
+    def __init__(self, *, base, writer: _PresentationWriter) -> None:
+        self._base = base
+        self.writer = writer
+        self._base.writer = writer
+        self._base.logger_type = "tensorboard"
+        self._base.disable_logs = False
+
+    def _call_enabled(self, method, /, *args, **kwargs):
+        self._base.log_dir = "metrics-enabled"
+        try:
+            return method(*args, **kwargs)
+        finally:
+            self._base.log_dir = None
+
+    def process_env_step(self, *args, **kwargs) -> None:
+        self._call_enabled(self._base.process_env_step, *args, **kwargs)
+
+    def log(self, *args, **kwargs) -> None:
+        self.writer.begin_update()
+        self._call_enabled(self._base.log, *args, **kwargs)
+
+    def save_model(self, *args, **kwargs) -> None:
+        del args, kwargs
+
+
+def _ignore_internal_checkpoint(*args, **kwargs) -> None:
+    del args, kwargs
+
+
 def _train_cfg(
     *,
     training_config: RlTrainingConfig,
@@ -101,8 +251,8 @@ def _train_cfg(
         # critic shares it (no privileged observations yet).
         "obs_groups": {"policy": ["policy"], "critic": ["policy"]},
         "num_steps_per_env": int(training_config.num_steps_per_env),
-        # The orchestration loop owns checkpoint cadence. RSL-RL still writes
-        # the terminal model at the end of every learn() chunk.
+        # The orchestration loop owns checkpoint cadence. The runner receives
+        # no log directory, so its internal periodic/final save path is inert.
         "save_interval": 2**31 - 1,
         "empirical_normalization": False,
         "policy": {
@@ -139,7 +289,7 @@ def build_runner(
     training_config: RlTrainingConfig,
     phase: RlTrainingPhaseConfig,
     policy_config: RlPolicyConfig,
-    log_dir: str,
+    log_dir: str | None,
     device: str,
 ) -> _PolicyRunner:
     """Wrap a DirectRLEnv for rsl_rl and build the OnPolicyRunner."""
@@ -159,10 +309,43 @@ def build_runner(
     )
 
 
+def configure_monitoring(
+    *,
+    runner: _PolicyRunner,
+    writer,
+    phase: RlTrainingPhaseConfig,
+    phase_number: int,
+) -> None:
+    """Install the sole namespaced TensorBoard writer for one attempt."""
+    presentation = _PresentationWriter(
+        writer=writer,
+        phase=phase,
+        phase_number=phase_number,
+    )
+    if hasattr(runner, "logger"):
+        runner.logger = _MetricLogger(base=runner.logger, writer=presentation)
+        return
+    runner.writer = presentation
+    runner.logger_type = "tensorboard"
+    runner.log_dir = str(writer.log_dir)
+    runner.save = _ignore_internal_checkpoint
+
+
+def monitoring_step(*, runner: _PolicyRunner) -> int:
+    """Return total attempted updates, independent of learner restoration."""
+    logger = getattr(runner, "logger", None)
+    if isinstance(logger, _MetricLogger):
+        return logger.writer.presentation_step
+    if isinstance(getattr(runner, "writer", None), _PresentationWriter):
+        return runner.writer.presentation_step
+    raise RuntimeError("training monitoring has not been configured")
+
+
 def configure_phase(
     *,
     runner: _PolicyRunner,
     phase: RlTrainingPhaseConfig,
+    phase_number: int = 1,
 ) -> None:
     """Apply declarative optimizer values without replacing optimizer state."""
     runner.alg.learning_rate = float(phase.learning_rate)
@@ -170,6 +353,10 @@ def configure_phase(
     runner.alg.schedule = str(phase.schedule)
     for parameter_group in runner.alg.optimizer.param_groups:
         parameter_group["lr"] = float(phase.learning_rate)
+    if isinstance(getattr(runner, "logger", None), _MetricLogger):
+        runner.logger.writer.configure_phase(phase=phase, phase_number=phase_number)
+    elif isinstance(getattr(runner, "writer", None), _PresentationWriter):
+        runner.writer.configure_phase(phase=phase, phase_number=phase_number)
 
 
 def train_chunk(
@@ -182,6 +369,11 @@ def train_chunk(
     """Train exact new updates and number the terminal model by completed updates."""
     if completed_iterations < 0 or iterations <= 0:
         raise ValueError("completed_iterations must be non-negative and iterations positive")
+    logger = getattr(runner, "logger", None)
+    if isinstance(logger, _MetricLogger):
+        logger.writer.begin_update()
+    elif isinstance(getattr(runner, "writer", None), _PresentationWriter):
+        runner.writer.begin_update()
     runner.current_learning_iteration = completed_iterations + 1
     runner.learn(
         num_learning_iterations=iterations,
@@ -193,8 +385,14 @@ def train_chunk(
     )
 
 
-def save_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path) -> None:
+def save_checkpoint(
+    *,
+    runner: _PolicyRunner,
+    checkpoint_path: Path,
+    iteration: int,
+) -> None:
     """Persist one evaluation checkpoint without external-logger side effects."""
+    runner.current_learning_iteration = iteration
     torch.save(
         {
             "model_state_dict": _policy_module(runner).state_dict(),
@@ -206,13 +404,17 @@ def save_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path) -> None:
     )
 
 
-def load_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str) -> None:
-    """Restore policy weights for export without resuming optimizer state."""
+def restore_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str) -> int:
+    """Restore actor, critic, optimizer, and learner iteration for refinement."""
     runner.load(
         str(checkpoint_path),
-        load_optimizer=False,
+        load_optimizer=True,
         map_location=device,
     )
+    payload = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    iteration = int(payload["iter"])
+    runner.current_learning_iteration = iteration
+    return iteration
 
 
 def _policy_module(runner: _PolicyRunner) -> _ActorCritic:

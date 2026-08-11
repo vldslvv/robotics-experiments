@@ -23,6 +23,12 @@ loaders in `tools/_ulog_common.py`.
 
 ## Sim-to-real comparison
 
+Task-neutral repeated-flight evidence and position/pose envelopes are produced
+by `make measure-flight-envelope`; see `docs/FLIGHT_PARAMETERS.md`. Those
+artifacts establish the stable comparison boundary. The tools below remain
+diagnostics for explaining differences in the retained ULogs and bridge or
+hardware logs.
+
 `compare_logs.py` overlays two PX4 ULogs and prints a per-metric divergence table
 for the hover/dynamics signals (horizontal drift, vertical range, speed, tilt,
 yaw, body rates, and commanded motor effort). Use it to quantify the sim-to-real

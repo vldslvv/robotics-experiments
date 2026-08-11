@@ -29,19 +29,22 @@ training:
   vehicle_id: 0
   policy_name: hover
   controller_artifact: .build/alignment/x500-px4-v1/best
+  flight_envelope_artifact: .build/flight-envelopes/holybro-x500-v2-hover-v1/latest
   phases:
     - max_iterations: 1500
       evaluation_interval: 200
       learning_rate: 1.0e-3
       schedule: adaptive
       entropy_coef: 0.005
-      hard_case_fraction: 0.0
+      range_undershoot_min_m: null
   plateau:
     metric_name: held_out_task_cost
     direction: minimize
     minimum_delta: 0.003
-    patience_evaluations: 30
+    patience_evaluations: 10
   evaluation_worker_timeout_s: 600.0
+  telemetry_sample_interval_s: 1.0
+  gpu_utilization_target_rate: 0.95
   num_steps_per_env: 24
   gamma: 0.99
   lam: 0.95
@@ -51,7 +54,7 @@ training:
   num_mini_batches: 4
   desired_kl: 0.01
   max_grad_norm: 1.0
-  seed: 42
+  attempt_seeds: [42, 43, 44]
 
 # Hover task definition and task-owned ActorCritic topology.
 hover:

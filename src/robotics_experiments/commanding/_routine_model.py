@@ -296,12 +296,21 @@ class VehicleRoutine:
 
 @dataclass(frozen=True)
 class _OffboardState:
-    """Continuous OFFBOARD policy, transmission, payload, and mode progress."""
+    """Continuous OFFBOARD policy, transmission, payload, and mode progress.
+
+    ``policy_generation`` identifies the cached adapter result, while
+    ``transmitted_policy_generation`` and ``transmitted_setpoint`` identify the
+    wire effect the imperative driver retains after a successful port send.
+    """
 
     policy_cadence: _CadenceState = _CadenceState()
     transmitter_cadence: _CadenceState = _CadenceState()
     transmissions: int = 0
+    policy_generation: int = 0
+    transmitted_policy_generation: int = 0
     cached_setpoint: Optional[StreamSetpoint] = None
+    transmitted_setpoint: Optional[StreamSetpoint] = None
+    transmitted_setpoint_sim_time_us: int = -1
     requested: bool = False
     accepted: bool = False
     policy_state: Optional[object] = None

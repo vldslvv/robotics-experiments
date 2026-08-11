@@ -15,6 +15,8 @@ _MOVED_TARGETS = (
     "test-integration-press-policy",
     "test-integration-press-policy-transfer",
     "test-integration-press-approach-routine",
+    "test-integration-press-navigation-handoff-sample",
+    "measure-press-navigation-handoff",
 )
 
 
@@ -28,6 +30,17 @@ def test_rl_targets_are_defined_only_in_rl_makefile() -> None:
                 definitions[target].append(path.name)
 
     assert definitions == {target: ["rl.mk"] for target in _MOVED_TARGETS}
+
+
+def test_tensorboard_uses_five_second_reload_and_preserves_scalar_points() -> None:
+    makefile = (REPO_ROOT / "make" / "rl.mk").read_text()
+    tensorboard = makefile.split("tensorboard-rl:", maxsplit=1)[1].split(
+        ".PHONY: test-integration-press-hover-goto", maxsplit=1
+    )[0]
+    assert "--reload_interval 5" in tensorboard
+    assert "--samples_per_plugin 'scalars=$(RL_TENSORBOARD_SCALAR_SAMPLES)'" in tensorboard
+    assert "--load_fast=false" in tensorboard
+    assert "RL_TENSORBOARD_SCALAR_SAMPLES ?= 1000000" in makefile
 
 
 def test_root_makefile_includes_rl_makefile_and_training_makefile_is_removed() -> None:
@@ -102,6 +115,20 @@ def test_legacy_temporal_targets_and_variables_are_removed() -> None:
     assert "TEMPORAL_" not in text
 
 
+def test_navigation_handoff_measurement_reuses_the_production_routine() -> None:
+    makefile = (REPO_ROOT / "make" / "rl.mk").read_text()
+    sample = makefile.split("test-integration-press-navigation-handoff-sample:", maxsplit=1)[
+        1
+    ].split(".PHONY: measure-press-navigation-handoff", maxsplit=1)[0]
+    runner = (REPO_ROOT / "make/scripts/run_press_navigation_handoff_measurement.sh").read_text()
+
+    assert "ISAAC_PRESS_APPROACH_ROUTINE_TEST" in sample
+    assert "configs/policy_press_approach_quad.yaml" in makefile
+    assert "generate-drone-usd" not in sample
+    assert "PRESS_NAVIGATION_MEASUREMENT_OUTPUT" in sample
+    assert '"${PRESS_NAVIGATION_MEASUREMENT_RUNS}" -lt 10' in runner
+
+
 def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them() -> None:
     integration_makefile = (REPO_ROOT / "make" / "integration-tests.mk").read_text()
     assert "test-integration-press-hover-goto" in integration_makefile
@@ -117,6 +144,22 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
 
     assert result.returncode == 0, result.stderr
     assert "run_isaac_integration_test.sh" in result.stdout
+
+    contact_result = subprocess.run(
+        [
+            "make",
+            "-n",
+            "-o",
+            "generate-drone-usd",
+            "test-integration-press-contact-chain",
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert contact_result.returncode == 0, contact_result.stderr
+    assert "configs/policy_press_approach_quad.yaml" in contact_result.stdout
 
 
 def test_training_uses_one_merged_container_invocation() -> None:

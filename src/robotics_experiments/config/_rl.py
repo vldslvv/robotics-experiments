@@ -11,9 +11,12 @@ __all__ = [
     "PressApproachGoalConfig",
     "PressApproachRewardConfig",
     "PressApproachTerminationConfig",
-    "PressApproachTrainingResetConfig",
     "PressApproachVelocityReferenceConfig",
     "PressHandoffConfig",
+    "PressNavigationNoiseConfig",
+    "PressCurriculumConfig",
+    "PressCurriculumResetSourceConfig",
+    "PressCurriculumStageConfig",
     "PressResetConfig",
     "PressTaskConfig",
     "RlConfig",
@@ -163,26 +166,48 @@ class PressHandoffConfig(_FreezableConfig):
     wall_normal_speed_max_mps: float
     lateral_speed_max_mps: float
     angular_speed_max_radps: float
+    relative_attitude_error_max_rad: float
     body_z_alignment_min: float
     estimator_health_min: float
 
 
 @dataclass
-class PressApproachRewardConfig(_FreezableConfig):
-    """Parameters for the eleven signed approach-stage reward contributions."""
+class PressNavigationNoiseConfig(_FreezableConfig):
+    """Measured final-waypoint pose variation covered by actor entry.
 
-    range_progress_weight: float
-    range_barrier_margin_m: float
-    range_barrier_weight: float
-    alignment_error_weight: float
-    velocity_tracking_weight: float
-    wall_normal_braking_command_weight: float
-    upright_error_weight: float
-    action_delta_weight: float
-    success_weight: float
-    collision_weight: float
-    flight_failure_weight: float
-    timeout_weight: float
+    Attributes:
+        source: Repo-relative accepted measurement-summary path.
+        sample_count: Number of independent production-route arrivals measured.
+        position_margin_m: Extra coverage beyond every observed position bound.
+        rotation_margin_rad: Extra coverage beyond the observed attitude error.
+        switch_range_min_m: Minimum observed switch range, meters.
+        switch_range_max_m: Maximum observed switch range, meters.
+        lateral_align_max_m: Maximum observed in-plate position error, meters.
+        relative_attitude_error_max_rad: Maximum observed full relative-attitude
+            error, radians.
+    """
+
+    source: str
+    sample_count: int
+    position_margin_m: float
+    rotation_margin_rad: float
+    switch_range_min_m: float
+    switch_range_max_m: float
+    lateral_align_max_m: float
+    relative_attitude_error_max_rad: float
+
+
+@dataclass
+class PressApproachRewardConfig(_FreezableConfig):
+    """Magnitudes for the signed approach-stage reward contributions."""
+
+    stabilization_capture_radius_m: float
+    position_progress_weight: float
+    stabilization_weight: float
+    predictive_barrier_weight: float
+    strict_hold_weight: float
+    terminal_success_weight: float
+    terminal_failure_weight: float
 
 
 @dataclass
@@ -206,6 +231,7 @@ class PressApproachGoalConfig(_FreezableConfig):
     range_min_m: float
     range_max_m: float
     alignment_error_max_m: float
+    relative_attitude_error_max_rad: float
     linear_speed_max_mps: float
     angular_speed_max_radps: float
     body_z_alignment_min: float
@@ -228,22 +254,12 @@ class PressResetConfig(_FreezableConfig):
 
 
 @dataclass
-class PressApproachTrainingResetConfig(_FreezableConfig):
-    """Training-only mixture that concentrates samples near a hard boundary."""
-
-    hard_case_fraction: float
-    range_min_m: float
-    range_max_m: float
-    tangential_error_min_m: float
-    tangential_error_max_m: float
-
-
-@dataclass
 class PressApproachTerminationConfig(_FreezableConfig):
     """Contact and flight-envelope failure conditions for approach."""
 
     crash_tilt_cos: float
     min_altitude_m: float
+    range_undershoot_min_m: float
     max_wall_normal_distance_m: float
     max_lateral_error_m: float
     max_vertical_error_m: float
@@ -252,9 +268,10 @@ class PressApproachTerminationConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachEvaluationConfig(_FreezableConfig):
-    """Deterministic approach-policy workload, advisory gates, and ranking."""
+    """Disjoint deterministic validation/test workloads, gates, and ranking."""
 
-    seeds: List[int]
+    validation_seeds: List[int]
+    test_seeds: List[int]
     episodes_per_seed: int
     success_rate_min: float
     collision_rate_max: float
@@ -262,9 +279,12 @@ class PressApproachEvaluationConfig(_FreezableConfig):
     flight_failure_penalty: float
     timeout_penalty: float
     non_success_penalty: float
+    dwell_progress_weight: float
     terminal_range_weight: float
     trajectory_alignment_weight: float
+    relative_attitude_error_weight: float
     velocity_tracking_weight: float
+    angular_velocity_weight: float
     upright_error_weight: float
     action_delta_weight: float
     completion_time_weight: float
@@ -282,14 +302,42 @@ class RlPlateauCriteriaConfig(_FreezableConfig):
 
 @dataclass
 class RlTrainingPhaseConfig(_FreezableConfig):
-    """One phase in a single scratch PPO optimizer lineage."""
+    """One phase in an attempt's validation-selected PPO branch."""
 
     max_iterations: int
     evaluation_interval: int
     learning_rate: float
     schedule: str
     entropy_coef: float
-    hard_case_fraction: float
+    range_undershoot_min_m: float | None
+
+
+@dataclass
+class PressCurriculumResetSourceConfig(_FreezableConfig):
+    """One typed reset source in a press curriculum-stage mixture."""
+
+    source: str
+    weight: float
+
+
+@dataclass
+class PressCurriculumStageConfig(_FreezableConfig):
+    """The task distribution and training schedule for one ordered press stage."""
+
+    name: str
+    reset_mix: List[PressCurriculumResetSourceConfig]
+    hold_s: float
+    training_hold_s: List[float]
+    episode_length_s: float
+    phases: List[RlTrainingPhaseConfig]
+
+
+@dataclass
+class PressCurriculumConfig(_FreezableConfig):
+    """A linear, validation-gated press-policy curriculum."""
+
+    active_stage: str
+    stages: List[PressCurriculumStageConfig]
 
 
 @dataclass
@@ -306,8 +354,11 @@ class RlTrainingConfig(_FreezableConfig):
             ``latest`` symlink.
         controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
-        phases: Ordered curriculum phases executed by one fresh runner. No
-            checkpoint initialization or resume path is supported.
+        flight_envelope_artifact: Flight-envelope bundle or publication link
+            resolved and matched to the controller artifact before training.
+        phases: Ordered curriculum phases executed by each fresh attempt.
+        telemetry_sample_interval_s: Diagnostic hardware sampling cadence.
+        gpu_utilization_target_rate: Diagnostic GPU-utilization target in [0, 1].
         num_steps_per_env: On-policy rollout length per env per iteration.
         gamma: Discount factor.
         lam: GAE lambda.
@@ -317,16 +368,19 @@ class RlTrainingConfig(_FreezableConfig):
         num_mini_batches: Minibatches per epoch.
         desired_kl: Adaptive-schedule KL target.
         max_grad_norm: Gradient clipping norm.
-        seed: Training seed (env reset + torch).
+        attempt_seeds: Independent training seeds (env reset + torch).
     """
 
     task_id: str
     vehicle_id: int
     policy_name: str
     controller_artifact: str
+    flight_envelope_artifact: str
     phases: List[RlTrainingPhaseConfig]
     plateau: RlPlateauCriteriaConfig
     evaluation_worker_timeout_s: float
+    telemetry_sample_interval_s: float
+    gpu_utilization_target_rate: float
     num_steps_per_env: int
     gamma: float
     lam: float
@@ -336,7 +390,7 @@ class RlTrainingConfig(_FreezableConfig):
     num_mini_batches: int
     desired_kl: float
     max_grad_norm: float
-    seed: int
+    attempt_seeds: List[int]
 
 
 @dataclass
@@ -344,26 +398,39 @@ class PressTaskConfig(_FreezableConfig):
     """Named press curriculum-stage config.
 
     Attributes:
-        curriculum_stage: Required stage name written to artifacts.
+        curriculum: Ordered typed stages and the stage selected by this config.
         policy: Task-owned actor/critic topology.
         handoff: Thresholds for the nav -> policy handoff gate.
-        goal: Stable approach target and dense velocity reference.
-        reward: Approach-stage reward weights.
+        navigation_noise: Measured final-waypoint position variation that the
+            handoff and training-reset envelope must cover.
+        goal: Shared target pose and velocity reference.
+        reward: Shared reward weights; the stage decides which terms apply.
         reset: Physical scene and initial-state ranges.
-        training_reset: Training-only hard-case reset mixture.
-        termination: Contact and flight-envelope failure conditions.
-        evaluation: Deterministic approach workload and acceptance targets.
+        termination: Shared safety termination conditions.
+        evaluation: Shared deterministic workload and acceptance thresholds.
     """
 
-    curriculum_stage: str
+    curriculum: PressCurriculumConfig
     policy: RlPolicyConfig
     handoff: PressHandoffConfig
+    navigation_noise: PressNavigationNoiseConfig
     goal: PressApproachGoalConfig
     reward: PressApproachRewardConfig
     reset: PressResetConfig
-    training_reset: PressApproachTrainingResetConfig
     termination: PressApproachTerminationConfig
     evaluation: PressApproachEvaluationConfig
+
+    def selected_stage(self) -> PressCurriculumStageConfig:
+        """Return the configured stage after loader validation."""
+
+        matches = [
+            stage for stage in self.curriculum.stages if stage.name == self.curriculum.active_stage
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "rl.press.curriculum.active_stage must select exactly one ordered stage"
+            )
+        return matches[0]
 
 
 @dataclass

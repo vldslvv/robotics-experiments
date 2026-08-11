@@ -1103,6 +1103,10 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
             value=definition.get("experiment_config"),
             name="experiment_config",
         ),
+        flight_envelope_artifact=_string(
+            value=definition.get("flight_envelope_artifact"),
+            name="flight_envelope_artifact",
+        ),
         vehicle=_string(value=definition.get("vehicle"), name="vehicle"),
         airframe=_string(value=definition.get("airframe"), name="airframe"),
         command_rate_hz=_finite(

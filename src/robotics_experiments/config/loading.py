@@ -241,42 +241,95 @@ def _validate_alignment(experiment: ExperimentConfig) -> None:
         raise ValueError("alignment.execution.gpu_sample_interval_s must be finite and positive")
 
 
+def _validate_training_phases(*, phases, path: str, range_limit_m: float) -> None:
+    if not phases:
+        raise ValueError(f"{path} must contain at least one phase")
+    for index, phase in enumerate(phases):
+        phase_path = f"{path}[{index}]"
+        if phase.max_iterations <= 0 or phase.evaluation_interval <= 0:
+            raise ValueError(
+                f"{phase_path} max_iterations and evaluation_interval must be positive"
+            )
+        if phase.evaluation_interval > phase.max_iterations:
+            raise ValueError(f"{phase_path}.evaluation_interval must not exceed max_iterations")
+        if not math.isfinite(phase.learning_rate) or phase.learning_rate <= 0.0:
+            raise ValueError(f"{phase_path}.learning_rate must be finite and positive")
+        if phase.schedule not in {"fixed", "adaptive"}:
+            raise ValueError(f"{phase_path}.schedule must be 'fixed' or 'adaptive'")
+        if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
+            raise ValueError(f"{phase_path}.entropy_coef must be finite and non-negative")
+        if phase.range_undershoot_min_m is not None and (
+            not math.isfinite(phase.range_undershoot_min_m)
+            or not 0.0 < phase.range_undershoot_min_m <= range_limit_m
+        ):
+            raise ValueError(
+                f"{phase_path}.range_undershoot_min_m must be positive and no greater "
+                f"than {range_limit_m}"
+            )
+
+
+def _validate_plateau(*, plateau, path: str) -> None:
+    if not plateau.metric_name.strip():
+        raise ValueError(f"{path}.metric_name must be non-empty")
+    if plateau.direction not in {"minimize", "maximize"}:
+        raise ValueError(f"{path}.direction must be 'minimize' or 'maximize'")
+    if not math.isfinite(plateau.minimum_delta) or plateau.minimum_delta <= 0.0:
+        raise ValueError(f"{path}.minimum_delta must be finite and positive")
+    if plateau.patience_evaluations <= 0:
+        raise ValueError(f"{path}.patience_evaluations must be positive")
+
+
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     training = experiment.rl.training
     if not training.controller_artifact.strip():
         raise ValueError("rl.training.controller_artifact must be non-empty")
-    if not training.phases:
-        raise ValueError("rl.training.phases must contain at least one phase")
-    for index, phase in enumerate(training.phases):
-        path = f"rl.training.phases[{index}]"
-        if phase.max_iterations <= 0 or phase.evaluation_interval <= 0:
-            raise ValueError(f"{path} max_iterations and evaluation_interval must be positive")
-        if phase.evaluation_interval > phase.max_iterations:
-            raise ValueError(f"{path}.evaluation_interval must not exceed max_iterations")
-        if not math.isfinite(phase.learning_rate) or phase.learning_rate <= 0.0:
-            raise ValueError(f"{path}.learning_rate must be finite and positive")
-        if phase.schedule not in {"fixed", "adaptive"}:
-            raise ValueError(f"{path}.schedule must be 'fixed' or 'adaptive'")
-        if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
-            raise ValueError(f"{path}.entropy_coef must be finite and non-negative")
-        if not math.isfinite(phase.hard_case_fraction) or not (
-            0.0 <= phase.hard_case_fraction <= 1.0
-        ):
-            raise ValueError(f"{path}.hard_case_fraction must be between 0 and 1")
-    plateau = training.plateau
-    if not plateau.metric_name.strip():
-        raise ValueError("rl.training.plateau.metric_name must be non-empty")
-    if plateau.direction not in {"minimize", "maximize"}:
-        raise ValueError("rl.training.plateau.direction must be 'minimize' or 'maximize'")
-    if not math.isfinite(plateau.minimum_delta) or plateau.minimum_delta <= 0.0:
-        raise ValueError("rl.training.plateau.minimum_delta must be finite and positive")
-    if plateau.patience_evaluations <= 0:
-        raise ValueError("rl.training.plateau.patience_evaluations must be positive")
+    if not training.flight_envelope_artifact.strip():
+        raise ValueError("rl.training.flight_envelope_artifact must be non-empty")
+    attempt_seeds = tuple(training.attempt_seeds)
+    if not attempt_seeds or len(set(attempt_seeds)) != len(attempt_seeds):
+        raise ValueError("rl.training.attempt_seeds must be nonempty and unique")
+    if training.task_id == "Isaac-Switch-Press-Direct-v1":
+        stage = experiment.rl.press.selected_stage()
+        phases = stage.phases
+        plateau = training.plateau
+        range_limit_m = experiment.rl.press.goal.range_min_m
+        if training.policy_name != f"press-{stage.name}":
+            raise ValueError("press policy_name must match the active ordered stage")
+        if experiment.rl.episode_length_s != stage.episode_length_s:
+            raise ValueError(
+                "rl.episode_length_s must match the active press curriculum episode_length_s"
+            )
+    else:
+        phases = training.phases
+        plateau = training.plateau
+        range_limit_m = math.inf
+    _validate_training_phases(
+        phases=phases,
+        path="rl.press.curriculum active stage phases"
+        if training.task_id == "Isaac-Switch-Press-Direct-v1"
+        else "rl.training.phases",
+        range_limit_m=range_limit_m,
+    )
+    _validate_plateau(
+        plateau=plateau,
+        path="rl.press.curriculum active stage plateau"
+        if training.task_id == "Isaac-Switch-Press-Direct-v1"
+        else "rl.training.plateau",
+    )
     if (
         not math.isfinite(training.evaluation_worker_timeout_s)
         or training.evaluation_worker_timeout_s <= 0.0
     ):
         raise ValueError("rl.training.evaluation_worker_timeout_s must be finite and positive")
+    if (
+        not math.isfinite(training.telemetry_sample_interval_s)
+        or training.telemetry_sample_interval_s <= 0.0
+    ):
+        raise ValueError("rl.training.telemetry_sample_interval_s must be finite and positive")
+    if not math.isfinite(training.gpu_utilization_target_rate) or not (
+        0.0 < training.gpu_utilization_target_rate <= 1.0
+    ):
+        raise ValueError("rl.training.gpu_utilization_target_rate must be in (0, 1]")
     policies = {
         "rl.hover.policy": experiment.rl.hover.policy,
         "rl.press.policy": experiment.rl.press.policy,
@@ -305,12 +358,15 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
             )
 
 
-def _validate_press_approach(experiment: ExperimentConfig) -> None:
+def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
     press = experiment.rl.press
-    if press.curriculum_stage != "approach":
-        raise ValueError(
-            f"unknown rl.press.curriculum_stage={press.curriculum_stage!r}; " "expected 'approach'"
-        )
+    stage = press.selected_stage()
+    if len(stage.training_hold_s) != len(stage.phases):
+        raise ValueError("active press stage must provide one hold duration per training phase")
+    if not math.isclose(
+        sum(source.weight for source in stage.reset_mix), 1.0, rel_tol=0.0, abs_tol=1.0e-9
+    ):
+        raise ValueError("active press stage reset weights must sum to one")
     handoff = press.handoff
     if not (
         math.isfinite(handoff.switch_range_min_m)
@@ -323,6 +379,7 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "wall_normal_speed_max_mps": handoff.wall_normal_speed_max_mps,
         "lateral_speed_max_mps": handoff.lateral_speed_max_mps,
         "angular_speed_max_radps": handoff.angular_speed_max_radps,
+        "relative_attitude_error_max_rad": handoff.relative_attitude_error_max_rad,
     }
     for name, value in positive_handoff_values.items():
         if not math.isfinite(value) or value <= 0.0:
@@ -338,33 +395,83 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.handoff.{name} must be between 0 and 1")
 
-    training_reset = press.training_reset
-    if not math.isfinite(training_reset.hard_case_fraction) or not (
-        0.0 <= training_reset.hard_case_fraction <= 1.0
+    navigation_noise = press.navigation_noise
+    if not navigation_noise.source.strip():
+        raise ValueError("rl.press.navigation_noise.source must be non-empty")
+    navigation_source = Path(navigation_noise.source)
+    if navigation_source.is_absolute() or ".." in navigation_source.parts:
+        raise ValueError("rl.press.navigation_noise.source must be a repo-relative path")
+    if navigation_noise.sample_count < 10:
+        raise ValueError("rl.press.navigation_noise.sample_count must be at least 10")
+    if (
+        not math.isfinite(navigation_noise.position_margin_m)
+        or navigation_noise.position_margin_m <= 0.0
     ):
-        raise ValueError("rl.press.training_reset.hard_case_fraction must be between 0 and 1")
-    if not (
-        handoff.switch_range_min_m
-        <= training_reset.range_min_m
-        < training_reset.range_max_m
-        <= handoff.switch_range_max_m
+        raise ValueError("rl.press.navigation_noise.position_margin_m must be finite and positive")
+    if (
+        not math.isfinite(navigation_noise.rotation_margin_rad)
+        or navigation_noise.rotation_margin_rad <= 0.0
     ):
         raise ValueError(
-            "rl.press.training_reset range bounds must be ordered inside the handoff range"
+            "rl.press.navigation_noise.rotation_margin_rad must be finite and positive"
         )
     if not (
-        0.0
-        <= training_reset.tangential_error_min_m
-        < training_reset.tangential_error_max_m
-        <= handoff.lateral_align_max_m
+        math.isfinite(navigation_noise.switch_range_min_m)
+        and math.isfinite(navigation_noise.switch_range_max_m)
+        and 0.0 < navigation_noise.switch_range_min_m <= navigation_noise.switch_range_max_m
     ):
         raise ValueError(
-            "rl.press.training_reset tangential bounds must be ordered inside the handoff disk"
+            "rl.press.navigation_noise switch range bounds must be positive and ordered"
+        )
+    if (
+        not math.isfinite(navigation_noise.lateral_align_max_m)
+        or navigation_noise.lateral_align_max_m < 0.0
+    ):
+        raise ValueError(
+            "rl.press.navigation_noise.lateral_align_max_m must be finite and non-negative"
+        )
+    if (
+        not math.isfinite(navigation_noise.relative_attitude_error_max_rad)
+        or navigation_noise.relative_attitude_error_max_rad < 0.0
+    ):
+        raise ValueError(
+            "rl.press.navigation_noise.relative_attitude_error_max_rad must be finite "
+            "and non-negative"
+        )
+    margin_m = navigation_noise.position_margin_m
+    if handoff.switch_range_min_m > navigation_noise.switch_range_min_m - margin_m:
+        raise ValueError(
+            "rl.press.handoff.switch_range_min_m must cover the measured navigation "
+            "minimum plus navigation_noise.position_margin_m"
+        )
+    if handoff.switch_range_max_m < navigation_noise.switch_range_max_m + margin_m:
+        raise ValueError(
+            "rl.press.handoff.switch_range_max_m must cover the measured navigation "
+            "maximum plus navigation_noise.position_margin_m"
+        )
+    if handoff.lateral_align_max_m < navigation_noise.lateral_align_max_m + margin_m:
+        raise ValueError(
+            "rl.press.handoff.lateral_align_max_m must cover measured navigation "
+            "alignment plus navigation_noise.position_margin_m"
+        )
+    if handoff.relative_attitude_error_max_rad < (
+        navigation_noise.relative_attitude_error_max_rad + navigation_noise.rotation_margin_rad
+    ):
+        raise ValueError(
+            "rl.press.handoff.relative_attitude_error_max_rad must cover measured navigation "
+            "attitude error plus navigation_noise.rotation_margin_rad"
         )
 
     goal = press.goal
     if not 0.0 < goal.range_min_m <= goal.range_max_m:
         raise ValueError("rl.press.goal range bounds must be positive and ordered")
+    if (
+        not math.isfinite(press.termination.range_undershoot_min_m)
+        or press.termination.range_undershoot_min_m >= goal.range_min_m
+    ):
+        raise ValueError(
+            "press stage termination.range_undershoot_min_m must be below goal.range_min_m"
+        )
     reference = goal.velocity_reference
     if not goal.range_min_m <= reference.range_center_m <= goal.range_max_m:
         raise ValueError(
@@ -383,6 +490,7 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.press.goal.body_z_alignment_min must be between 0 and 1")
     positive_goal_values = {
         "alignment_error_max_m": goal.alignment_error_max_m,
+        "relative_attitude_error_max_rad": goal.relative_attitude_error_max_rad,
         "linear_speed_max_mps": goal.linear_speed_max_mps,
         "angular_speed_max_radps": goal.angular_speed_max_radps,
         "velocity_reference.wall_normal_prediction_horizon_s": (
@@ -398,17 +506,6 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
             raise ValueError(f"rl.press.goal.{name} must be finite and positive")
     if goal.stable_steps <= 0:
         raise ValueError("rl.press.goal.stable_steps must be positive")
-
-    if handoff.switch_range_min_m <= goal.range_max_m:
-        raise ValueError(
-            "rl.press.handoff.switch_range_min_m must exceed rl.press.goal.range_max_m"
-        )
-
-    if (
-        not math.isfinite(press.reward.range_barrier_margin_m)
-        or press.reward.range_barrier_margin_m <= 0.0
-    ):
-        raise ValueError("rl.press.reward.range_barrier_margin_m must be finite and positive")
     for field in fields(press.reward):
         name = field.name
         value = getattr(press.reward, name)
@@ -416,9 +513,27 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
             raise ValueError(
                 f"rl.press.reward.{name} must be finite and non-negative, got {value!r}"
             )
+    if press.reward.stabilization_capture_radius_m <= 0.0:
+        raise ValueError("rl.press.reward.stabilization_capture_radius_m must be positive")
     evaluation = press.evaluation
-    if evaluation.episodes_per_seed <= 0 or not evaluation.seeds:
-        raise ValueError("rl.press.evaluation requires seeds and positive episodes_per_seed")
+    validation_seeds = tuple(evaluation.validation_seeds)
+    test_seeds = tuple(evaluation.test_seeds)
+    if not validation_seeds or len(set(validation_seeds)) != len(validation_seeds):
+        raise ValueError("rl.press.evaluation.validation_seeds must be nonempty and unique")
+    if len(test_seeds) != 3 or len(set(test_seeds)) != len(test_seeds):
+        raise ValueError("rl.press.evaluation.test_seeds must contain exactly three unique seeds")
+    seed_groups = (
+        set(experiment.rl.training.attempt_seeds),
+        set(validation_seeds),
+        set(test_seeds),
+    )
+    overlaps = (
+        left & right for index, left in enumerate(seed_groups) for right in seed_groups[index + 1 :]
+    )
+    if any(overlaps):
+        raise ValueError("rl training, validation, and test seeds must be mutually disjoint")
+    if evaluation.episodes_per_seed != 100:
+        raise ValueError("rl.press.evaluation.episodes_per_seed must equal 100")
     for name, value in {
         "success_rate_min": evaluation.success_rate_min,
         "collision_rate_max": evaluation.collision_rate_max,
@@ -430,9 +545,12 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "flight_failure_penalty",
         "timeout_penalty",
         "non_success_penalty",
+        "dwell_progress_weight",
         "terminal_range_weight",
         "trajectory_alignment_weight",
+        "relative_attitude_error_weight",
         "velocity_tracking_weight",
+        "angular_velocity_weight",
         "upright_error_weight",
         "action_delta_weight",
         "completion_time_weight",
@@ -582,6 +700,6 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     _validate_rates(experiment)
     _validate_alignment(experiment)
     _validate_rl_policies(experiment)
-    _validate_press_approach(experiment)
+    _validate_press_curriculum(experiment)
     _validate_switches(experiment)
     return _freeze_config_graph(experiment)

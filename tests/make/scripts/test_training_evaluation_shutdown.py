@@ -26,6 +26,8 @@ def _run_wrapper(
     shutdown: bool = False,
     shutdown_exit: int = 0,
     stale_tensorboard: bool = False,
+    scalar_ready_after_polls: int = 1,
+    tensorboard_port: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -74,10 +76,27 @@ if [[ "$*" == *data/environment* ]]; then
     fi
     exit 0
 fi
-printf '{"Train/mean_reward": {}}\\n'
+scalar_poll_count="$(cat "${SCALAR_POLL_COUNT}" 2>/dev/null || printf '0')"
+scalar_poll_count="$((scalar_poll_count + 1))"
+printf '%s\\n' "${scalar_poll_count}" >"${SCALAR_POLL_COUNT}"
+if [ "${scalar_poll_count}" -lt "${SCALAR_READY_AFTER_POLLS}" ]; then
+    printf '{}\\n'
+    exit 0
+fi
+printf '{"train/reward/episode_mean": {}}\\n'
 exit 0
 """,
     )
+    if scalar_ready_after_polls > 1:
+        _write_executable(
+            path=fake_bin / "sleep",
+            body="""#!/usr/bin/env bash
+if [ "$1" = 1 ]; then
+    exec /usr/bin/sleep 0.01
+fi
+exec /usr/bin/sleep "$@"
+""",
+        )
     _write_executable(
         path=fake_bin / "docker",
         body="""#!/usr/bin/env bash
@@ -131,12 +150,16 @@ exit "${EVAL_EXIT}"
         {
             "PATH": f"{fake_bin}:{env['PATH']}",
             "EVAL_EXIT": str(eval_exit),
+            "SCALAR_POLL_COUNT": str(tmp_path / "scalar-polls"),
+            "SCALAR_READY_AFTER_POLLS": str(scalar_ready_after_polls),
             "SHUTDOWN_EXIT": str(shutdown_exit),
             "STALE_TENSORBOARD": str(stale_tensorboard).lower(),
             "TRAIN_EXIT": str(train_exit),
             "WRAPPER_CALLS": str(calls),
         }
     )
+    if tensorboard_port is not None:
+        env["RL_TENSORBOARD_PORT"] = str(tensorboard_port)
     command = [
         "bash",
         str(_SCRIPT),
@@ -206,14 +229,37 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
     console = next((tmp_path / "logs").glob("*.console.log")).read_text(encoding="utf-8")
     assert "shutdown=disabled" in console
     assert (
-        "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in console
+        "TensorBoard URL: http://127.0.0.1:6006/?smoothing=0&tagFilter=" in console
         and "scalar data loaded" in console
     )
     assert (
-        "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in result.stdout
+        "TensorBoard URL: http://127.0.0.1:6006/?smoothing=0&tagFilter=" in result.stdout
         and "scalar data loaded" in result.stdout
     )
+    assert "primary learning and validation charts with Smoothing=0" in console
+    assert "training_report.json" in console
     assert "unbound variable" not in result.stderr
+
+
+def test_wrapper_uses_requested_tensorboard_port(tmp_path: Path) -> None:
+    result = _run_wrapper(tmp_path=tmp_path, train_exit=0, tensorboard_port=6008)
+
+    assert result.returncode == 0
+    calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
+    assert "RL_TENSORBOARD_PORT=6008" in calls
+    assert "TensorBoard URL: http://127.0.0.1:6008/?smoothing=0&tagFilter=" in result.stdout
+
+
+def test_wrapper_waits_for_first_slow_validation_scalars(tmp_path: Path) -> None:
+    result = _run_wrapper(
+        tmp_path=tmp_path,
+        train_exit=0,
+        scalar_ready_after_polls=35,
+    )
+
+    assert result.returncode == 0
+    assert int((tmp_path / "scalar-polls").read_text(encoding="utf-8")) >= 35
+    assert "scalar data loaded" in result.stdout
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:

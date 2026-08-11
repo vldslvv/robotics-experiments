@@ -1,0 +1,14 @@
+defaults:
+  - default
+
+# The verification module, not this routine, selects the measurement window.
+# This 51-second hold keeps the simulator alive for up to 15 seconds to observe
+# PX4 enter AUTO_LOITER, six seconds of verified loiter settling, and thirty
+# seconds of measurement. The capture leaf records raw pose evidence throughout.
+steps:
+  - kind: arm
+  - kind: takeoff
+    climb_m: 2.5
+    min_climb_m: 1.5
+  - kind: hover
+    hold_s: 51.0

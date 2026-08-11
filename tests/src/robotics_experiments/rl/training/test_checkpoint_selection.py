@@ -20,7 +20,7 @@ from robotics_experiments.rl.training.selection import publish_policy_labels
 from tests.support.paths import REPO_ROOT
 
 
-def _criteria(*, patience: int = 30) -> RlPlateauCriteriaConfig:
+def _criteria(*, patience: int = 10) -> RlPlateauCriteriaConfig:
     return RlPlateauCriteriaConfig(
         metric_name="held_out_task_cost",
         direction="minimize",
@@ -53,13 +53,26 @@ def _press_result(**overrides):
         "body_collision_rate": 0.006,
         "pusher_collision_rate": 0.004,
         "other_flight_failure_rate": 0.0,
+        "range_undershoot_rate": 0.0,
         "timeout_rate": 0.04,
+        "range_pass_rate": 1.0,
+        "alignment_pass_rate": 1.0,
+        "attitude_pass_rate": 1.0,
+        "linear_speed_pass_rate": 1.0,
+        "angular_speed_pass_rate": 1.0,
+        "contact_clear_pass_rate": 1.0,
+        "complete_goal_pass_rate": 0.95,
+        "mean_normalized_pose_error": 0.1,
+        "mean_max_stable_goal_fraction": 0.95,
+        "maximum_stable_goal_fraction": 1.0,
         "mean_closest_range_m": 0.41,
         "min_closest_range_m": 0.405,
         "median_completion_time_s": 2.0,
         "mean_terminal_range_cost": 0.0,
         "mean_trajectory_alignment_cost": 0.1,
+        "mean_relative_attitude_error_cost": 0.1,
         "mean_velocity_tracking_cost": 0.1,
+        "mean_angular_velocity_cost": 0.1,
         "mean_upright_error_cost": 0.1,
         "mean_action_delta_cost": 0.1,
         "mean_completion_time_fraction": 0.2,
@@ -92,7 +105,7 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     contract = PolicyContract(
-        policy_interface=PolicyInterface.PRESS_APPROACH,
+        policy_interface=PolicyInterface.PRESS,
         obs_schema_version=1,
         obs_dim=34,
         policy_rate_hz=20.0,
@@ -104,14 +117,25 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         hover_thrust_normalized=0.57,
         curriculum_stage="approach",
     )
-    fingerprint = _press_comparison_fingerprint(config=config, contract=contract)
+    fingerprint = _press_comparison_fingerprint(
+        config=config,
+        contract=contract,
+        flight_envelope_fingerprint="envelope-a",
+    )
     assert fingerprint == _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, max_body_velocity_mps=3.0),
+        flight_envelope_fingerprint="envelope-a",
     )
     assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, obs_dim=35),
+        flight_envelope_fingerprint="envelope-a",
+    )
+    assert fingerprint != _press_comparison_fingerprint(
+        config=config,
+        contract=contract,
+        flight_envelope_fingerprint="envelope-b",
     )
 
 
@@ -124,7 +148,9 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         ("timeout_rate", 0.0, 0.04),
         ("mean_terminal_range_cost", 0.0, 0.1),
         ("mean_trajectory_alignment_cost", 0.0, 0.1),
+        ("mean_relative_attitude_error_cost", 0.0, 0.1),
         ("mean_velocity_tracking_cost", 0.0, 0.1),
+        ("mean_angular_velocity_cost", 0.0, 0.1),
         ("mean_upright_error_cost", 0.0, 0.1),
         ("mean_action_delta_cost", 0.0, 0.1),
         ("mean_completion_time_fraction", 0.0, 0.2),
@@ -145,15 +171,64 @@ def test_acceptance_is_separate_from_evaluation_cost() -> None:
     from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
-    evaluation = _scored(min_closest_range_m=0.399)
+    evaluation = _scored(
+        collision_rate=0.0,
+        body_collision_rate=0.0,
+        pusher_collision_rate=0.0,
+        min_closest_range_m=0.399,
+    )
     assert evaluation.metric("held_out_task_cost") >= 0.0
     acceptance = evaluate_press_acceptance(
         evaluation=evaluation,
         evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.goal.range_min_m,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
     )
     assert not acceptance.passed
-    assert acceptance.reasons == ("range undershoot",)
+    assert acceptance.reasons == ("minimum closest range",)
+    assert len(acceptance.gates) == 5
+
+
+def test_acceptance_includes_configured_range_safety_boundary() -> None:
+    from robotics_experiments.config import load_config
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    acceptance = evaluate_press_acceptance(
+        evaluation=_scored(
+            collision_rate=0.0,
+            body_collision_rate=0.0,
+            pusher_collision_rate=0.0,
+            min_closest_range_m=0.40,
+        ),
+        evaluation_config=config.rl.press.evaluation,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+    )
+    assert acceptance.passed
+
+
+@pytest.mark.parametrize(
+    ("overrides", "failed_gate"),
+    [
+        ({"median_completion_time_s": float("nan")}, "trace finiteness"),
+        ({"approach_success_rate": 0.94}, "approach success rate"),
+        ({"collision_rate": 0.02}, "collision rate"),
+        ({"min_closest_range_m": 0.399}, "minimum closest range"),
+        ({"other_flight_failure_rate": 0.01}, "other flight-failure rate"),
+    ],
+)
+def test_every_acceptance_gate_is_individually_binding(overrides, failed_gate: str) -> None:
+    from robotics_experiments.config import load_config
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    acceptance = evaluate_press_acceptance(
+        evaluation=_scored(**overrides),
+        evaluation_config=config.rl.press.evaluation,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+    )
+    assert not acceptance.passed
+    assert failed_gate in acceptance.reasons
+    assert {gate.name for gate in acceptance.gates if not gate.passed} == set(acceptance.reasons)
 
 
 def test_plateau_accumulates_small_improvements_against_material_reference() -> None:
@@ -174,9 +249,9 @@ def test_plateau_accumulates_small_improvements_against_material_reference() -> 
     assert second.state == PlateauState(reference_value=0.997, stale_evaluations=0)
 
 
-def test_plateau_requires_all_thirty_consecutive_stale_evaluations() -> None:
+def test_plateau_requires_all_ten_consecutive_stale_evaluations() -> None:
     state = PlateauState(reference_value=1.0, stale_evaluations=0)
-    for iteration in range(1, 30):
+    for iteration in range(1, 10):
         update = advance_plateau(
             criteria=_criteria(),
             state=state,
@@ -187,7 +262,7 @@ def test_plateau_requires_all_thirty_consecutive_stale_evaluations() -> None:
     update = advance_plateau(
         criteria=_criteria(),
         state=state,
-        evaluation=_evaluation(iteration=30, cost=1.0),
+        evaluation=_evaluation(iteration=10, cost=1.0),
     )
     assert update.plateau_reached
 
@@ -200,8 +275,19 @@ def test_run_selection_minimizes_cost_and_prefers_earlier_exact_tie() -> None:
             _evaluation(iteration=20, cost=0.4),
             _evaluation(iteration=30, cost=0.4),
         ),
+        eligible_policy_digests=frozenset(),
     )
     assert selected.iteration == 20
+
+
+def test_validation_passing_candidate_ranks_ahead_of_lower_cost_failure() -> None:
+    passing = _evaluation(iteration=20, cost=0.5)
+    selected = select_best_evaluation(
+        criteria=_criteria(),
+        evaluations=(_evaluation(iteration=10, cost=0.1), passing),
+        eligible_policy_digests=frozenset({passing.policy_digest}),
+    )
+    assert selected is passing
 
 
 def _report(*, fingerprint: str, value: float) -> str:

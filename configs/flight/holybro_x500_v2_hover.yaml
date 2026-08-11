@@ -1,0 +1,23 @@
+schema_version: 1
+flight_id: holybro-x500-v2-hover-v1
+source_backend: px4-sitl
+state_source: simulator-ground-truth
+experiment_config: configs/flight_parameters_x500_hover.yaml
+vehicle: x500_01
+scenario:
+  kind: hover
+  repetitions: 30
+  mode_transition_timeout_s: 15.0
+  mode_report_max_age_s: 2.5
+  settle_s: 6.0
+  measure_s: 30.0
+  sample_rate_hz: 20.0
+  target_position_enu_m: [0.0, 0.0, 2.5]
+  target_yaw_rad: 0.0
+position_margin_m: 0.005
+attitude_margin_rad: 0.004363323129985824
+execution:
+  # Each trial owns fresh PX4 and Isaac processes. Keep one worker on the
+  # single-GPU development machine; the campaign runner retains ordered trial
+  # identities so this can be raised on suitable hardware.
+  worker_count: 1

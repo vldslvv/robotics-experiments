@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import MISSING
+from dataclasses import MISSING, replace
 from typing import cast
 
 import isaaclab.sim as sim_utils
@@ -19,7 +19,8 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg, UsdFileCfg, spawn_g
 from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
 
-from robotics_experiments.config import ExperimentConfig, RlPolicyConfig
+from robotics_experiments.config import ExperimentConfig, RlPolicyConfig, RlTrainingPhaseConfig
+from robotics_experiments.flight_parameters import FlightEnvelope
 from robotics_experiments.rl import PolicyContract
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
@@ -30,6 +31,7 @@ from robotics_experiments.rl.press import (
     PressObservationMask,
     initial_press_approach_state,
     pack_press_observation,
+    quaternion_geodesic_error_rad,
     reset_press_approach_state,
     step_press_approach,
 )
@@ -41,11 +43,8 @@ from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
     _training_vehicle,
 )
 from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
+    _hover_pose_from_unit_samples,
     _press_entry_state_from_unit_samples,
-    _press_training_entry_state_from_unit_samples,
-)
-from robotics_experiments.workflows.isaac_lab.tasks.flight import (
-    _normalized_action_to_controller_command,
 )
 
 __all__ = ["SwitchPressEnv", "SwitchPressEnvCfg", "make_switch_press_env_cfg"]
@@ -60,18 +59,11 @@ _PAD_PRIM_PATH = "/World/envs/env_.*/Drone/pusher/pad"
 # correction to its root pose yields the canonical pi-about-Z provider pose.
 _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
 _TRAINING_REWARD_TERMS = (
-    "range_progress",
-    "range_barrier",
-    "alignment_error",
-    "velocity_tracking",
-    "wall_normal_braking_command",
-    "upright_error",
-    "action_delta",
-    "success",
-    "collision",
-    "flight_failure",
-    "timeout",
-    "total",
+    "position_progress",
+    "stabilization",
+    "predictive_barrier",
+    "strict_hold",
+    "terminal_outcome",
 )
 
 
@@ -87,7 +79,6 @@ class SwitchPressEnvCfg(DirectRLEnvCfg):
     observation_space: int = cast(int, MISSING)
     policy_interface: str = cast(str, MISSING)
     policy_config: RlPolicyConfig = cast(RlPolicyConfig, MISSING)
-    use_training_reset_distribution: bool = cast(bool, MISSING)
     state_space = 0
     sim: SimulationCfg = cast(SimulationCfg, MISSING)
     drone_cfg: ArticulationCfg = cast(ArticulationCfg, MISSING)
@@ -102,19 +93,16 @@ def make_switch_press_env_cfg(
     *,
     experiment_config: ExperimentConfig,
     policy_contract: PolicyContract | None = None,
-    use_training_reset_distribution: bool = False,
 ) -> SwitchPressEnvCfg:
     """Build the press task from one immutable resolved experiment config."""
     vehicle = _training_vehicle(experiment_config)
     rl = experiment_config.rl
     reset = rl.press.reset
-    if (
-        policy_contract is not None
-        and policy_contract.curriculum_stage != rl.press.curriculum_stage
-    ):
+    stage = rl.press.selected_stage()
+    if policy_contract is not None and policy_contract.curriculum_stage != stage.name:
         raise ValueError(
             f"press artifact stage {policy_contract.curriculum_stage!r} does not match "
-            f"configured stage {rl.press.curriculum_stage!r}"
+            f"configured stage {stage.name!r}"
         )
     policy_rate_hz = (
         rl.policy_rate_hz if policy_contract is None else policy_contract.policy_rate_hz
@@ -134,13 +122,12 @@ def make_switch_press_env_cfg(
     return SwitchPressEnvCfg(
         decimation=decimation,
         policy_rate_hz=policy_rate_hz,
-        episode_length_s=rl.episode_length_s,
+        episode_length_s=stage.episode_length_s,
         action_space=action_dim,
         observation_schema_version=OBSERVATION_SCHEMA_VERSION,
         observation_space=PRESS_OBSERVATION_DIM,
-        policy_interface="press-approach",
+        policy_interface="press",
         policy_config=rl.press.policy,
-        use_training_reset_distribution=use_training_reset_distribution,
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
@@ -212,6 +199,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         *,
         cfg: SwitchPressEnvCfg,
         experiment_config: ExperimentConfig,
+        flight_envelope: FlightEnvelope,
         policy_contract=None,
         render_mode: str | None = None,
         **kwargs,
@@ -229,20 +217,30 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 f"press task requires exactly one switch joint, found {len(switch_joint_ids)}"
             )
         self._switch_joint_id = int(switch_joint_ids[0])
+        self._flight_envelope = flight_envelope
+        self._stage = self._experiment_config.rl.press.selected_stage()
         stiffness = (
             self.switch.data.default_joint_stiffness[:, switch_joint_ids]
             * self._experiment_config.rl.press.reset.button_stiffness_scale
         )
         self.switch.write_joint_stiffness_to_sim(stiffness, joint_ids=switch_joint_ids)
-        relative_position, _ = self._relative_switch_pose()
+        relative_position, relative_quat_xyzw = self._relative_switch_pose()
+        position_error_enu_m, attitude_error_wxyz = self._hover_pose_errors(
+            relative_position=relative_position,
+            relative_quat_xyzw=relative_quat_xyzw,
+        )
         self._task_state = initial_press_approach_state(
-            relative_switch_range_m=relative_position[:, 0],
-            action=self.actions,
+            relative_switch_pos_m=relative_position,
+            relative_switch_quat_xyzw=relative_quat_xyzw,
+            goal_cfg=self._experiment_config.rl.press.goal,
+            flight_envelope=self._flight_envelope,
+            position_error_enu_m=position_error_enu_m,
+            attitude_error_flu_enu_wxyz=attitude_error_wxyz,
         )
         self._task_result: PressApproachResult[torch.Tensor] | None = None
-        self._training_hard_case_fraction = float(
-            self._experiment_config.rl.press.training_reset.hard_case_fraction
-        )
+        self._task_sample: PressApproachInput[torch.Tensor] | None = None
+        self._training_termination_cfg = self._experiment_config.rl.press.termination
+        self._training_hold_steps = round(self._stage.hold_s * self.cfg.policy_rate_hz)
         self._physics_substep_index = 0
         self._body_collision_latch = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
@@ -254,13 +252,29 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._body_collision_episode_count = torch.zeros((), device=self.device)
         self._pusher_collision_episode_count = torch.zeros((), device=self.device)
         self._flight_failure_episode_count = torch.zeros((), device=self.device)
+        self._crash_episode_count = torch.zeros((), device=self.device)
+        self._altitude_failure_episode_count = torch.zeros((), device=self.device)
+        self._range_undershoot_episode_count = torch.zeros((), device=self.device)
+        self._relative_envelope_episode_count = torch.zeros((), device=self.device)
         self._timeout_episode_count = torch.zeros((), device=self.device)
 
-    def set_training_hard_case_fraction(self, fraction: float, /) -> None:
-        """Change the reset mixture at an in-run curriculum boundary."""
-        if not 0.0 <= fraction <= 1.0:
-            raise ValueError("training hard-case fraction must be between 0 and 1")
-        self._training_hard_case_fraction = float(fraction)
+    def configure_training_phase(self, phase: RlTrainingPhaseConfig, phase_number: int, /) -> None:
+        """Apply the one task-specific phase setting through a narrow seam."""
+        range_min_m = phase.range_undershoot_min_m
+        if range_min_m is None:
+            raise ValueError("press training phases require range_undershoot_min_m")
+        strict_min = self._experiment_config.rl.press.goal.range_min_m
+        if not math.isfinite(range_min_m) or not 0.0 < range_min_m <= strict_min:
+            raise ValueError(
+                f"training range undershoot minimum must be positive and at most {strict_min} m"
+            )
+        self._training_termination_cfg = replace(
+            self._experiment_config.rl.press.termination,
+            range_undershoot_min_m=range_min_m,
+        )
+        self._training_hold_steps = round(
+            self._stage.training_hold_s[phase_number - 1] * self.cfg.policy_rate_hz
+        )
 
     @property
     def press_approach_result(self):
@@ -346,6 +360,20 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         relative_quat_xyzw = relative_quat_wxyz[:, [1, 2, 3, 0]]
         return relative_position, relative_quat_xyzw
 
+    def _hover_pose_errors(
+        self,
+        *,
+        relative_position: torch.Tensor,
+        relative_quat_xyzw: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        target_range = self._experiment_config.rl.press.goal.velocity_reference.range_center_m
+        target_relative = torch.zeros_like(relative_position)
+        target_relative[:, 0] = target_range
+        position_error = math_utils.quat_apply(
+            self._contact_frame_quat(), target_relative - relative_position
+        )
+        return position_error, relative_quat_xyzw[:, [3, 0, 1, 2]]
+
     def _collision_flag(self, *, sensor: ContactSensor) -> torch.Tensor:
         force_norm = torch.linalg.norm(sensor.data.net_forces_w, dim=-1)
         threshold = self._experiment_config.rl.press.termination.contact_force_threshold_n
@@ -377,41 +405,43 @@ class SwitchPressEnv(_FlightDirectRLEnv):
     def _sample(self, *, time_out: torch.Tensor) -> PressApproachInput[torch.Tensor]:
         self._latch_collision_sample()
         relative_position, relative_quat_xyzw = self._relative_switch_pose()
-        velocity_command_world = _normalized_action_to_controller_command(
-            self.actuation_params,
-            self.actions,
-            self.drone.data.root_quat_w,
-        )[:, :3]
+        position_error_enu_m, attitude_error_wxyz = self._hover_pose_errors(
+            relative_position=relative_position,
+            relative_quat_xyzw=relative_quat_xyzw,
+        )
         quat = self.drone.data.root_quat_w
         body_z_world_z = 1.0 - 2.0 * (quat[:, 1].square() + quat[:, 2].square())
         relative_quat_wxyz = relative_quat_xyzw[:, [3, 0, 1, 2]]
         return PressApproachInput(
             relative_switch_pos_m=relative_position,
+            relative_switch_quat_xyzw=relative_quat_xyzw,
+            position_error_enu_m=position_error_enu_m,
+            attitude_error_flu_enu_wxyz=attitude_error_wxyz,
             linear_velocity_mps=math_utils.quat_apply(
                 relative_quat_wxyz,
                 self.drone.data.root_lin_vel_b,
             ),
-            wall_normal_velocity_command_mps=math_utils.quat_apply_inverse(
-                self._contact_frame_quat(), velocity_command_world
-            )[:, 0],
             angular_velocity_radps=self.drone.data.root_ang_vel_b,
             body_z_world_z=body_z_world_z,
             altitude_m=self.drone.data.root_pos_w[:, 2],
             body_collision_flag=self._body_collision_latch.clone(),
             pusher_collision_flag=self._pusher_collision_latch.clone(),
-            action=self.actions,
             time_out=time_out,
         )
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         press = self._experiment_config.rl.press
+        self._task_sample = self._sample(time_out=time_out)
         self._task_result = step_press_approach(
             state=self._task_state,
-            sample=self._sample(time_out=time_out),
+            sample=self._task_sample,
             goal_cfg=press.goal,
             reward_cfg=press.reward,
-            termination_cfg=press.termination,
+            termination_cfg=self._training_termination_cfg,
+            flight_envelope=self._flight_envelope,
+            hold_steps=self._training_hold_steps,
+            approach_enabled=self._stage.name == "approach",
         )
         result = self._task_result
         self._task_state = result.state
@@ -420,7 +450,11 @@ class SwitchPressEnv(_FlightDirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         if self._task_result is None:
             raise RuntimeError("press transition must advance in _get_dones before rewards")
+        if self._task_sample is None:
+            raise RuntimeError("press sample must exist before rewards")
         result = self._task_result
+        sample = self._task_sample
+        goal = self._experiment_config.rl.press.goal
         ended = self.reset_buf
         collision = result.termination.collision
         self._completed_episode_count += ended.count_nonzero()
@@ -435,27 +469,105 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._flight_failure_episode_count += (
             ended & result.termination.flight_failure & ~collision
         ).count_nonzero()
+        self._crash_episode_count += (ended & result.termination.crash).count_nonzero()
+        self._altitude_failure_episode_count += (
+            ended & result.termination.altitude
+        ).count_nonzero()
+        self._range_undershoot_episode_count += (
+            ended & result.termination.range_undershoot
+        ).count_nonzero()
+        self._relative_envelope_episode_count += (
+            ended & result.termination.relative_envelope
+        ).count_nonzero()
         self._timeout_episode_count += (ended & result.termination.time_out).count_nonzero()
         episode_denominator = self._completed_episode_count.clamp_min(1.0)
         self.extras["log"] = {
-            "Press/completed_episodes": self._completed_episode_count,
-            "Press/success_percent": 100.0 * self._successful_episode_count / episode_denominator,
-            "Press/collision_percent": 100.0 * self._collision_episode_count / episode_denominator,
-            "Press/body_collision_percent": 100.0
-            * self._body_collision_episode_count
-            / episode_denominator,
-            "Press/pusher_collision_percent": 100.0
-            * self._pusher_collision_episode_count
-            / episode_denominator,
-            "Press/flight_failure_percent": 100.0
-            * self._flight_failure_episode_count
-            / episode_denominator,
-            "Press/timeout_percent": 100.0 * self._timeout_episode_count / episode_denominator,
+            "train/outcome/completed_episodes": self._completed_episode_count,
+            "train/outcome/success_rate": (self._successful_episode_count / episode_denominator),
+            "train/outcome/collision_rate": (self._collision_episode_count / episode_denominator),
+            "train/outcome/body_collision_rate": (
+                self._body_collision_episode_count / episode_denominator
+            ),
+            "train/outcome/pusher_collision_rate": (
+                self._pusher_collision_episode_count / episode_denominator
+            ),
+            "train/outcome/flight_failure_rate": (
+                self._flight_failure_episode_count / episode_denominator
+            ),
+            "train/outcome/timeout_rate": (self._timeout_episode_count / episode_denominator),
+            "train/outcome/crash_rate": (self._crash_episode_count / episode_denominator),
+            "train/outcome/altitude_failure_rate": (
+                self._altitude_failure_episode_count / episode_denominator
+            ),
+            "train/outcome/range_undershoot_rate": (
+                self._range_undershoot_episode_count / episode_denominator
+            ),
+            "train/outcome/relative_envelope_failure_rate": (
+                self._relative_envelope_episode_count / episode_denominator
+            ),
+            "train/goal/range_pass_rate": (
+                (sample.relative_switch_pos_m[:, 0] >= goal.range_min_m)
+                & (sample.relative_switch_pos_m[:, 0] <= goal.range_max_m)
+            )
+            .float()
+            .mean(),
+            "train/goal/alignment_pass_rate": (
+                torch.linalg.vector_norm(sample.relative_switch_pos_m[:, 1:3], dim=-1)
+                <= goal.alignment_error_max_m
+            )
+            .float()
+            .mean(),
+            "train/goal/attitude_pass_rate": (
+                quaternion_geodesic_error_rad(quaternion_xyzw=sample.relative_switch_quat_xyzw)
+                <= goal.relative_attitude_error_max_rad
+            )
+            .float()
+            .mean(),
+            "train/goal/linear_speed_pass_rate": (
+                torch.linalg.vector_norm(sample.linear_velocity_mps, dim=-1)
+                <= goal.linear_speed_max_mps
+            )
+            .float()
+            .mean(),
+            "train/goal/angular_speed_pass_rate": (
+                torch.linalg.vector_norm(sample.angular_velocity_radps, dim=-1)
+                <= goal.angular_speed_max_radps
+            )
+            .float()
+            .mean(),
+            "train/goal/contact_clear_pass_rate": result.contact_clear.float().mean(),
+            "train/goal/complete_pass_rate": result.strict_goal.float().mean(),
+            "train/goal/mean_dwell_fraction": (
+                result.state.stable_goal_steps.float().mean() / self._training_hold_steps
+            ),
+            "train/goal/maximum_dwell_fraction": (
+                result.state.stable_goal_steps.max().float() / self._training_hold_steps
+            ),
         }
         self.extras["log"].update(
             {
-                f"Reward/{name}": getattr(result.rewards, name).mean()
+                f"train/reward/{name}": getattr(result.rewards, name).mean()
                 for name in _TRAINING_REWARD_TERMS
+            }
+        )
+        self.extras["log"].update(
+            {
+                "train/reward/per_step_mean": result.rewards.total.mean(),
+                "train/state/mean_range_error_m": result.range_error_m.mean(),
+                "train/state/mean_alignment_error_m": result.alignment_error_m.mean(),
+                "train/state/mean_attitude_error_rad": result.attitude_error_rad.mean(),
+                "train/state/mean_linear_speed_mps": result.linear_speed_mps.mean(),
+                "train/state/mean_angular_speed_radps": result.angular_speed_radps.mean(),
+                "train/state/mean_normalized_pose_error": (
+                    result.state.normalized_pose_error.mean()
+                ),
+                "train/state/flight_envelope_pass_rate": result.envelope.inside.float().mean(),
+                "train/state/mean_position_envelope_utilization": (
+                    result.envelope.position_utilization.mean()
+                ),
+                "train/state/mean_attitude_envelope_utilization": (
+                    result.envelope.attitude_utilization.mean()
+                ),
             }
         )
         return result.rewards.total
@@ -488,7 +600,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             lamp_state=zeros,
             lamp_confidence=ones,
             lamp_age_s=zeros,
-            previous_action=self._task_state.previous_action,
+            previous_action=self.actions,
             handoff_mode=ones,
             estimator_health=ones,
             obs_mask=torch.full_like(ones, mask),
@@ -503,29 +615,48 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         switch_position = self.switch.data.default_root_state[env_ids, :3]
         switch_position = switch_position + self.scene.env_origins[env_ids]
         count = len(env_ids)
-        if self.cfg.use_training_reset_distribution:
-            wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
-                _press_training_entry_state_from_unit_samples(
-                    unit_samples=torch.rand((count, 10), device=self.device),
-                    gate=handoff_gate,
-                    training_reset=self._experiment_config.rl.press.training_reset,
-                    hard_case_fraction=self._training_hard_case_fraction,
-                )
-            )
-        else:
-            wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
-                _press_entry_state_from_unit_samples(
-                    unit_samples=torch.rand((count, 9), device=self.device),
-                    gate=handoff_gate,
-                )
-            )
+        navigation = _press_entry_state_from_unit_samples(
+            unit_samples=torch.rand((count, 12), device=self.device),
+            gate=handoff_gate,
+        )
+        position_error_enu_m, hover_quat_wxyz = _hover_pose_from_unit_samples(
+            unit_samples=torch.rand((count, 6), device=self.device),
+            envelope=self._flight_envelope,
+        )
+        target_range = self._experiment_config.rl.press.goal.velocity_reference.range_center_m
+        contact_quat = self._contact_frame_quat()[env_ids]
+        position_error_contact = math_utils.quat_apply_inverse(contact_quat, position_error_enu_m)
+        hover_wall_normal = target_range - position_error_contact[:, 0]
+        hover_lateral_vertical = -position_error_contact[:, 1:3]
+        reset_weights = {source.source: source.weight for source in self._stage.reset_mix}
+        unknown_sources = reset_weights.keys() - {
+            "measured_navigation_handoff",
+            "pinned_flight_envelope",
+        }
+        if unknown_sources:
+            raise ValueError(f"unsupported press reset sources: {sorted(unknown_sources)}")
+        navigation_mask = torch.rand(count, device=self.device) < reset_weights.get(
+            "measured_navigation_handoff", 0.0
+        )
+        wall_normal = torch.where(navigation_mask, navigation[0], hover_wall_normal)
+        lateral_vertical = torch.where(
+            navigation_mask[:, None], navigation[1], hover_lateral_vertical
+        )
+        linear_velocity_contact = torch.where(
+            navigation_mask[:, None], navigation[2], torch.zeros_like(navigation[2])
+        )
+        angular_velocity = torch.where(
+            navigation_mask[:, None], navigation[3], torch.zeros_like(navigation[3])
+        )
+        relative_quat_wxyz = torch.where(navigation_mask[:, None], navigation[4], hover_quat_wxyz)
         root_state = self.drone.data.default_root_state[env_ids].clone()
         root_state[:, :3] = switch_position - torch.cat(
             (wall_normal[:, None], lateral_vertical),
             dim=-1,
         )
+        root_state[:, 3:7] = math_utils.quat_mul(contact_quat, relative_quat_wxyz)
         root_state[:, 7:10] = math_utils.quat_apply(
-            self._contact_frame_quat()[env_ids],
+            contact_quat,
             linear_velocity_contact,
         )
         root_state[:, 10:13] = angular_velocity
@@ -541,8 +672,25 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             self._task_state = reset_press_approach_state(
                 state=self._task_state,
                 env_ids=env_ids,
-                relative_switch_range_m=wall_normal,
-                action=torch.zeros((count, self.cfg.action_space), device=self.device),
+                relative_switch_pos_m=torch.cat((wall_normal[:, None], lateral_vertical), dim=-1),
+                relative_switch_quat_xyzw=relative_quat_wxyz[:, [1, 2, 3, 0]],
+                goal_cfg=self._experiment_config.rl.press.goal,
+                flight_envelope=self._flight_envelope,
+                position_error_enu_m=math_utils.quat_apply(
+                    contact_quat,
+                    torch.cat(
+                        (
+                            torch.full_like(
+                                wall_normal[:, None],
+                                self._experiment_config.rl.press.goal.velocity_reference.range_center_m,
+                            )
+                            - wall_normal[:, None],
+                            -lateral_vertical,
+                        ),
+                        dim=-1,
+                    ),
+                ),
+                attitude_error_flu_enu_wxyz=relative_quat_wxyz,
             )
             self._body_collision_latch[env_ids] = False
             self._pusher_collision_latch[env_ids] = False
