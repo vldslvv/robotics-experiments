@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: TWENTIETH SCRATCH SELECTION REJECTED; LOWER ONE-SIDED WEIGHT NEXT
+Status: TWENTY-FIRST SCRATCH SELECTION REJECTED; EARLY HARD EXAMPLES NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -35,6 +35,7 @@ are unsupported.
 | `20260811T120750Z-scratch-wall-normal-command-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus wall-normal command tracking 10 | Iteration 140 selected; score -0.509376, 96.0% success, advisory rejected | Coarse-test wall-normal weight 30 before changing the target or curriculum |
 | `20260811T123932Z-scratch-wall-normal-command-w30` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus wall-normal command tracking 30 | Iteration 140 selected; score -0.796698, 89.3% success, advisory rejected | Stop the symmetric-weight sweep and supervise only evidenced retreat commands |
 | `20260811T131001Z-scratch-one-sided-braking-w100` | `20260810T-accepted-reproduction` | Same scratch schedule; one-sided retreat-command supervision at weight 100 | Iteration 140 selected; score -0.491165, 96.3% success, advisory rejected | Reduce the oscillating one-sided gradient to weight 30 |
+| `20260811T133733Z-scratch-one-sided-braking-w30` | `20260810T-accepted-reproduction` | Same scratch schedule; one-sided retreat-command supervision at weight 30 | Iteration 130 selected; score -0.480194, 96.7% success, advisory rejected | Stop the reward-weight sweep and introduce difficult starts during phase 1 |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1144,3 +1145,38 @@ evidenced sign error while reducing the phase-2 oscillation by more than three
 times. If weight 30 preserves high success and lowers the failure count, refine
 the supported bracket. If it merely returns to the existing plateau, stop
 fitting the reward scalar and change the in-run hard-case learning schedule.
+
+### 38. Lower braking weight nearly restores the frontier but not acceptance
+
+Date: 2026-08-11.
+
+Plain-language view: The lighter braking lesson avoids the worst oscillations
+and gets close to the strongest policy again, but it does not remove the final
+range crossings. The policy sees difficult boundary starts too abruptly and
+too late; introduce a small fraction during its main learning phase.
+
+Technical view: Run
+`20260811T133733Z-scratch-one-sided-braking-w30` started from clean source
+commit `278db1d`, a new network, and a new optimizer. It changed only the
+one-sided braking-command weight from 100 to 30. Training completed 152 updates
+in 934.7 seconds and evaluator revision 7 scored all 11 checkpoints fresh in
+459.6 seconds.
+
+Model 130 was selected with score -0.480194, 96.67% success, 3.33% other
+flight failure, zero collision and timeout, 0.41476 m mean closest range, and
+0.39814 m minimum closest range. Its mean braking-command contribution was
+only -0.000788 per active step. Model 120 starts at 89.0% success and 11.0%
+failure; model 125 falls to 77.33% and 22.67%; model 130 recovers sharply;
+models 135 through 150 then range from 86.33% to 95.0% success. The lower
+weight reduces but does not remove hard-phase instability. It neither beats
+the 97.0%/3.0% frontier nor changes the first failed boundary, so further
+reward-weight refinement is unsupported.
+
+Keep one-sided weight 30 and introduce a 10% difficult-reset fraction during
+the 121-update main phase, followed by the existing 40% hard phase. This keeps
+90% of the proven easy curriculum while providing boundary-action gradients
+before the abrupt update-121 transition. Preserve both learning rates,
+iteration counts, controller, reward semantics, held-out distribution, and
+exact gates. If early exposure improves the exact failure count without losing
+success, refine the curriculum fraction; otherwise replace the abrupt two-step
+schedule with a graduated intermediate phase.
