@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: FIFTH SCRATCH SELECTION REJECTED; EVALUATION CACHE PENDING
+Status: FIFTH SCRATCH SELECTION REJECTED; EVALUATION CACHE IMPLEMENTED
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -316,3 +316,30 @@ controller, policy, environment, seed, and threshold contract. Cache reuse is
 only a selection optimization; final independent evaluation remains fresh and
 uncached. After verification, test the existing 50% upper reset-mixture bracket
 because 40% improved success but left the undershoot rate unchanged.
+
+### 12. Deduplicate byte-identical held-out checkpoints
+
+Date: 2026-08-11.
+
+Plain-language view: Repeated scratch runs intentionally reproduce a long
+common training prefix. Do not fly the same policy through the same statistical
+selection workload again when its checkpoint bytes and every evaluation input
+are identical. Reuse that selection measurement and keep the final independent
+acceptance run fresh.
+
+Technical view: Add a transient content-addressed cache under
+`.build/training/<policy>/.evaluation-cache`. Its key includes checkpoint
+SHA-256, policy comparison fingerprint, controller digest, and an explicit
+press-evaluator revision. The comparison fingerprint already owns the policy
+interface, observation, task, scene, vehicle, physics, goal, reset, handoff,
+termination, held-out seeds, episode count, weights, and thresholds. Cache
+payloads retain metrics, margins, reward means, acceptance, source run, and
+source iteration; current reports identify each candidate's evaluation source
+as `fresh` or `cache`.
+
+At selection startup, same-fingerprint and same-controller reports seed missing
+entries, so the next run benefits without a sacrificial reevaluation. Invalid
+cache entries emit a warning and fall back to a fresh evaluation. The cache is
+never consulted by `eval_press.py`, PX4 transfer, or deployment. Host tests
+cover content and controller isolation, cached selection without environment
+execution, report seeding, and iteration-local ranking reconstruction.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -33,6 +34,7 @@ from robotics_experiments.rl.training.selection import (
     CheckpointCandidate,
     CheckpointSelection,
     MetricValue,
+    RewardMean,
     enumerate_checkpoints,
     publish_policy_labels,
     select_checkpoint,
@@ -47,6 +49,9 @@ _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
 _REPORT_SCHEMA_VERSION = 1
+_EVALUATION_CACHE_DIRNAME = ".evaluation-cache"
+_EVALUATION_CACHE_SCHEMA_VERSION = 1
+_PRESS_EVALUATOR_REVISION = 1
 
 
 class _ActorCritic(Protocol):
@@ -112,6 +117,213 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _evaluation_cache_location(
+    *,
+    checkpoint: Path,
+    cache_dir: Path,
+    comparison_fingerprint: str,
+    controller_digest: str,
+) -> tuple[Path, str]:
+    checkpoint_digest = _file_sha256(checkpoint)
+    contract = {
+        "evaluator_revision": _PRESS_EVALUATOR_REVISION,
+        "checkpoint_digest": checkpoint_digest,
+        "comparison_fingerprint": comparison_fingerprint,
+        "controller_digest": controller_digest,
+    }
+    encoded = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
+    return cache_dir / f"{hashlib.sha256(encoded).hexdigest()}.json", checkpoint_digest
+
+
+def _evaluation_record(evaluation: CandidateEvaluation) -> dict[str, Any]:
+    return {
+        "advisory_accepted": evaluation.accepted,
+        "evaluation_source": evaluation.source,
+        "metrics": {metric.name: metric.value for metric in evaluation.metrics},
+        "normalized_margins": list(evaluation.normalized_margins),
+        "ranking_values": list(evaluation.ranking_values),
+        "reward_means": {reward.name: reward.mean for reward in evaluation.reward_means},
+    }
+
+
+def _evaluation_from_record(
+    *,
+    candidate: CheckpointCandidate,
+    record: dict[str, Any],
+    source: str,
+) -> CandidateEvaluation:
+    accepted = record.get("advisory_accepted")
+    metrics = record.get("metrics")
+    normalized_margins = record.get("normalized_margins")
+    ranking_values = record.get("ranking_values")
+    reward_means = record.get("reward_means")
+    if type(accepted) is not bool:
+        raise ValueError("candidate evaluation accepted flag must be boolean")
+    if not isinstance(metrics, dict) or not isinstance(reward_means, dict):
+        raise ValueError("candidate evaluation metrics and reward means must be objects")
+    if not isinstance(normalized_margins, list) or not isinstance(ranking_values, list):
+        raise ValueError("candidate evaluation margins and ranking values must be lists")
+    if len(ranking_values) != 2:
+        raise ValueError("candidate evaluation must contain score and iteration ranking values")
+    score = ranking_values[0]
+    if not isinstance(score, int | float) or isinstance(score, bool) or not math.isfinite(score):
+        raise ValueError("candidate evaluation score must be finite")
+    return CandidateEvaluation(
+        candidate=candidate,
+        accepted=accepted,
+        metrics=tuple(MetricValue(str(name), value) for name, value in metrics.items()),
+        normalized_margins=tuple(float(value) for value in normalized_margins),
+        ranking_values=(float(score), -candidate.iteration),
+        reward_means=tuple(
+            RewardMean(str(name), float(value)) for name, value in reward_means.items()
+        ),
+        source=source,
+    )
+
+
+def _write_cached_evaluation(
+    *,
+    cache_path: Path,
+    evaluation: CandidateEvaluation,
+    checkpoint_digest: str,
+    source_run_id: str,
+) -> None:
+    payload = {
+        "schema_version": _EVALUATION_CACHE_SCHEMA_VERSION,
+        "checkpoint_digest": checkpoint_digest,
+        "source_run_id": source_run_id,
+        "evaluation": _evaluation_record(evaluation),
+    }
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix=f".{cache_path.stem}.",
+        suffix=".tmp",
+        dir=cache_path.parent,
+        delete=False,
+    ) as stream:
+        json.dump(payload, stream, indent=2, allow_nan=False)
+        stream.write("\n")
+        temp_path = Path(stream.name)
+    temp_path.replace(cache_path)
+
+
+def _read_cached_evaluation(
+    *,
+    candidate: CheckpointCandidate,
+    cache_dir: Path,
+    comparison_fingerprint: str,
+    controller_digest: str,
+) -> tuple[CandidateEvaluation | None, str, Path, str]:
+    cache_path, checkpoint_digest = _evaluation_cache_location(
+        checkpoint=candidate.path,
+        cache_dir=cache_dir,
+        comparison_fingerprint=comparison_fingerprint,
+        controller_digest=controller_digest,
+    )
+    if not cache_path.is_file():
+        return None, checkpoint_digest, cache_path, ""
+    try:
+        payload = json.loads(cache_path.read_text())
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != _EVALUATION_CACHE_SCHEMA_VERSION
+            or payload.get("checkpoint_digest") != checkpoint_digest
+            or not isinstance(payload.get("evaluation"), dict)
+        ):
+            raise ValueError("evaluation cache entry has an invalid contract")
+        evaluation = _evaluation_from_record(
+            candidate=candidate,
+            record=payload["evaluation"],
+            source="cache",
+        )
+        source_run_id = payload.get("source_run_id")
+        if not isinstance(source_run_id, str) or not source_run_id:
+            raise ValueError("evaluation cache source run must be non-empty")
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        _report(f"WARNING: ignoring invalid evaluation cache {cache_path.name}: {exc}")
+        return None, checkpoint_digest, cache_path, ""
+    return evaluation, checkpoint_digest, cache_path, source_run_id
+
+
+def _prime_evaluation_cache(
+    *,
+    policy_root: Path,
+    cache_dir: Path,
+    comparison_fingerprint: str,
+    controller_digest: str,
+) -> int:
+    primed = 0
+    for prior_run_dir in policy_root.iterdir():
+        if not prior_run_dir.is_dir() or prior_run_dir.is_symlink():
+            continue
+        report_path = prior_run_dir / _REPORT_FILENAME
+        if not report_path.is_file():
+            continue
+        try:
+            prior_metadata = load_policy_metadata(artifact_dir=prior_run_dir)
+            report = json.loads(report_path.read_text())
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        if (
+            not isinstance(report, dict)
+            or report.get("schema_version") != _REPORT_SCHEMA_VERSION
+            or report.get("comparison_fingerprint") != comparison_fingerprint
+            or prior_metadata.controller_digest != controller_digest
+        ):
+            continue
+        records = report.get("candidates")
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict) or record.get("evaluated") is not True:
+                continue
+            iteration = record.get("iteration")
+            relative_checkpoint = record.get("checkpoint")
+            if type(iteration) is not int or not isinstance(relative_checkpoint, str):
+                continue
+            relative_path = Path(relative_checkpoint)
+            if relative_path.is_absolute() or ".." in relative_path.parts:
+                continue
+            checkpoint = prior_run_dir / relative_path
+            if not checkpoint.is_file():
+                continue
+            candidate = CheckpointCandidate(iteration=iteration, path=checkpoint)
+            try:
+                evaluation = _evaluation_from_record(
+                    candidate=candidate,
+                    record=record,
+                    source="fresh",
+                )
+                cache_path, checkpoint_digest = _evaluation_cache_location(
+                    checkpoint=checkpoint,
+                    cache_dir=cache_dir,
+                    comparison_fingerprint=comparison_fingerprint,
+                    controller_digest=controller_digest,
+                )
+                if cache_path.exists():
+                    continue
+                _write_cached_evaluation(
+                    cache_path=cache_path,
+                    evaluation=evaluation,
+                    checkpoint_digest=checkpoint_digest,
+                    source_run_id=prior_run_dir.name,
+                )
+            except (OSError, TypeError, ValueError):
+                continue
+            primed += 1
+    return primed
+
+
 def _press_evaluation(
     *,
     candidate: CheckpointCandidate,
@@ -156,6 +368,58 @@ def _press_evaluation(
         f"pusher_collision={summary.pusher_collision_rate:.3f} "
         f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
         f"timeout={summary.timeout_rate:.3f}"
+    )
+    return evaluation
+
+
+def _press_evaluation_with_cache(
+    *,
+    candidate: CheckpointCandidate,
+    runner: _Runner,
+    env: _SelectionEnvironment,
+    seeds: tuple[int, ...],
+    episodes_per_seed: int,
+    evaluation_config: PressApproachEvaluationConfig,
+    goal_config: PressApproachGoalConfig,
+    device: str,
+    cache_dir: Path,
+    comparison_fingerprint: str,
+    controller_digest: str,
+    source_run_id: str,
+) -> CandidateEvaluation:
+    cached, checkpoint_digest, cache_path, cached_source_run_id = _read_cached_evaluation(
+        candidate=candidate,
+        cache_dir=cache_dir,
+        comparison_fingerprint=comparison_fingerprint,
+        controller_digest=controller_digest,
+    )
+    if cached is not None:
+        metrics = {metric.name: metric.value for metric in cached.metrics}
+        _report(
+            f"checkpoint selection iteration={candidate.iteration} CACHE_HIT "
+            f"source={cached_source_run_id} "
+            f"advisory_accepted={str(cached.accepted).lower()} "
+            f"score={cached.ranking_values[0]:.6f} "
+            f"success={metrics['approach_success_rate']:.3f} "
+            f"other_flight_failure={metrics['other_flight_failure_rate']:.3f} "
+            f"timeout={metrics['timeout_rate']:.3f}"
+        )
+        return cached
+    evaluation = _press_evaluation(
+        candidate=candidate,
+        runner=runner,
+        env=env,
+        seeds=seeds,
+        episodes_per_seed=episodes_per_seed,
+        evaluation_config=evaluation_config,
+        goal_config=goal_config,
+        device=device,
+    )
+    _write_cached_evaluation(
+        cache_path=cache_path,
+        evaluation=evaluation,
+        checkpoint_digest=checkpoint_digest,
+        source_run_id=source_run_id,
     )
     return evaluation
 
@@ -297,13 +561,7 @@ def _selection_report(
             "evaluated": evaluation is not None,
         }
         if evaluation is not None:
-            record |= {
-                "advisory_accepted": evaluation.accepted,
-                "metrics": {metric.name: metric.value for metric in evaluation.metrics},
-                "normalized_margins": list(evaluation.normalized_margins),
-                "ranking_values": list(evaluation.ranking_values),
-                "reward_means": {reward.name: reward.mean for reward in evaluation.reward_means},
-            }
+            record |= _evaluation_record(evaluation)
         candidates.append(record)
     return {
         "schema_version": _REPORT_SCHEMA_VERSION,
@@ -337,6 +595,10 @@ def _select_candidates(
     evaluation_config: PressApproachEvaluationConfig,
     goal_config: PressApproachGoalConfig,
     device: str,
+    cache_dir: Path,
+    comparison_fingerprint: str,
+    controller_digest: str,
+    source_run_id: str,
 ) -> CheckpointSelection:
     scorer = None
     selection_method = "final-no-scorer"
@@ -346,7 +608,7 @@ def _select_candidates(
             scorer_candidates: tuple[CheckpointCandidate, ...],
         ) -> tuple[CandidateEvaluation, ...]:
             return tuple(
-                _press_evaluation(
+                _press_evaluation_with_cache(
                     candidate=candidate,
                     runner=runner,
                     env=env,
@@ -355,6 +617,10 @@ def _select_candidates(
                     evaluation_config=evaluation_config,
                     goal_config=goal_config,
                     device=device,
+                    cache_dir=cache_dir,
+                    comparison_fingerprint=comparison_fingerprint,
+                    controller_digest=controller_digest,
+                    source_run_id=source_run_id,
                 )
                 for candidate in scorer_candidates
             )
@@ -396,17 +662,10 @@ def _publish_selection(
             "selection_metric": selection.selection_method,
             "comparison_fingerprint": report["comparison_fingerprint"],
             "score": selected_evaluation.ranking_values[0],
-            "advisory_accepted": selected_evaluation.accepted,
             "seeds": report["seeds"],
             "episodes_per_seed": report["episodes_per_seed"],
             "thresholds": report["thresholds"],
-            "metrics": {metric.name: metric.value for metric in selected_evaluation.metrics},
-            "normalized_margins": list(selected_evaluation.normalized_margins),
-            "ranking_values": list(selected_evaluation.ranking_values),
-            "reward_means": {
-                reward.name: reward.mean for reward in selected_evaluation.reward_means
-            },
-        }
+        } | _evaluation_record(selected_evaluation)
     training.load_checkpoint(
         runner=runner,
         checkpoint_path=selection.selected.path,
@@ -464,6 +723,16 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     env_seed = seeds[0] if seeds else int(training_config.seed)
     num_envs = evaluation.episodes_per_seed if is_press else 1
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    cache_dir = policy_root / _EVALUATION_CACHE_DIRNAME
+    if comparison_fingerprint is not None:
+        primed = _prime_evaluation_cache(
+            policy_root=policy_root,
+            cache_dir=cache_dir,
+            comparison_fingerprint=comparison_fingerprint,
+            controller_digest=policy_metadata.controller_digest,
+        )
+        if primed:
+            _report(f"checkpoint evaluation cache primed entries={primed}")
     env, env_cfg = make_isaac_lab_env(
         task_id=training_config.task_id,
         experiment_config=config,
@@ -500,6 +769,10 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             evaluation_config=evaluation,
             goal_config=config.rl.press.goal,
             device=device,
+            cache_dir=cache_dir,
+            comparison_fingerprint=comparison_fingerprint or "",
+            controller_digest=policy_metadata.controller_digest,
+            source_run_id=run_id,
         )
         report = _selection_report(
             selection=selection,

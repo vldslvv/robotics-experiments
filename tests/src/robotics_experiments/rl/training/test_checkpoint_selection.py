@@ -311,18 +311,25 @@ def test_selector_publishes_best_rejected_fallback() -> None:
 
 def test_press_selection_evaluates_every_candidate_with_one_environment(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     selector = _load_selector_module()
     candidates = tuple(
-        CheckpointCandidate(iteration, Path(f"model_{iteration}.pt")) for iteration in (0, 50, 299)
+        CheckpointCandidate(iteration, tmp_path / f"model_{iteration}.pt")
+        for iteration in (0, 50, 299)
     )
+    for candidate in candidates:
+        candidate.path.write_bytes(str(candidate.iteration).encode())
     calls = []
 
     def fake_evaluate(**kwargs):
         calls.append(kwargs)
-        return _evaluation(
-            selector=selector,
-            iteration=kwargs["candidate"].iteration,
+        return replace(
+            _evaluation(
+                selector=selector,
+                iteration=kwargs["candidate"].iteration,
+            ),
+            candidate=kwargs["candidate"],
         )
 
     monkeypatch.setattr(selector, "_press_evaluation", fake_evaluate)
@@ -340,10 +347,167 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
         ),
         goal_config=SimpleNamespace(range_min_m=0.40),
         device="cuda:0",
+        cache_dir=tmp_path / "cache",
+        comparison_fingerprint="comparison",
+        controller_digest="controller",
+        source_run_id="current",
     )
     assert [call["candidate"] for call in calls] == list(candidates)
     assert all(call["seeds"] == (101, 202, 303) for call in calls)
     assert selection.selected in candidates
+
+
+def test_press_evaluation_cache_is_content_and_contract_addressed(tmp_path: Path) -> None:
+    selector = _load_selector_module()
+    checkpoint = tmp_path / "model_10.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    candidate = CheckpointCandidate(10, checkpoint)
+    evaluation = _evaluation(selector=selector, iteration=10)
+    cache_dir = tmp_path / "cache"
+    cache_path, checkpoint_digest = selector._evaluation_cache_location(  # noqa: SLF001
+        checkpoint=checkpoint,
+        cache_dir=cache_dir,
+        comparison_fingerprint="comparison",
+        controller_digest="controller",
+    )
+    selector._write_cached_evaluation(  # noqa: SLF001
+        cache_path=cache_path,
+        evaluation=evaluation,
+        checkpoint_digest=checkpoint_digest,
+        source_run_id="source",
+    )
+
+    cached, digest, path, source = selector._read_cached_evaluation(  # noqa: SLF001
+        candidate=candidate,
+        cache_dir=cache_dir,
+        comparison_fingerprint="comparison",
+        controller_digest="controller",
+    )
+    assert cached is not None
+    assert cached.source == "cache"
+    assert cached.ranking_values == (evaluation.ranking_values[0], -10)
+    assert digest == checkpoint_digest
+    assert path == cache_path
+    assert source == "source"
+
+    miss, *_rest = selector._read_cached_evaluation(  # noqa: SLF001
+        candidate=candidate,
+        cache_dir=cache_dir,
+        comparison_fingerprint="comparison",
+        controller_digest="different-controller",
+    )
+    assert miss is None
+
+
+def test_press_selection_reuses_cached_evaluation(monkeypatch, tmp_path: Path) -> None:
+    selector = _load_selector_module()
+    checkpoint = tmp_path / "model_10.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    candidate = CheckpointCandidate(10, checkpoint)
+    evaluation = _evaluation(selector=selector, iteration=10)
+    cache_dir = tmp_path / "cache"
+    cache_path, checkpoint_digest = selector._evaluation_cache_location(  # noqa: SLF001
+        checkpoint=checkpoint,
+        cache_dir=cache_dir,
+        comparison_fingerprint="comparison",
+        controller_digest="controller",
+    )
+    selector._write_cached_evaluation(  # noqa: SLF001
+        cache_path=cache_path,
+        evaluation=evaluation,
+        checkpoint_digest=checkpoint_digest,
+        source_run_id="source",
+    )
+    monkeypatch.setattr(
+        selector,
+        "_press_evaluation",
+        lambda **_kwargs: pytest.fail("cache hit must not run the environment"),
+    )
+
+    selection = selector._select_candidates(  # noqa: SLF001
+        policy_interface="press-approach",
+        candidates=(candidate,),
+        runner=object(),
+        env=object(),
+        seeds=(101, 202, 303),
+        evaluation_config=SimpleNamespace(
+            episodes_per_seed=100,
+            success_rate_min=0.95,
+            collision_rate_max=0.01,
+            selection_metric="held-out-press-task-quality",
+        ),
+        goal_config=SimpleNamespace(range_min_m=0.40),
+        device="cuda:0",
+        cache_dir=cache_dir,
+        comparison_fingerprint="comparison",
+        controller_digest="controller",
+        source_run_id="current",
+    )
+
+    assert selection.selected == candidate
+    assert selection.evaluations[0].source == "cache"
+
+
+def test_prior_same_contract_report_primes_evaluation_cache(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    selector = _load_selector_module()
+    policy_root = tmp_path / "press-approach"
+    prior_run = policy_root / "prior"
+    checkpoint = prior_run / "logs" / "model_10.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    evaluation = replace(
+        _evaluation(selector=selector, iteration=10),
+        candidate=CheckpointCandidate(10, checkpoint),
+    )
+    (prior_run / "checkpoint_selection.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "comparison_fingerprint": "comparison",
+                "candidates": [
+                    {
+                        "iteration": 10,
+                        "checkpoint": "logs/model_10.pt",
+                        "evaluated": True,
+                        "advisory_accepted": evaluation.accepted,
+                        "metrics": {metric.name: metric.value for metric in evaluation.metrics},
+                        "normalized_margins": list(evaluation.normalized_margins),
+                        "ranking_values": list(evaluation.ranking_values),
+                        "reward_means": {
+                            reward.name: reward.mean for reward in evaluation.reward_means
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(
+        selector,
+        "load_policy_metadata",
+        lambda **_kwargs: SimpleNamespace(controller_digest="controller"),
+    )
+    cache_dir = policy_root / ".evaluation-cache"
+
+    assert (
+        selector._prime_evaluation_cache(  # noqa: SLF001
+            policy_root=policy_root,
+            cache_dir=cache_dir,
+            comparison_fingerprint="comparison",
+            controller_digest="controller",
+        )
+        == 1
+    )
+    cached, *_rest = selector._read_cached_evaluation(  # noqa: SLF001
+        candidate=CheckpointCandidate(20, checkpoint),
+        cache_dir=cache_dir,
+        comparison_fingerprint="comparison",
+        controller_digest="controller",
+    )
+    assert cached is not None
+    assert cached.ranking_values == (evaluation.ranking_values[0], -20)
 
 
 def test_no_scorer_warns_and_selects_final_checkpoint() -> None:

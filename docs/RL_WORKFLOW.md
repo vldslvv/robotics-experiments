@@ -124,6 +124,13 @@ penalties for collision, flight failure, timeout, non-success, terminal range,
 trajectory alignment, velocity tracking, upright error, action change, and
 completion time.
 
+Held-out selection caches an evaluation by checkpoint content, comparison
+fingerprint, controller digest, and evaluator revision. Reports mark every
+candidate as `fresh` or `cache`; same-contract reports can seed the transient
+cache under `.build/training/<policy>/.evaluation-cache`. This avoids rerunning
+byte-identical scratch prefixes. Independent policy evaluation never uses this
+cache and remains the fresh acceptance proof.
+
 A policy artifact is exactly `policy.pt` plus `policy_meta.json`. Metadata uses
 the strict schema-1 `robotics-experiments-policy` contract and records policy
 interface, observation/action contracts, cadence, controller artifact and

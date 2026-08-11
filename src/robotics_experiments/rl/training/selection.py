@@ -61,6 +61,7 @@ class CandidateEvaluation:
     normalized_margins: tuple[float, ...]
     ranking_values: tuple[float, ...]
     reward_means: tuple[RewardMean, ...]
+    source: str = "fresh"
 
 
 @dataclass(frozen=True)
