@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: TWENTY-FIRST SCRATCH SELECTION REJECTED; EARLY HARD EXAMPLES NEXT
+Status: TWENTY-SECOND SCRATCH SELECTION REJECTED; GRADUATED HARD CURRICULUM NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -36,6 +36,7 @@ are unsupported.
 | `20260811T123932Z-scratch-wall-normal-command-w30` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus wall-normal command tracking 30 | Iteration 140 selected; score -0.796698, 89.3% success, advisory rejected | Stop the symmetric-weight sweep and supervise only evidenced retreat commands |
 | `20260811T131001Z-scratch-one-sided-braking-w100` | `20260810T-accepted-reproduction` | Same scratch schedule; one-sided retreat-command supervision at weight 100 | Iteration 140 selected; score -0.491165, 96.3% success, advisory rejected | Reduce the oscillating one-sided gradient to weight 30 |
 | `20260811T133733Z-scratch-one-sided-braking-w30` | `20260810T-accepted-reproduction` | Same scratch schedule; one-sided retreat-command supervision at weight 30 | Iteration 130 selected; score -0.480194, 96.7% success, advisory rejected | Stop the reward-weight sweep and introduce difficult starts during phase 1 |
+| `20260811T140551Z-scratch-early-hard10-braking-w30` | `20260810T-accepted-reproduction` | 121 updates at `1e-4` with 10% difficult resets, then 31 at `3e-5` with 40%; one-sided braking weight 30 | Iteration 130 selected; score -0.632643, 93.3% success, advisory rejected | Restore the proven easy phase and introduce difficult resets through a short graduated transition |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1180,3 +1181,40 @@ iteration counts, controller, reward semantics, held-out distribution, and
 exact gates. If early exposure improves the exact failure count without losing
 success, refine the curriculum fraction; otherwise replace the abrupt two-step
 schedule with a graduated intermediate phase.
+
+### 39. Early difficult starts disrupt the main learning phase
+
+Date: 2026-08-11.
+
+Plain-language view: Mixing boundary starts into the entire main phase makes
+the policy substantially less reliable. Keep the strong contact-free learning
+phase intact and teach the boundary through a short transition before the full
+hard phase.
+
+Technical view: Run
+`20260811T140551Z-scratch-early-hard10-braking-w30` started from clean source
+commit `201ce62`, a new network, and a new optimizer. It changed only the main
+phase difficult-reset fraction from zero to 10%, retaining the accepted
+controller, predictive reference, one-sided braking weight 30, learning rates,
+phase lengths, held-out seeds, and exact gates. Training completed 152 updates
+in 967.9 seconds and evaluator revision 7 scored all 11 checkpoints fresh in
+514.2 seconds.
+
+Model 130 was selected with score -0.632643, 93.33% success, 6.67% other
+flight failure, zero collision and timeout, 0.41475 m mean closest range, and
+0.39855 m minimum closest range. The end of the main phase already has only
+87.67% success and 12.33% failure at model 120. Models 125 through 150 then
+oscillate between 80.0% and 93.33% success with 6.67% to 20.0% failure. This is
+worse than both the 97.0%/3.0% strongest frontier and the immediately preceding
+96.67%/3.33% run. Difficult starts throughout the high-rate phase are therefore
+ruled out.
+
+Restore zero difficult resets for the 121-update main phase. Add a short
+intermediate phase with 20% difficult resets at `3e-5`, then enter the existing
+40% mixture at a lower `1e-5` learning rate. This preserves the proven
+contact-free representation, exposes boundary states without a single 0-to-40%
+distribution jump, and reduces destructive updates after full hard exposure.
+Keep the controller, rewards, observations, held-out distribution, gates, and
+single scratch optimizer lineage unchanged. If this still oscillates, inspect
+the intermediate and final checkpoint trajectory before changing either phase
+length or fraction.
