@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: FOURTEENTH SCRATCH SELECTION REJECTED; TRACKING MIDPOINT NEXT
+Status: FIFTEENTH SCRATCH SELECTION REJECTED; DIRECT COMMAND TARGET NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -29,6 +29,7 @@ are unsupported.
 | `20260811T090631Z-scratch-predictive-extended61` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 61 at `3e-5`; predictive horizon 0.4 s at weight 10 | Iteration 160 selected; score -0.472188, 96.67% success, advisory rejected | Stop extending and move prediction into the dense velocity reference |
 | `20260811T093944Z-scratch-predictive-reference400ms` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5`; 0.4 s predictive velocity reference | Iteration 135 selected; score -0.471879, 97.0% success, advisory rejected | Strengthen the evidenced but underweighted dense tracking target |
 | `20260811T100846Z-scratch-predictive-reference-vtrack900` | `20260810T-accepted-reproduction` | Same scratch schedule and predictive reference; velocity-tracking weight 900 | Iteration 145 selected; score -1.447104, 67.7% success, advisory rejected | Refine the overbraking bracket at weight 600 |
+| `20260811T103705Z-scratch-predictive-reference-vtrack600` | `20260810T-accepted-reproduction` | Same scratch schedule and predictive reference; velocity-tracking weight 600 | Iteration 135 selected; score -0.518753, 95.7% success, advisory rejected | Stop the scalar sweep and teach the physical velocity command directly |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -905,3 +906,45 @@ overbraking weight-900 result. If 600 restores high success but leaves the
 same three deterministic crossings, stop fitting this scalar and inspect the
 action/reference boundary for a structural training target. If it materially
 reduces failures, refine only the supported side of the bracket.
+
+### 32. Midpoint confirms an indirect credit-assignment boundary
+
+Date: 2026-08-11.
+
+Plain-language view: The midpoint learns to finish, but it does not learn the
+sign of the final braking command reliably. Stop making the indirect motion
+penalty larger and teach the policy the controller command it should issue.
+
+Technical view: Run
+`20260811T103705Z-scratch-predictive-reference-vtrack600` started from clean
+source commit `d67d695`, a new network, and a new optimizer. It kept the
+accepted controller, 0.4-second predictive reference, 121-plus-31 schedule,
+40% difficult-reset fraction, and exact held-out contract. Training completed
+152 updates in 934.1 seconds and all 11 checkpoints were evaluated fresh in
+437.4 seconds.
+
+Model 135 was selected with score -0.518753, 95.67% success, 4.33% other
+flight failure, zero collision and timeout, 0.41432 m mean closest range, and
+0.39862 m minimum closest range. The midpoint is worse than the weight-300
+frontier at 97.0% success and 3.0% failure. Models 125 and 130 both reach
+95.0% success with 5.0% failure, and models 140-150 regress. The scalar bracket
+is therefore exhausted rather than refined further.
+
+Independent evaluation reproduced the selected result exactly and preserved
+traces under `.build/docker/integration/eval-press.20260811T110113Z.562750`.
+At a final crossing, range falls from 0.40050 m to 0.39954 m while forward
+speed remains 0.0210 m/s and normalized wall-normal action is positive
+0.00316. With the 2.0 m/s action scale, this requests positive 0.0063 m/s even
+though the 0.4-second predictive reference requests approximately -0.029 m/s.
+The same sign error appears across seeds. The state-velocity loss describes the
+desired motion, but its gradient reaches the action only through the simulated
+controller and plant.
+
+Make one structural training change: retain the actual velocity-tracking term
+at its strongest weight-300 frontier and add a physical command-tracking term
+that compares the actor's three-axis velocity command directly with the same
+predictive target. Carry the physical command in `PressApproachInput` so the
+pure task remains independent of policy action scaling. Start the new term at
+weight 100; at the evidenced crossing this contributes roughly 0.12 per step
+and, unlike the state term, has a direct action gradient. Keep every other
+reward, controller, schedule, reset, held-out metric, and gate unchanged.
