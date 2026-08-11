@@ -364,8 +364,7 @@ def validate_policy_artifact(
     if not module_path.is_file() or not metadata_path.is_file():
         raise ValueError(
             f"policy artifact {artifact_dir} is missing {POLICY_FILENAME} or "
-            f"{METADATA_FILENAME}; train and select one first "
-            "(make train-rl, then make select-rl-checkpoint)"
+            f"{METADATA_FILENAME}; run make train-rl first"
         )
     return _load_metadata(artifact_dir=artifact_dir)
 
@@ -380,8 +379,7 @@ def load_policy(
     if not module_path.is_file():
         raise ValueError(
             f"policy artifact {artifact_dir} is missing {POLICY_FILENAME} or "
-            f"{METADATA_FILENAME}; train and select one first "
-            "(make train-rl, then make select-rl-checkpoint)"
+            f"{METADATA_FILENAME}; run make train-rl first"
         )
     metadata = _load_metadata(artifact_dir=artifact_dir)
     contract = metadata.contract

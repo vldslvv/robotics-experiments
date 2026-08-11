@@ -249,8 +249,10 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.training.phases must contain at least one phase")
     for index, phase in enumerate(training.phases):
         path = f"rl.training.phases[{index}]"
-        if phase.iterations <= 0 or phase.save_interval <= 0:
-            raise ValueError(f"{path} iterations and save_interval must be positive")
+        if phase.max_iterations <= 0 or phase.evaluation_interval <= 0:
+            raise ValueError(f"{path} max_iterations and evaluation_interval must be positive")
+        if phase.evaluation_interval > phase.max_iterations:
+            raise ValueError(f"{path}.evaluation_interval must not exceed max_iterations")
         if not math.isfinite(phase.learning_rate) or phase.learning_rate <= 0.0:
             raise ValueError(f"{path}.learning_rate must be finite and positive")
         if phase.schedule not in {"fixed", "adaptive"}:
@@ -261,6 +263,20 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
             0.0 <= phase.hard_case_fraction <= 1.0
         ):
             raise ValueError(f"{path}.hard_case_fraction must be between 0 and 1")
+    plateau = training.plateau
+    if not plateau.metric_name.strip():
+        raise ValueError("rl.training.plateau.metric_name must be non-empty")
+    if plateau.direction not in {"minimize", "maximize"}:
+        raise ValueError("rl.training.plateau.direction must be 'minimize' or 'maximize'")
+    if not math.isfinite(plateau.minimum_delta) or plateau.minimum_delta <= 0.0:
+        raise ValueError("rl.training.plateau.minimum_delta must be finite and positive")
+    if plateau.patience_evaluations <= 0:
+        raise ValueError("rl.training.plateau.patience_evaluations must be positive")
+    if (
+        not math.isfinite(training.evaluation_worker_timeout_s)
+        or training.evaluation_worker_timeout_s <= 0.0
+    ):
+        raise ValueError("rl.training.evaluation_worker_timeout_s must be finite and positive")
     policies = {
         "rl.hover.policy": experiment.rl.hover.policy,
         "rl.press.policy": experiment.rl.press.policy,
@@ -369,6 +385,9 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "alignment_error_max_m": goal.alignment_error_max_m,
         "linear_speed_max_mps": goal.linear_speed_max_mps,
         "angular_speed_max_radps": goal.angular_speed_max_radps,
+        "velocity_reference.wall_normal_prediction_horizon_s": (
+            reference.wall_normal_prediction_horizon_s
+        ),
         "velocity_reference.wall_normal_alignment_gate_m": (reference.wall_normal_alignment_gate_m),
         "velocity_reference.wall_normal_gain_per_s": (reference.wall_normal_gain_per_s),
         "velocity_reference.tangential_gain_per_s": reference.tangential_gain_per_s,
@@ -406,10 +425,6 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
-    if evaluation.selection_metric != "held-out-press-task-quality":
-        raise ValueError(
-            "rl.press.evaluation.selection_metric must be 'held-out-press-task-quality'"
-        )
     for name in (
         "collision_penalty",
         "flight_failure_penalty",

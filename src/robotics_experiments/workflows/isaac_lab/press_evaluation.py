@@ -5,24 +5,32 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
 import torch
 
-from robotics_experiments.config import PressApproachGoalConfig
+from robotics_experiments.config import PressApproachEvaluationConfig, PressApproachGoalConfig
 from robotics_experiments.rl.press import (
     PressApproachResult,
     PressApproachRewardTerms,
     press_approach_target_velocity,
 )
-from robotics_experiments.rl.training.selection import RewardMean
+from robotics_experiments.rl.training.progress import (
+    AcceptanceResult,
+    EvaluationMetric,
+    PolicyEvaluation,
+    RewardMean,
+)
 
 __all__ = [
     "PressApproachEpisodeMetrics",
     "PressApproachEvaluationResult",
     "PressApproachEvaluationSummary",
+    "evaluate_press_acceptance",
     "evaluate_press_approach_policy",
+    "press_policy_evaluation",
     "summarize_press_approach_episodes",
 ]
 
@@ -175,6 +183,7 @@ def _trajectory_costs(
     )
     target_velocity = press_approach_target_velocity(
         relative_switch_pos_m=relative_position,
+        linear_velocity_mps=contact_velocity,
         reference_cfg=goal_config.velocity_reference,
     )
     velocity_tracking_cost = (
@@ -475,3 +484,97 @@ def evaluate_press_approach_policy(
             RewardMean(name=name, mean=value / count) for name, (value, count) in rewards.items()
         ),
     )
+
+
+def press_policy_evaluation(
+    *,
+    iteration: int,
+    checkpoint_path: Path,
+    policy_digest: str,
+    result: PressApproachEvaluationResult,
+    evaluation_config: PressApproachEvaluationConfig,
+    source: str,
+) -> PolicyEvaluation:
+    """Convert one rollout result into the evaluator's decision-free contract."""
+    summary = result.summary
+    task_cost = (
+        float(evaluation_config.collision_penalty) * summary.collision_rate
+        + float(evaluation_config.flight_failure_penalty) * summary.other_flight_failure_rate
+        + float(evaluation_config.timeout_penalty) * summary.timeout_rate
+        + float(evaluation_config.non_success_penalty) * (1.0 - summary.approach_success_rate)
+        + float(evaluation_config.terminal_range_weight) * summary.mean_terminal_range_cost
+        + float(evaluation_config.trajectory_alignment_weight)
+        * summary.mean_trajectory_alignment_cost
+        + float(evaluation_config.velocity_tracking_weight) * summary.mean_velocity_tracking_cost
+        + float(evaluation_config.upright_error_weight) * summary.mean_upright_error_cost
+        + float(evaluation_config.action_delta_weight) * summary.mean_action_delta_cost
+        + float(evaluation_config.completion_time_weight) * summary.mean_completion_time_fraction
+    )
+    if not np.isfinite(task_cost):
+        raise ValueError("held-out press evaluation produced a non-finite task cost")
+    finite_values = (
+        summary.approach_success_rate,
+        summary.collision_rate,
+        summary.body_collision_rate,
+        summary.pusher_collision_rate,
+        summary.other_flight_failure_rate,
+        summary.timeout_rate,
+        summary.mean_closest_range_m,
+        summary.min_closest_range_m,
+        summary.mean_terminal_range_cost,
+        summary.mean_trajectory_alignment_cost,
+        summary.mean_velocity_tracking_cost,
+        summary.mean_upright_error_cost,
+        summary.mean_action_delta_cost,
+        summary.mean_completion_time_fraction,
+    )
+    traces_finite = all(np.isfinite(value) for value in finite_values) and (
+        summary.median_completion_time_s is None or np.isfinite(summary.median_completion_time_s)
+    )
+    return PolicyEvaluation(
+        iteration=iteration,
+        checkpoint_path=checkpoint_path,
+        policy_digest=policy_digest,
+        metrics=(
+            EvaluationMetric("approach_success_rate", summary.approach_success_rate),
+            EvaluationMetric("collision_rate", summary.collision_rate),
+            EvaluationMetric("body_collision_rate", summary.body_collision_rate),
+            EvaluationMetric("pusher_collision_rate", summary.pusher_collision_rate),
+            EvaluationMetric("other_flight_failure_rate", summary.other_flight_failure_rate),
+            EvaluationMetric("timeout_rate", summary.timeout_rate),
+            EvaluationMetric("mean_closest_range_m", summary.mean_closest_range_m),
+            EvaluationMetric("min_closest_range_m", summary.min_closest_range_m),
+            EvaluationMetric("median_completion_time_s", summary.median_completion_time_s),
+            EvaluationMetric("terminal_range_cost", summary.mean_terminal_range_cost),
+            EvaluationMetric("trajectory_alignment_cost", summary.mean_trajectory_alignment_cost),
+            EvaluationMetric("velocity_tracking_cost", summary.mean_velocity_tracking_cost),
+            EvaluationMetric("upright_error_cost", summary.mean_upright_error_cost),
+            EvaluationMetric("action_delta_cost", summary.mean_action_delta_cost),
+            EvaluationMetric("completion_time_fraction", summary.mean_completion_time_fraction),
+            EvaluationMetric("traces_finite", float(traces_finite)),
+            EvaluationMetric("held_out_task_cost", float(task_cost)),
+        ),
+        reward_means=result.reward_means,
+        source=source,
+    )
+
+
+def evaluate_press_acceptance(
+    *,
+    evaluation: PolicyEvaluation,
+    evaluation_config: PressApproachEvaluationConfig,
+    minimum_range_m: float,
+) -> AcceptanceResult:
+    """Apply press gates once to the run-wide selected evaluator result."""
+    reasons = []
+    if evaluation.metric("traces_finite") != 1.0:
+        reasons.append("non-finite traces")
+    if evaluation.metric("approach_success_rate") < evaluation_config.success_rate_min:
+        reasons.append("approach success")
+    if evaluation.metric("collision_rate") > evaluation_config.collision_rate_max:
+        reasons.append("simulated collisions")
+    if evaluation.metric("min_closest_range_m") < minimum_range_m:
+        reasons.append("range undershoot")
+    if evaluation.metric("other_flight_failure_rate") > 0.0:
+        reasons.append("flight-envelope failure")
+    return AcceptanceResult(passed=not reasons, reasons=tuple(reasons))

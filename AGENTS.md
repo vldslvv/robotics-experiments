@@ -226,11 +226,13 @@ the current contents and the intended home for that kind of code.
   always starts one new runner and optimizer. Ordered Hydra phases may change
   the learning schedule and reset mixture inside that single scratch lineage;
   checkpoint initialization, resume, and post-run fine-tuning are unsupported.
-  `make train-rl` automatically evaluates every checkpoint and
-  publishes the selected run: `latest` always advances, while `best` advances
-  only for a strictly higher held-out score within the same comparison
-  fingerprint. Press acceptance gates are advisory publication diagnostics;
-  the task-owned held-out metric and weights live in Hydra.
+  `make train-rl` is one merged phase/evaluation loop. Each phase declares its
+  maximum updates and held-out cadence; one persistent evaluator returns raw
+  named metrics, while the Hydra-owned plateau rule reads exactly one named
+  scalar and never reads acceptance gates. After all phases end, the run-wide
+  best scalar selects the policy and the existing press gates are applied once
+  to that stored evaluation. `latest` always advances, while `best` advances
+  only for a strictly better comparable metric within one fingerprint.
 - Alignment invariants: read `docs/SIM_TO_SIM_ALIGNMENT.md` before touching
   `src/robotics_experiments/controller/`,
   `src/robotics_experiments/alignment/`, controller definitions, alignment Make

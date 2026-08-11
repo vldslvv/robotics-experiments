@@ -30,12 +30,18 @@ training:
   policy_name: hover
   controller_artifact: .build/alignment/x500-px4-v1/best
   phases:
-    - iterations: 1500
-      save_interval: 200
+    - max_iterations: 1500
+      evaluation_interval: 200
       learning_rate: 1.0e-3
       schedule: adaptive
       entropy_coef: 0.005
       hard_case_fraction: 0.0
+  plateau:
+    metric_name: held_out_task_cost
+    direction: minimize
+    minimum_delta: 0.003
+    patience_evaluations: 30
+  evaluation_worker_timeout_s: 600.0
   num_steps_per_env: 24
   gamma: 0.99
   lam: 0.95

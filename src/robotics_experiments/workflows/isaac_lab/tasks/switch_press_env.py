@@ -44,6 +44,9 @@ from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
     _press_entry_state_from_unit_samples,
     _press_training_entry_state_from_unit_samples,
 )
+from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+    _normalized_action_to_controller_command,
+)
 
 __all__ = ["SwitchPressEnv", "SwitchPressEnvCfg", "make_switch_press_env_cfg"]
 
@@ -61,6 +64,7 @@ _TRAINING_REWARD_TERMS = (
     "range_barrier",
     "alignment_error",
     "velocity_tracking",
+    "wall_normal_braking_command",
     "upright_error",
     "action_delta",
     "success",
@@ -246,17 +250,17 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._pusher_collision_latch = torch.zeros_like(self._body_collision_latch)
         self._completed_episode_count = torch.zeros((), device=self.device)
         self._successful_episode_count = torch.zeros((), device=self.device)
+        self._collision_episode_count = torch.zeros((), device=self.device)
+        self._body_collision_episode_count = torch.zeros((), device=self.device)
+        self._pusher_collision_episode_count = torch.zeros((), device=self.device)
+        self._flight_failure_episode_count = torch.zeros((), device=self.device)
+        self._timeout_episode_count = torch.zeros((), device=self.device)
 
     def set_training_hard_case_fraction(self, fraction: float, /) -> None:
         """Change the reset mixture at an in-run curriculum boundary."""
         if not 0.0 <= fraction <= 1.0:
             raise ValueError("training hard-case fraction must be between 0 and 1")
         self._training_hard_case_fraction = float(fraction)
-        self._collision_episode_count = torch.zeros((), device=self.device)
-        self._body_collision_episode_count = torch.zeros((), device=self.device)
-        self._pusher_collision_episode_count = torch.zeros((), device=self.device)
-        self._flight_failure_episode_count = torch.zeros((), device=self.device)
-        self._timeout_episode_count = torch.zeros((), device=self.device)
 
     @property
     def press_approach_result(self):
@@ -373,6 +377,11 @@ class SwitchPressEnv(_FlightDirectRLEnv):
     def _sample(self, *, time_out: torch.Tensor) -> PressApproachInput[torch.Tensor]:
         self._latch_collision_sample()
         relative_position, relative_quat_xyzw = self._relative_switch_pose()
+        velocity_command_world = _normalized_action_to_controller_command(
+            self.actuation_params,
+            self.actions,
+            self.drone.data.root_quat_w,
+        )[:, :3]
         quat = self.drone.data.root_quat_w
         body_z_world_z = 1.0 - 2.0 * (quat[:, 1].square() + quat[:, 2].square())
         relative_quat_wxyz = relative_quat_xyzw[:, [3, 0, 1, 2]]
@@ -382,6 +391,9 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 relative_quat_wxyz,
                 self.drone.data.root_lin_vel_b,
             ),
+            wall_normal_velocity_command_mps=math_utils.quat_apply_inverse(
+                self._contact_frame_quat(), velocity_command_world
+            )[:, 0],
             angular_velocity_radps=self.drone.data.root_ang_vel_b,
             body_z_world_z=body_z_world_z,
             altitude_m=self.drone.data.root_pos_w[:, 2],

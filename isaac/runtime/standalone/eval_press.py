@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import math
+import hashlib
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 
 from robotics_experiments.config import ExperimentConfig, load_config
 from robotics_experiments.rl import POLICY_FILENAME, validate_policy_artifact
-from robotics_experiments.workflows.isaac_lab import (
-    PressApproachEvaluationResult,
-    evaluate_press_approach_policy,
-    make_isaac_lab_env,
-)
+
+if TYPE_CHECKING:
+    from robotics_experiments.workflows.isaac_lab import PressApproachEvaluationResult
 
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
@@ -31,6 +30,14 @@ def _repo_root() -> Path:
 
 
 def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvaluationResult:
+    # AppLauncher must start before the Isaac Lab workflow import.
+    from robotics_experiments.workflows.isaac_lab import (
+        evaluate_press_acceptance,
+        evaluate_press_approach_policy,
+        make_isaac_lab_env,
+        press_policy_evaluation,
+    )
+
     evaluation = config.rl.press.evaluation
     seeds = tuple(int(seed) for seed in evaluation.seeds)
     metadata = validate_policy_artifact(artifact_dir=artifact_dir)
@@ -95,39 +102,23 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     )
     for reward in result.reward_means:
         _report(f"reward_mean {reward.name}={reward.mean:.6f}")
-
-    finite_trace_values = (
-        summary.approach_success_rate,
-        summary.collision_rate,
-        summary.body_collision_rate,
-        summary.pusher_collision_rate,
-        summary.other_flight_failure_rate,
-        summary.timeout_rate,
-        summary.mean_closest_range_m,
-        summary.min_closest_range_m,
-        summary.mean_terminal_range_cost,
-        summary.mean_trajectory_alignment_cost,
-        summary.mean_velocity_tracking_cost,
-        summary.mean_upright_error_cost,
-        summary.mean_action_delta_cost,
-        summary.mean_completion_time_fraction,
+    digest = hashlib.sha256((artifact_dir / POLICY_FILENAME).read_bytes()).hexdigest()
+    evaluated = press_policy_evaluation(
+        iteration=int(metadata.values["selected_checkpoint_iteration"]),
+        checkpoint_path=artifact_dir / POLICY_FILENAME,
+        policy_digest=digest,
+        result=result,
+        evaluation_config=evaluation,
+        source="independent",
     )
-    failures = []
-    if not all(math.isfinite(value) for value in finite_trace_values) or (
-        summary.median_completion_time_s is not None
-        and not math.isfinite(summary.median_completion_time_s)
-    ):
-        failures.append("non-finite traces")
-    if summary.approach_success_rate < evaluation.success_rate_min:
-        failures.append("approach success")
-    if summary.collision_rate > evaluation.collision_rate_max:
-        failures.append("simulated collisions")
-    if summary.min_closest_range_m < config.rl.press.goal.range_min_m:
-        failures.append("range undershoot")
-    if summary.other_flight_failure_rate > 0.0:
-        failures.append("flight-envelope failure")
-    if failures:
-        raise AssertionError("press acceptance failed: " + ", ".join(failures))
+    _report(f"held_out_task_cost={evaluated.metric('held_out_task_cost'):.6f}")
+    acceptance = evaluate_press_acceptance(
+        evaluation=evaluated,
+        evaluation_config=evaluation,
+        minimum_range_m=config.rl.press.goal.range_min_m,
+    )
+    if not acceptance.passed:
+        raise AssertionError("press acceptance failed: " + ", ".join(acceptance.reasons))
     _report("press approach evaluation PASSED")
     return result
 

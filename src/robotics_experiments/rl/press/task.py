@@ -59,6 +59,7 @@ class PressApproachInput(Generic[ArrayT]):
 
     relative_switch_pos_m: ArrayT
     linear_velocity_mps: ArrayT
+    wall_normal_velocity_command_mps: ArrayT
     angular_velocity_radps: ArrayT
     body_z_world_z: ArrayT
     altitude_m: ArrayT
@@ -70,12 +71,13 @@ class PressApproachInput(Generic[ArrayT]):
 
 @dataclass(frozen=True)
 class PressApproachRewardTerms(Generic[ArrayT]):
-    """The ten signed per-step Stage 1 reward contributions."""
+    """The eleven signed per-step Stage 1 reward contributions."""
 
     range_progress: ArrayT
     range_barrier: ArrayT
     alignment_error: ArrayT
     velocity_tracking: ArrayT
+    wall_normal_braking_command: ArrayT
     upright_error: ArrayT
     action_delta: ArrayT
     success: ArrayT
@@ -91,6 +93,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
             + self.range_barrier
             + self.alignment_error
             + self.velocity_tracking
+            + self.wall_normal_braking_command
             + self.upright_error
             + self.action_delta
             + self.success
@@ -228,13 +231,17 @@ def reset_press_approach_state(
 def press_approach_target_velocity(
     *,
     relative_switch_pos_m: ArrayT,
+    linear_velocity_mps: ArrayT,
     reference_cfg: PressApproachVelocityReferenceConfig,
 ) -> ArrayT:
-    """Return the clipped three-axis contact-frame approach velocity."""
+    """Return the predictive clipped contact-frame approach velocity."""
     if isinstance(relative_switch_pos_m, torch.Tensor):
+        projected_range = relative_switch_pos_m[..., 0] - (
+            reference_cfg.wall_normal_prediction_horizon_s
+            * linear_velocity_mps[..., 0].clamp_min(0.0)
+        )
         wall_normal = (
-            reference_cfg.wall_normal_gain_per_s
-            * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m)
+            reference_cfg.wall_normal_gain_per_s * (projected_range - reference_cfg.range_center_m)
         ).clamp(
             reference_cfg.wall_normal_min_mps,
             reference_cfg.wall_normal_max_mps,
@@ -250,9 +257,12 @@ def press_approach_target_velocity(
         denominator = tangential_norm.clamp_min(reference_cfg.tangential_speed_max_mps)
         scale = reference_cfg.tangential_speed_max_mps / denominator
         return torch.cat((wall_normal[..., None], tangential * scale[..., None]), dim=-1)
+    projected_range = relative_switch_pos_m[..., 0] - (
+        reference_cfg.wall_normal_prediction_horizon_s
+        * np.maximum(linear_velocity_mps[..., 0], 0.0)
+    )
     wall_normal = np.clip(
-        reference_cfg.wall_normal_gain_per_s
-        * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m),
+        reference_cfg.wall_normal_gain_per_s * (projected_range - reference_cfg.range_center_m),
         reference_cfg.wall_normal_min_mps,
         reference_cfg.wall_normal_max_mps,
     )
@@ -309,8 +319,15 @@ def step_press_approach(
     current_range = sample.relative_switch_pos_m[..., 0]
     alignment_error = _norm(sample.relative_switch_pos_m[..., 1:3])
     upright_alignment = _clip(sample.body_z_world_z, 0.0, 1.0)
+    range_barrier_start = goal_cfg.range_min_m + reward_cfg.range_barrier_margin_m
+    range_barrier_deficit = _clip(
+        (range_barrier_start - current_range) / reward_cfg.range_barrier_margin_m,
+        0.0,
+        float("inf"),
+    )
     target_velocity = press_approach_target_velocity(
         relative_switch_pos_m=sample.relative_switch_pos_m,
+        linear_velocity_mps=sample.linear_velocity_mps,
         reference_cfg=goal_cfg.velocity_reference,
     )
 
@@ -359,21 +376,25 @@ def step_press_approach(
         range_progress=(
             reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
         ),
-        range_barrier=(
-            -reward_cfg.range_barrier_weight
-            * _square(
-                _clip(
-                    (goal_cfg.range_min_m + reward_cfg.range_barrier_margin_m - current_range)
-                    / reward_cfg.range_barrier_margin_m,
-                    0.0,
-                    float("inf"),
-                )
-            )
-        ),
+        range_barrier=(-reward_cfg.range_barrier_weight * _square(range_barrier_deficit)),
         alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
         velocity_tracking=(
             -reward_cfg.velocity_tracking_weight
             * _sum_square(sample.linear_velocity_mps - target_velocity)
+        ),
+        wall_normal_braking_command=(
+            -reward_cfg.wall_normal_braking_command_weight
+            * _where(
+                target_velocity[..., 0] < 0.0,
+                _square(
+                    _clip(
+                        sample.wall_normal_velocity_command_mps - target_velocity[..., 0],
+                        0.0,
+                        float("inf"),
+                    )
+                ),
+                _zeros_like(value=target_velocity[..., 0]),
+            )
         ),
         upright_error=(-reward_cfg.upright_error_weight * _square(1.0 - upright_alignment)),
         action_delta=(

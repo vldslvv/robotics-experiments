@@ -16,7 +16,9 @@ from robotics_experiments.workflows.isaac_lab.press_evaluation import (
     PressApproachEpisodeMetrics,
     PressApproachEvaluationResult,
     PressApproachEvaluationSummary,
+    evaluate_press_acceptance,
     evaluate_press_approach_policy,
+    press_policy_evaluation,
     summarize_press_approach_episodes,
 )
 from robotics_experiments.workflows.isaac_lab.registration import (
@@ -50,10 +52,12 @@ __all__ = [
     "SwitchPressEnv",
     "SwitchPressEnvCfg",
     "compute_lab_rotor_omega",
+    "evaluate_press_acceptance",
     "evaluate_press_approach_policy",
     "make_drone_hover_env_cfg",
     "make_isaac_lab_env",
     "make_switch_press_env_cfg",
+    "press_policy_evaluation",
     "register_isaac_lab_tasks",
     "summarize_press_approach_episodes",
 ]

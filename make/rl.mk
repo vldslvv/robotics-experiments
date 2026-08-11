@@ -5,9 +5,6 @@
 TRAIN_RL_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/train_rl.py
 TRAIN_RL_LOG = /isaac-sim/.nvidia-omniverse/logs/train_rl.log
 TRAIN_ARGS ?=
-SELECT_RL_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/select_rl_checkpoint.py
-SELECT_RL_LOG = /isaac-sim/.nvidia-omniverse/logs/select_rl_checkpoint.log
-SELECT_ARGS ?=
 EVAL_PRESS_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/eval_press.py
 EVAL_PRESS_LOG = /isaac-sim/.nvidia-omniverse/logs/eval_press.log
 EVAL_ARGS ?=
@@ -16,9 +13,8 @@ RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 RL_TENSORBOARD_LOGDIR ?= .build/training
 
-# Training evaluates every saved checkpoint after PPO, exports the best
-# checkpoint in the run, always advances latest, and conditionally advances
-# the comparable best label.
+# One process trains, evaluates at phase cadence, selects the lowest-cost
+# checkpoint, applies final acceptance, and publishes the completed run.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 train-rl: generate-drone-usd
@@ -33,28 +29,7 @@ train-rl: generate-drone-usd
 	        $(ISAAC_INTEGRATION_COMMON_ENV) \
 	        ISAAC_TEST_EXTRA_ARGS='$(TRAIN_ARGS)' \
 	        RL_RUN_ID="$$run_id" \
-	        bash "$(ISAAC_INTEGRATION_RUNNER)"; \
-	    case '$(TRAIN_ARGS)' in \
-	        *--export-checkpoint*) exit 0 ;; \
-	    esac; \
-	    TEST_TARGET='select-rl-checkpoint' \
-	        ISAAC_TEST_LOG='$(SELECT_RL_LOG)' \
-	        ISAAC_TEST_SCRIPT='$(SELECT_RL_SCRIPT)' \
-	        $(ISAAC_INTEGRATION_COMMON_ENV) \
-	        ISAAC_TEST_EXTRA_ARGS='$(SELECT_ARGS)' \
-	        RL_RUN_ID="$$run_id" \
 	        bash "$(ISAAC_INTEGRATION_RUNNER)"
-
-# Explicit selection re-evaluates an existing run and republishes its labels.
-.PHONY: select-rl-checkpoint
-select-rl-checkpoint: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-select-rl-checkpoint: ISAAC_TEST_EXTRA_ARGS = $(SELECT_ARGS)
-select-rl-checkpoint: generate-drone-usd
-	@TEST_TARGET='select-rl-checkpoint' \
-	    ISAAC_TEST_LOG='$(SELECT_RL_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(SELECT_RL_SCRIPT)' \
-	    $(ISAAC_INTEGRATION_COMMON_ENV) \
-	    bash "$(ISAAC_INTEGRATION_RUNNER)"
 
 # Evaluation independently verifies the selected artifact. When RL_RUN_ID is
 # supplied it evaluates that exact published run instead of resolving latest.
