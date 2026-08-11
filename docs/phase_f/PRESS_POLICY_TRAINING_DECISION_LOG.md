@@ -365,3 +365,22 @@ Proceed to the already evidenced 50% upper reset-mixture coarse sweep. Retain
 the byte-identical phase-1 prefix, accepted controller, reward, optimizer,
 held-out distribution, and gates. Cache hits should eliminate its five repeated
 baseline evaluations; only new post-transition models require simulator work.
+
+### 14. Coarse-sweep the upper reset-mixture bracket
+
+Date: 2026-08-11.
+
+Plain-language view: Half of the consolidation starts now come from the exact
+difficult corner that still crosses the range boundary. Search broadly first:
+the stronger exposure may fix undershoot earlier, but too much can also make
+the actor brake so conservatively that it times out.
+
+Technical view: Keep phase 1 at 121 updates and retain the accepted controller,
+reward, policy architecture, PPO parameters, full-distribution evaluation, and
+all gates. Change only the difficult-reset fraction from 40% to the historical
+50% upper bracket. Run 31 consolidation iterations at fixed `3e-5`, zero
+entropy, and five-update checkpoint spacing. The six new post-transition
+checkpoints cover models 125-150. Content-addressed cache hits cover the five
+byte-identical phase-1 checkpoints, reducing the expected held-out workload
+from eleven fresh candidates to six. Fine resolution is justified only if the
+coarse response exposes a new promising interval without passing directly.
