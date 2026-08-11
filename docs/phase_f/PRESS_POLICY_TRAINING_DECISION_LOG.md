@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: SEVENTH SCRATCH SELECTION REJECTED; BRAKING OBJECTIVE DIAGNOSIS PENDING
+Status: SEVENTH SCRATCH SELECTION REJECTED; EARLIER BRAKING SWEEP PREDECLARED
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -481,3 +481,52 @@ wall-normal velocity long enough to cross 0.400 m. Run a fresh independent
 evaluation of model 150 to preserve the current worst traces, then change one
 task-owned braking signal supported by those traces while keeping the
 controller and acceptance contract fixed.
+
+### 18. Independent traces locate the braking signal too late
+
+Date: 2026-08-11.
+
+Plain-language view: The selected policy is already trying to stop, but the
+strong range warning begins after the vehicle has too much forward speed for
+the remaining distance. Start that warning earlier; do not change the aligned
+controller or relax the safety boundary.
+
+Technical view: Fresh independent evaluation of model 150 reproduced 96.0%
+success, 4.0% other flight failure, zero collision and timeout, 0.41491 m mean
+closest range, and 0.39852 m minimum closest range. The uncached evidence is
+preserved under
+`.build/docker/integration/eval-press.20260811T070218Z.262417`.
+
+The seed-101 worst trace enters 0.420 m at 0.045 m/s wall-normal speed and
+crosses 0.400 m at 0.022 m/s. Seed 202 enters at 0.050 m/s and crosses at
+0.039 m/s; seed 303 enters at 0.052 m/s and crosses at 0.039 m/s. Actor
+wall-normal actions are already near zero or slightly negative before the
+crossing, so the failure is residual closing motion rather than a positive
+approach command or controller tracking reversal. The existing normalized
+range barrier begins only at 0.420 m because its margin is 0.020 m. Its dense
+braking signal therefore starts after the retained traces require substantial
+deceleration.
+
+### 19. Coarse-sweep an earlier range barrier from scratch
+
+Date: 2026-08-11.
+
+Plain-language view: Double the warning distance from two to four centimeters.
+This gives the policy the same shaped safety lesson before the dangerous final
+segment, while success and forward progress still reward reaching the existing
+0.400-0.420 m goal.
+
+Technical view: Change only `range_barrier_margin_m` from 0.020 m to 0.040 m.
+The barrier now begins at 0.440 m and retains its weight, normalized quadratic
+shape, 0.400 m hard boundary, and 0.420 m goal maximum. Revert the exhausted
+late-mixture experiment to the strongest simple schedule: 121 full-distribution
+updates at `1e-4`, then 31 updates with 40% difficult starts at `3e-5`, saving
+every five updates. Start a new actor, critic, runner, and optimizer.
+
+This is a broad task-parameter step supported by the measured stopping
+distance, not checkpoint fine-tuning. Keep controller settings, policy
+architecture, PPO parameters, all other rewards, reset distributions,
+held-out seeds, and acceptance gates unchanged. If the broader barrier reduces
+range failures but causes timeouts, target the margin between 0.020 and 0.040 m;
+if the first failed boundary does not improve, add a distinct one-sided
+closing-speed signal instead of increasing the barrier again.
