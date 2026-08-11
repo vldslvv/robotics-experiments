@@ -56,7 +56,10 @@ The `press-approach` policy consumes the schema-1 34-value observation and
 emits four normalized velocity actions. The observation contains relative switch
 pose, vehicle motion and attitude, pusher state, contact and lamp state, previous
 action, handoff mode, estimator health, and availability bits. Training and
-runtime use the same packing function.
+runtime use the same packing function. Its scratch experiment maps a unit
+translation action to 0.5 m/s. Normalized exploration starts at 0.12 standard
+deviation, retaining a 0.06 m/s physical standard deviation while resolving the
+task's 0.10 m/s-or-less velocity references with useful action-head range.
 
 The current stage learns a contact-free approach and stable hover within
 0.40-0.42 m of the switch, not switch activation. Success requires five
@@ -133,7 +136,7 @@ inward. The horizon and reward weights remain task-owned Hydra data.
 
 ## Selection, artifact, and acceptance
 
-Training saves checkpoints throughout both phases. The selection step evaluates
+Training saves checkpoints throughout all phases. The selection step evaluates
 every checkpoint on the configured held-out seeds and publishes the best one by
 `held-out-press-task-quality`. The score combines success with configured
 penalties for collision, flight failure, timeout, non-success, terminal range,

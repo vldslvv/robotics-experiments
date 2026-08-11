@@ -10,8 +10,11 @@ rl:
   num_envs: 32768
   episode_length_s: 10.0
   action:
-    max_body_velocity_mps: 2.0
+    max_body_velocity_mps: 0.5
   press:
+    policy:
+      actor:
+        initial_noise_std: 0.12
     goal:
       velocity_reference:
         range_center_m: 0.415

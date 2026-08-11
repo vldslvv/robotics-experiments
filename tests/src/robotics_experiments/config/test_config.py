@@ -232,7 +232,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     policy = config.rl.press.policy
 
     assert config.rl.action.action_dim == 4
-    assert config.rl.action.max_body_velocity_mps == 2.0
+    assert config.rl.action.max_body_velocity_mps == 0.5
     assert not config.rl.lab_vehicle.enable_gyroscopic_forces
     assert training.controller_artifact == ".build/alignment/x500-px4-v1/best"
     assert config.rl.press.reset.physical_contact_enabled
@@ -256,7 +256,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
         0.2,
         0.4,
     )
-    assert policy.actor.initial_noise_std == 0.03
+    assert policy.actor.initial_noise_std == 0.12
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
     assert policy.critic.hidden_dims == (256, 256, 128)
