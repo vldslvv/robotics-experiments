@@ -635,3 +635,35 @@ If range failure falls materially, target the passing interval between 300 and
 stop fitting this reward term and inspect whether the policy action-to-velocity
 controller delay requires an explicit predictive target rather than a
 state-only penalty.
+
+### 24. A decade more closing-speed weight worsens the frontier
+
+Date: 2026-08-11.
+
+Plain-language view: Making the same warning ten times louder does not teach a
+safer stop. It first makes the actor reluctant to finish, then produces more
+range failures once it learns to approach. Stop tuning this weight and move the
+warning earlier by accounting for the distance the vehicle will travel while
+the controller is still slowing it down.
+
+Technical view: Run
+`20260811T080541Z-scratch-closing3000-coarse` started from clean source commit
+`434cf8c`, a new network, and a new optimizer. Training completed 152 updates
+in 932.9 seconds and evaluated all 11 checkpoints on the unchanged held-out
+set.
+
+Model 125 was selected with score -0.639254, 93.0% success, 6.67% other flight
+failure, 0.33% timeout, zero collision, 0.41434 m mean closest range, and
+0.39904 m minimum closest range. Earlier checkpoints show the stronger signal
+suppressing completion (model 60 has 11.0% success and 88.33% timeout), while
+later checkpoints trade timeout for unsafe approaches: model 120 has 73.0%
+success and 26.67% flight failure. No checkpoint passes the exact range or
+flight-failure gates.
+
+Weights 300 and 3000 both regress the original 96.0% success, 4.0% failure
+frontier, so there is no supported interval to refine. The failed boundary is
+still residual wall-normal motion after the actor starts braking. Replace this
+state-only excess-speed term with a predictive range barrier based on current
+range, positive wall-normal speed, and an evidenced stopping horizon. Keep the
+controller, current-range barrier, held-out distribution, and acceptance gates
+unchanged.
