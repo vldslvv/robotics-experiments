@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: SCRATCH TRAINING COMPLETE; FIRST HELD-OUT SELECTION REJECTED
+Status: SECOND SCRATCH SELECTION REJECTED; TARGETED FINE SWEEP PENDING
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -16,6 +16,7 @@ are unsupported.
 | Run ID | Controller run | Scratch schedule | Held-out result | Decision |
 | --- | --- | --- | --- | --- |
 | `20260811T030638Z-scratch-aligned` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 11 at `3e-5` | Iteration 126 selected; score -1.604688, 63.0% success, advisory rejected | Diagnose the timeout/failure boundary before the next scratch run |
+| `20260811T034512Z-scratch-hard30-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 51 at `3e-5` | Iteration 150 selected; score -0.566693, 94.7% success, advisory rejected | Fine-sweep updates 146-154 from scratch |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -119,3 +120,35 @@ five. This evaluates iterations 125 through 170 at five-update spacing while
 retaining the broad phase checkpoints. It changes only duration and checkpoint
 resolution, tests whether the 63% frontier is an undertrained consolidation
 phase, and bounds held-out evaluation cost before any targeted fine sweep.
+
+### 5. The coarse sweep brackets a near-acceptance interval
+
+Date: 2026-08-11.
+
+Plain-language view: More difficult-reset training was the right direction.
+The policy reached almost 95% success, but later updates first became too
+aggressive and then oscillated. The useful region is narrow enough that the
+next run should inspect every update there instead of extending training again.
+
+Technical view: Run `20260811T034512Z-scratch-hard30-coarse` started from a
+clean `63d5491` source commit and reproduced checkpoints 0 through 125 exactly.
+It completed 172 scratch updates in 1,073.5 seconds at approximately
+169k-177k frames/s. Selection evaluated 15 checkpoints in 640.1 seconds.
+Checkpoint 150 was selected with score -0.566693, 94.67% success, 5.33% other
+flight failure, zero timeout and collision, 0.41418 m mean closest range, and
+0.39858 m minimum closest range. It narrowly misses the 95% success boundary
+and still fails the zero-flight-failure and 0.400 m minimum-range gates.
+
+The new checkpoint curve is diagnostic rather than monotonic. Success rises
+from 69.7% at 135 to 82.7% at 140, 87.3% at 145, and 94.7% at 150, then falls
+to 83.0% at 155. Later checkpoints recover only to 91.0% and 92.0% before
+ending at 88.7%. Collisions stay zero throughout, while timeout becomes zero
+from 145 onward. Relative to the first run's 63.0% frontier, checkpoint 150
+reduces success-gate shortfall by about 98.4% and is material progress.
+
+The coarse five-update spacing brackets the best interval but cannot show
+whether updates 146-149 or 151-154 pass. Reproduce the same scratch path, keep
+coarse checkpoints through 145, and save every update from 146 through 155.
+Do not change controller, task, reward, PPO values, reset mixture, acceptance
+gates, or initialization. This is the targeted precision stage justified by
+the broad sweep.
