@@ -239,7 +239,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"
-    assert tuple(phase.iterations for phase in training.phases) == (121, 31)
+    assert tuple(phase.iterations for phase in training.phases) == (121, 61)
     assert tuple(phase.learning_rate for phase in training.phases) == (
         1.0e-4,
         3.0e-5,

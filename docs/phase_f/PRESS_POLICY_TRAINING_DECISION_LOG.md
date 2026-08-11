@@ -1,7 +1,7 @@
 # Press policy training decision log
 
-Status: NINTH SCRATCH SELECTION REJECTED; STRONG CLOSING-SPEED SWEEP PREDECLARED
-(2026-08-11).
+Status: ELEVENTH SCRATCH SELECTION REJECTED; EXTENDED PREDICTIVE CONSOLIDATION
+PREDECLARED (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
 selection, acceptance, and deployment decisions. Controller fitting and its
@@ -24,6 +24,8 @@ are unsupported.
 | `20260811T063515Z-scratch-late-hard50` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 24 at `3e-5` with 40% difficult resets and 12 at 50% | Iteration 150 selected; score -0.507785, 96.0% success, advisory rejected | Preserve independent worst traces, then strengthen the evidenced braking objective |
 | `20260811T070651Z-scratch-barrier40-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets; 0.040 m range barrier | Iteration 145 selected; score -1.579391, 65.0% success, advisory rejected | Restore the 0.020 m barrier and fit a one-sided unsafe closing-speed term |
 | `20260811T073726Z-scratch-closing300-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets; closing-speed weight 300 | Iteration 140 selected; score -0.580549, 94.0% success, advisory rejected | Increase the evidenced but underpowered one-sided term by one coarse decade |
+| `20260811T080541Z-scratch-closing3000-coarse` | `20260810T-accepted-reproduction` | Same scratch schedule; closing-speed weight 3000 | Iteration 125 selected; score -0.639254, 93.0% success, advisory rejected | Stop fitting the state-only term and add predictive braking evidence |
+| `20260811T083710Z-scratch-predictive400ms-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; predictive horizon 0.4 s at weight 10 | Iteration 150 selected; score -0.527009, 95.33% success, advisory rejected | Extend the still-improving low-rate phase in a new scratch lineage |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -733,3 +735,27 @@ requests only a small negative normalized wall-normal action. The controller
 responds in the correct direction; the policy has not yet learned enough
 braking command. Preserve the predictive structure and extend the second phase
 inside a new scratch invocation.
+
+### 27. Extend the still-rising predictive consolidation frontier
+
+Date: 2026-08-11.
+
+Plain-language view: Keep training the same lesson longer inside one scratch
+run. The useful behavior appeared only in the last ten updates, so the next run
+must show whether it continues to improve or has merely shifted the narrow peak.
+
+Technical view: Change only the second phase from 31 to 61 updates at the same
+fixed `3e-5` learning rate, zero entropy, 40% difficult-reset fraction, and
+five-update checkpoint interval. Keep phase 1 at 121 updates and preserve the
+predictive horizon, reward weights, controller, actor/critic architecture, PPO
+parameters, held-out seeds, and exact acceptance gates. The resulting 182
+updates remain one new runner and optimizer initialized from scratch; this is
+not checkpoint resume or post-run fine-tuning.
+
+The unchanged prefix should reproduce content-identical checkpoints through
+model 150. Let the content-addressed evaluation cache reuse only those exact
+artifacts, then evaluate models 155-180 fresh. If success stabilizes while
+range failures fall to zero, accept and run independent evaluation. If the
+frontier regresses after model 150, reduce the predictive weight rather than
+adding more updates, because the 0.4-second structure has already demonstrated
+the intended safety effect.
