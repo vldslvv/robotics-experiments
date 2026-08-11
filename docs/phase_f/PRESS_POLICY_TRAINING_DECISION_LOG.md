@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: TWELFTH SCRATCH SELECTION REJECTED; PREDICTIVE VELOCITY REFERENCE NEXT
+Status: THIRTEENTH SCRATCH SELECTION REJECTED; DENSE TRACKING WEIGHT SWEEP NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -27,6 +27,7 @@ are unsupported.
 | `20260811T080541Z-scratch-closing3000-coarse` | `20260810T-accepted-reproduction` | Same scratch schedule; closing-speed weight 3000 | Iteration 125 selected; score -0.639254, 93.0% success, advisory rejected | Stop fitting the state-only term and add predictive braking evidence |
 | `20260811T083710Z-scratch-predictive400ms-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; predictive horizon 0.4 s at weight 10 | Iteration 150 selected; score -0.527009, 95.33% success, advisory rejected | Extend the still-improving low-rate phase in a new scratch lineage |
 | `20260811T090631Z-scratch-predictive-extended61` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 61 at `3e-5`; predictive horizon 0.4 s at weight 10 | Iteration 160 selected; score -0.472188, 96.67% success, advisory rejected | Stop extending and move prediction into the dense velocity reference |
+| `20260811T093944Z-scratch-predictive-reference400ms` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5`; 0.4 s predictive velocity reference | Iteration 135 selected; score -0.471879, 97.0% success, advisory rejected | Strengthen the evidenced but underweighted dense tracking target |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -828,3 +829,43 @@ Return to 121 full-reset updates plus 31 low-rate updates with 40% difficult
 starts. Keep the aligned controller, network, remaining rewards, PPO values,
 held-out seeds, and exact gates unchanged. Start a new actor, critic, runner,
 and optimizer.
+
+### 30. Direct prediction improves the frontier but remains underweighted
+
+Date: 2026-08-11.
+
+Plain-language view: Asking directly for retreat works better than adding a
+separate warning, but the policy still ignores part of that request in the
+hardest starts. Make the existing tracking lesson stronger before changing the
+prediction horizon.
+
+Technical view: Run
+`20260811T093944Z-scratch-predictive-reference400ms` started from clean source
+commit `d8b7833`, a new network, and a new optimizer. Training completed 152
+updates in 929.8 seconds and evaluator revision 4 evaluated all 11 checkpoints
+fresh in 463.3 seconds.
+
+Model 135 was selected with score -0.471879, 97.0% success, 3.0% other flight
+failure, zero collision and timeout, 0.41448 m mean closest range, and
+0.39876 m minimum closest range. Independent evaluation reproduced every
+aggregate metric and preserved its traces under
+`.build/docker/integration/eval-press.20260811T100339Z.488702`. This removes
+one of attempt 12's ten deterministic failures and is the strongest scratch
+frontier so far. Models 130 and 135 share nine failures; models 140-150
+regress, so more updates at the same objective are unsupported.
+
+The trace provides a sharper boundary than the horizon alone. At one crossing,
+the 0.4-second projection already requests approximately -0.033 m/s
+wall-normal velocity, yet the actor emits a slightly positive normalized
+wall-normal action and actual forward speed is 0.030 m/s. Another trace crosses
+at 0.016 m/s while the actor remains positive. The predictive reference is
+therefore active early enough, but the policy underweights its dense tracking
+cost relative to progress and completion.
+
+Keep the 0.4-second reference and coarse-sweep only
+`velocity_tracking_weight` from 300 to 900. This mirrors the previously proven
+threefold dense-target intervention while testing the new scratch contract.
+Keep the 121-plus-31 schedule, reset mixture, controller, all other rewards,
+held-out distribution, and exact gates fixed. If 900 overbrakes into timeout,
+refine the bracket at 600; if it reduces failures without timeout, retain it
+and refine only if exact acceptance still fails.
