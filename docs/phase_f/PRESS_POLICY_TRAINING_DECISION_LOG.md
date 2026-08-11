@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: FOURTH SCRATCH SELECTION REJECTED; 40% FINE SWEEP PENDING
+Status: FIFTH SCRATCH SELECTION REJECTED; EVALUATION CACHE PENDING
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -19,6 +19,7 @@ are unsupported.
 | `20260811T034512Z-scratch-hard30-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 51 at `3e-5` | Iteration 150 selected; score -0.566693, 94.7% success, advisory rejected | Fine-sweep updates 145-153 from scratch |
 | `20260811T041833Z-scratch-hard30-fine` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 33 at `3e-5` with every-update saves near the peak | Iteration 149 selected; score -0.566482, 94.7% success, advisory rejected | Expand the evidenced hard-case reset mixture in the next scratch lineage |
 | `20260811T045313Z-scratch-hard40-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets | Iteration 140 selected; score -0.519048, 96.0% success, advisory rejected | Fine-sweep updates 136-144 from scratch |
+| `20260811T052107Z-scratch-hard40-fine` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 24 at `3e-5` with every-update saves near the 40% peak | Iteration 142 selected; score -0.516978, 96.0% success, advisory rejected | Cache identical held-out evaluations, then expand to the evidenced upper reset bracket |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -282,3 +283,36 @@ through model 135; its second segment immediately continues the same runner and
 optimizer for ten configured iterations, saving models 136-144 individually.
 This lowers training from 152 to 147 configured iterations and evaluates 13
 checkpoints while adding exact resolution only inside the evidenced bracket.
+
+### 11. Exact resolution exhausts the 40% checkpoint boundary
+
+Date: 2026-08-11.
+
+Plain-language view: No skipped checkpoint passes. Five consecutive models
+reach or exceed the success threshold, but all retain essentially the same
+unsafe range crossings. The next training attempt must strengthen braking
+exposure rather than save more checkpoints at 40%.
+
+Technical view: Run `20260811T052107Z-scratch-hard40-fine` started from clean
+source commit `9a049f9`, a new network, and a new optimizer. Training completed
+its 147-iteration schedule in 905.1 seconds at approximately 175k-177k
+frames/s. Selection evaluated 13 checkpoints in 755.1 seconds. Model 142 was
+selected with score -0.516978, 96.0% success, 4.0% other flight failure, zero
+collision and timeout, 0.41477 m mean closest range, and 0.39861 m minimum
+closest range.
+
+Models 138-142 all pass the 95% success threshold. Their flight-failure rates
+remain confined to 4.0%-4.33%, and their minimum closest ranges remain below
+0.400 m. Model 143 falls back below the success gate and model 144 regresses
+further. The fine sweep therefore improves score by only 0.4% over the coarse
+frontier and does not improve the first failed boundary at all. Stop repeating
+40% checkpoint searches.
+
+The scratch prefix through model 135 is byte-identical across the coarse and
+fine runs, but selection spent about six minutes reevaluating eight identical
+checkpoints. Before the next scratch attempt, add a content-addressed held-out
+evaluation cache keyed by the checkpoint digest and the complete evaluator,
+controller, policy, environment, seed, and threshold contract. Cache reuse is
+only a selection optimization; final independent evaluation remains fresh and
+uncached. After verification, test the existing 50% upper reset-mixture bracket
+because 40% improved success but left the undershoot rate unchanged.
