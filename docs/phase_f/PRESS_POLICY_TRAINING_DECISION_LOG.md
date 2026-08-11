@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: SIXTH SCRATCH SELECTION REJECTED; LATE HARD-CASE CURRICULUM PREDECLARED
+Status: SEVENTH SCRATCH SELECTION REJECTED; BRAKING OBJECTIVE DIAGNOSIS PENDING
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -21,6 +21,7 @@ are unsupported.
 | `20260811T045313Z-scratch-hard40-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets | Iteration 140 selected; score -0.519048, 96.0% success, advisory rejected | Fine-sweep updates 136-144 from scratch |
 | `20260811T052107Z-scratch-hard40-fine` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 24 at `3e-5` with every-update saves near the 40% peak | Iteration 142 selected; score -0.516978, 96.0% success, advisory rejected | Cache identical held-out evaluations, then expand to the evidenced upper reset bracket |
 | `20260811T060552Z-scratch-hard50-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 50% difficult resets | Iteration 150 selected; score -0.527187, 95.7% success, advisory rejected | Preserve the stronger 40% learning path, then introduce 50% difficult resets only after its peak |
+| `20260811T063515Z-scratch-late-hard50` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 24 at `3e-5` with 40% difficult resets and 12 at 50% | Iteration 150 selected; score -0.507785, 96.0% success, advisory rejected | Preserve independent worst traces, then strengthen the evidenced braking objective |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -445,3 +446,38 @@ or immediately regresses. If it does not improve the zero-flight-failure and
 minimum-range gates, reset-mixture scheduling is exhausted and the next change
 must directly strengthen the already identified zero wall-normal velocity
 boundary in the task objective.
+
+### 17. Late hard exposure improves score but not the exact boundary
+
+Date: 2026-08-11.
+
+Plain-language view: Switching to more difficult starts late does not solve the
+last four percent of unsafe approaches. Some checkpoints get better overall,
+but the same flights still carry forward speed across the minimum range. Stop
+changing only the reset mixture and strengthen the braking lesson itself.
+
+Technical view: Run `20260811T063515Z-scratch-late-hard50` started from clean
+source commit `38ef479`, a new network, and a new optimizer. Its four phases
+completed 157 configured updates in 958.1 seconds. The selector reused models
+0-141 from the content-addressed cache and evaluated models 142-153 fresh in
+504.7 seconds.
+
+Model 150 was selected with score -0.507785, 96.0% success, 4.0% other flight
+failure, zero collision and timeout, 0.41494 m mean closest range, and 0.39852 m
+minimum closest range. Models 147 and 149-151 have the same 96.0% success and
+4.0% failure split. The intervention initially regresses to 89.0% success and
+11.0% failure at model 146, recovers without crossing the exact boundary, then
+regresses again after model 151. Compared with the prior 40% model-142
+frontier, selected score improves by 1.8%, but flight-failure rate and minimum
+range do not improve. This is not material progress under the exact safety
+gates.
+
+Static 30%, 40%, and 50% mixtures, exact checkpoint resolution, and a late
+40%-to-50% curriculum have now exhausted the reset-exposure hypothesis. The
+first failed behavior remains the target-velocity boundary already visible in
+the retained worst traces: when tangential error exceeds the alignment gate,
+the wall-normal reference is zero, yet the policy retains small positive
+wall-normal velocity long enough to cross 0.400 m. Run a fresh independent
+evaluation of model 150 to preserve the current worst traces, then change one
+task-owned braking signal supported by those traces while keeping the
+controller and acceptance contract fixed.
