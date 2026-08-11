@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: NINETEENTH SCRATCH SELECTION REJECTED; ONE-SIDED BRAKING TARGET NEXT
+Status: TWENTIETH SCRATCH SELECTION REJECTED; LOWER ONE-SIDED WEIGHT NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -34,6 +34,7 @@ are unsupported.
 | `20260811T113819Z-scratch-command-target-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus direct physical command tracking 10 | Iteration 150 selected; score -0.636139, 93.3% success, advisory rejected | Restrict the direct target to the evidenced wall-normal boundary |
 | `20260811T120750Z-scratch-wall-normal-command-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus wall-normal command tracking 10 | Iteration 140 selected; score -0.509376, 96.0% success, advisory rejected | Coarse-test wall-normal weight 30 before changing the target or curriculum |
 | `20260811T123932Z-scratch-wall-normal-command-w30` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus wall-normal command tracking 30 | Iteration 140 selected; score -0.796698, 89.3% success, advisory rejected | Stop the symmetric-weight sweep and supervise only evidenced retreat commands |
+| `20260811T131001Z-scratch-one-sided-braking-w100` | `20260810T-accepted-reproduction` | Same scratch schedule; one-sided retreat-command supervision at weight 100 | Iteration 140 selected; score -0.491165, 96.3% success, advisory rejected | Reduce the oscillating one-sided gradient to weight 30 |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1107,3 +1108,39 @@ schedule, held-out distribution, and gate fixed. Start the scoped braking term
 at weight 100 because it has no gradient during ordinary approach; if it
 preserves the high-success path but remains weak, fit its weight. If it causes
 timeouts, reduce it before changing the curriculum.
+
+### 37. One-sided braking recovers the frontier but weight 100 oscillates
+
+Date: 2026-08-11.
+
+Plain-language view: Restricting the direct lesson to braking restores most of
+the strong policy, but the lesson is still too strong: consecutive checkpoints
+alternate between nearly useful and severe boundary crossing. Reduce its
+weight before changing when difficult examples are introduced.
+
+Technical view: Run
+`20260811T131001Z-scratch-one-sided-braking-w100` started from clean source
+commit `f276f54`, a new network, and a new optimizer. The reward term was active
+only when the predictive reference requested retreat and penalized physical
+wall-normal commands above that target. It retained the accepted controller,
+actual-state velocity tracking weight 300, 121-plus-31 schedule, 40% difficult
+resets, held-out distribution, and exact gates. Training completed 152 updates
+in 932.8 seconds and evaluator revision 7 scored all 11 checkpoints fresh in
+467.0 seconds.
+
+Model 140 was selected with score -0.491165, 96.33% success, 3.67% other
+flight failure, zero collision and timeout, 0.41465 m mean closest range, and
+0.39871 m minimum closest range. Its mean one-sided braking contribution was
+-0.003219 per active step. Model 130 has the same success/failure rates;
+model 135 collapses to 54.0% success and 46.0% failure, model 145 recovers to
+96.0% and 4.0%, and model 150 collapses again to 77.67% and 22.33%. More
+updates at this weight are therefore unsupported. The result is directionally
+better than symmetric weight 30 but does not beat the 97.0%/3.0% state-only
+frontier and fails exact range safety.
+
+Preserve the one-sided structure and reduce
+`wall_normal_braking_command_weight` to 30. This keeps a direct gradient at the
+evidenced sign error while reducing the phase-2 oscillation by more than three
+times. If weight 30 preserves high success and lowers the failure count, refine
+the supported bracket. If it merely returns to the existing plateau, stop
+fitting the reward scalar and change the in-run hard-case learning schedule.
