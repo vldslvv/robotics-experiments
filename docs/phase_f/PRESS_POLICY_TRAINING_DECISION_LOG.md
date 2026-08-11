@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: THIRD SCRATCH SELECTION REJECTED; RESET-MIXTURE EXPANSION PENDING
+Status: FOURTH SCRATCH SELECTION REJECTED; 40% FINE SWEEP PENDING
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -18,6 +18,7 @@ are unsupported.
 | `20260811T030638Z-scratch-aligned` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 11 at `3e-5` | Iteration 126 selected; score -1.604688, 63.0% success, advisory rejected | Diagnose the timeout/failure boundary before the next scratch run |
 | `20260811T034512Z-scratch-hard30-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 51 at `3e-5` | Iteration 150 selected; score -0.566693, 94.7% success, advisory rejected | Fine-sweep updates 145-153 from scratch |
 | `20260811T041833Z-scratch-hard30-fine` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 33 at `3e-5` with every-update saves near the peak | Iteration 149 selected; score -0.566482, 94.7% success, advisory rejected | Expand the evidenced hard-case reset mixture in the next scratch lineage |
+| `20260811T045313Z-scratch-hard40-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets | Iteration 140 selected; score -0.519048, 96.0% success, advisory rejected | Fine-sweep updates 136-144 from scratch |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -230,3 +231,36 @@ produces a six-candidate coarse response after model 120 while taking four
 fewer total updates than the rejected fine run and avoiding nine low-value
 every-update evaluations. The only behavioral training change is the reset
 mixture supported by the persistent undershoot traces.
+
+### 9. The midpoint mixture passes success but not exact range safety
+
+Date: 2026-08-11.
+
+Plain-language view: More difficult starts improved braking enough to pass the
+success threshold, but four percent of held-out flights still crossed the hard
+range boundary. The broad checkpoints show a sharp improvement followed by a
+clear regression, so inspect the missing individual updates around that peak
+before changing how the policy learns again.
+
+Technical view: Run `20260811T045313Z-scratch-hard40-coarse` started from clean
+source commit `b7d0aaa`, a new network, and a new optimizer. Training completed
+its 152-iteration schedule in 927.3 seconds at approximately 176k-178k
+frames/s. Selection evaluated 11 checkpoints in 493.4 seconds, compared with
+19 checkpoints and 814.2 seconds for the preceding fine run.
+
+Model 140 was selected with score -0.519048, 96.0% success, 4.0% other flight
+failure, zero collision and timeout, 0.41489 m mean closest range, and 0.39902 m
+minimum closest range. It passes the success, collision, and timeout gates and
+improves score by 8.4% relative to the 30% model-149 frontier. Model 135 was
+still split between 63.67% success, 20.67% flight failure, and 15.67% timeout;
+model 145 regressed to 93.67% success and 6.33% flight failure, while model 150
+fell to 89.33% success and 10.67% flight failure. No collision boundary
+appeared.
+
+The response therefore brackets a narrow transition between models 136 and
+144. The exact 95% success gate has passed, but acceptance still requires zero
+other flight failure and minimum range at least 0.400 m. Run one every-update
+scratch sweep only across that bracket with all training and evaluation values
+unchanged. If none passes, checkpoint resolution is exhausted and the next
+attempt must address the remaining braking boundary structurally or with the
+already evidenced upper reset-mixture bracket.
