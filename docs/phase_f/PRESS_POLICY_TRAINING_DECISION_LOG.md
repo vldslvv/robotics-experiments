@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: TWENTY-SECOND SCRATCH SELECTION REJECTED; GRADUATED HARD CURRICULUM NEXT
+Status: TWENTY-THIRD SCRATCH SELECTION REJECTED; TASK ACTION SCALE NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -37,6 +37,7 @@ are unsupported.
 | `20260811T131001Z-scratch-one-sided-braking-w100` | `20260810T-accepted-reproduction` | Same scratch schedule; one-sided retreat-command supervision at weight 100 | Iteration 140 selected; score -0.491165, 96.3% success, advisory rejected | Reduce the oscillating one-sided gradient to weight 30 |
 | `20260811T133733Z-scratch-one-sided-braking-w30` | `20260810T-accepted-reproduction` | Same scratch schedule; one-sided retreat-command supervision at weight 30 | Iteration 130 selected; score -0.480194, 96.7% success, advisory rejected | Stop the reward-weight sweep and introduce difficult starts during phase 1 |
 | `20260811T140551Z-scratch-early-hard10-braking-w30` | `20260810T-accepted-reproduction` | 121 updates at `1e-4` with 10% difficult resets, then 31 at `3e-5` with 40%; one-sided braking weight 30 | Iteration 130 selected; score -0.632643, 93.3% success, advisory rejected | Restore the proven easy phase and introduce difficult resets through a short graduated transition |
+| `20260811T143832Z-scratch-graduated-hard20-40-braking-w30` | `20260810T-accepted-reproduction` | 121 easy updates at `1e-4`, 11 at `3e-5` with 20% difficult resets, then 31 at `1e-5` with 40% | Iteration 160 selected; score -0.528887, 95.3% success, advisory rejected | Stop fitting the unstable schedule and narrow the task-owned velocity action scale |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1218,3 +1219,53 @@ Keep the controller, rewards, observations, held-out distribution, gates, and
 single scratch optimizer lineage unchanged. If this still oscillates, inspect
 the intermediate and final checkpoint trajectory before changing either phase
 length or fraction.
+
+### 40. A graduated hard curriculum recovers but does not stabilize safety
+
+Date: 2026-08-11.
+
+Plain-language view: Introducing difficult starts gradually helps the policy
+recover after each bad update, but it still alternates between safer and unsafe
+commands. The policy's velocity action range is much wider than this task ever
+needs, so the next run should give the learned output useful resolution around
+the small braking commands.
+
+Technical view: Run
+`20260811T143832Z-scratch-graduated-hard20-40-braking-w30` started from clean
+source commit `01e7182`, a new network, and a new optimizer. It restored the
+proven 121-update easy phase, added 11 updates with 20% difficult resets at
+`3e-5`, and used 31 updates with 40% difficult resets at `1e-5`. The accepted
+controller, reward, observation, held-out distribution, and exact gates stayed
+fixed. Training completed 163 updates in 1045.8 seconds at approximately
+166,000 environment frames per second. A representative GPU sample was 75%
+utilization, 15.9/24.6 GB memory, and 204 W; the simulator pipeline, not memory,
+remained the measured throughput limit.
+
+Content-addressed selection reused exact results for models 0 through 90 and
+scored the nine curriculum-affected checkpoints fresh in 345.8 seconds. Model
+160 was selected with score -0.528887, 95.33% success, 4.67% other flight
+failure, zero collision and timeout, 0.41426 m mean closest range, and 0.39841 m
+minimum closest range. Models 125, 135, 140, 145, 150, and 160 stay between
+93.67% and 95.33% success, while models 130 and 155 collapse to 86.0% and
+85.33%. The lower final learning rate therefore limits neither the destructive
+oscillation nor the exact range failures. Extending or refining this schedule
+is unsupported.
+
+Independent evaluation reproduced the selected result and preserved its log
+under `.build/docker/integration/eval-press.20260811T150243Z.885315`. At the
+worst crossings the drone is still closing at about 0.022 to 0.040 m/s while
+the deterministic actor commands only weak retreat, zero, or a small approach
+velocity. Lateral, vertical, attitude, collision, and controller response
+remain within their envelopes. The first failed boundary is still the actor's
+wall-normal command.
+
+The task reference never requests more than 0.10 m/s on any translation axis,
+but the artifact currently maps a unit action to 2.0 m/s. Coarse-test a
+task-owned maximum of 0.5 m/s and raise normalized exploration noise from 0.03
+to 0.12 so its physical 0.06 m/s standard deviation is unchanged. This gives
+the deterministic mean four times more normalized resolution around the
+evidenced braking commands without reducing exploration or changing the
+controller, reward, reset distribution, learning schedule, held-out suite, or
+deployment contract. If it improves safety, refine the action-scale bracket;
+if not, restore the scale and add an explicit policy-output safety projection
+owned by the task interface rather than controller alignment.
