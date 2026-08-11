@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: TWENTY-THIRD SCRATCH SELECTION REJECTED; TASK ACTION SCALE NEXT
+Status: TWENTY-FOURTH SCRATCH SELECTION REJECTED; LONGER SCALE-AWARE SCRATCH RUN NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -38,6 +38,7 @@ are unsupported.
 | `20260811T133733Z-scratch-one-sided-braking-w30` | `20260810T-accepted-reproduction` | Same scratch schedule; one-sided retreat-command supervision at weight 30 | Iteration 130 selected; score -0.480194, 96.7% success, advisory rejected | Stop the reward-weight sweep and introduce difficult starts during phase 1 |
 | `20260811T140551Z-scratch-early-hard10-braking-w30` | `20260810T-accepted-reproduction` | 121 updates at `1e-4` with 10% difficult resets, then 31 at `3e-5` with 40%; one-sided braking weight 30 | Iteration 130 selected; score -0.632643, 93.3% success, advisory rejected | Restore the proven easy phase and introduce difficult resets through a short graduated transition |
 | `20260811T143832Z-scratch-graduated-hard20-40-braking-w30` | `20260810T-accepted-reproduction` | 121 easy updates at `1e-4`, 11 at `3e-5` with 20% difficult resets, then 31 at `1e-5` with 40% | Iteration 160 selected; score -0.528887, 95.3% success, advisory rejected | Stop fitting the unstable schedule and narrow the task-owned velocity action scale |
+| `20260811T150929Z-scratch-action-scale050-noise012` | `20260810T-accepted-reproduction` | Same graduated schedule; 0.5 m/s translation scale and 0.12 normalized exploration noise | Iteration 160 selected; score -1.715155, 59.3% success, advisory rejected | Preserve the late improvement and double the high-rate learning phase in one new scratch run |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1269,3 +1270,41 @@ controller, reward, reset distribution, learning schedule, held-out suite, or
 deployment contract. If it improves safety, refine the action-scale bracket;
 if not, restore the scale and add an explicit policy-output safety projection
 owned by the task interface rather than controller alignment.
+
+### 41. Narrower actions need more high-rate scratch learning
+
+Date: 2026-08-11.
+
+Plain-language view: The smaller velocity range gives the actor finer control,
+but the old training length is too short for it to learn decisive motion. Since
+training is fast and the last checkpoints are still improving, give the same
+scratch procedure substantially more high-rate learning before rejecting the
+representation.
+
+Technical view: Run `20260811T150929Z-scratch-action-scale050-noise012`
+started from clean source commit `5ec3a27`, a new network, and a new optimizer.
+It changed the translation action scale from 2.0 to 0.5 m/s and normalized
+exploration noise from 0.03 to 0.12, preserving the initial 0.06 m/s physical
+standard deviation. The accepted controller, reward, three-phase curriculum,
+held-out distribution, and exact gates stayed fixed. Training completed 163
+updates in 1058.2 seconds and all 13 checkpoints were evaluated fresh in 606.1
+seconds because the action contract changed.
+
+Model 160 was selected with score -1.715155, 59.33% success, 0.67% body
+collision, 3.33% other flight failure, 36.67% timeout, 0.42033 m mean closest
+range, and 0.39911 m minimum closest range. Model 120 first reaches 54.33%
+success; the transition then falls to 45.0%, and models 130 through 150 stay
+between 49.33% and 53.33%. Models 155 and 160 recover to 58.0% and 59.33%, so
+the run is far below acceptance but still improving at its terminal boundary.
+The new body-collision and timeout modes arise from insufficient learned motion
+authority, not from controller response or a newly discovered simulator seam.
+
+Preserve the 0.5 m/s scale, 0.12 exploration noise, and all other semantics.
+Extend the zero-hard-case `1e-4` phase from 121 to 241 updates, then retain the
+11-update 20% transition and 31-update 40% final phase unchanged. This remains
+one new scratch network and optimizer; it is not checkpoint continuation or
+fine-tuning. Content-addressed selection should reuse checkpoints 0 through 120
+and evaluate the extended learning frontier fresh. If the longer phase restores
+high success and improves safety, refine only the supported training-length
+side. If it plateaus far below the old action contract, restore 2.0 m/s and
+implement the evidenced task-owned braking projection.
