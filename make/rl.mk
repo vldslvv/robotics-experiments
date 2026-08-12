@@ -73,7 +73,7 @@ test-integration-press-hover-goto: generate-drone-usd
 
 .PHONY: test-integration-press-contact-chain
 test-integration-press-contact-chain: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-contact-chain: HYDRA_CONFIG = configs/train_press_approach_quad.yaml
+test-integration-press-contact-chain: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
 test-integration-press-contact-chain: ISAAC_TEST_EXTRA_ARGS = --contact-chain --num-envs 1
 test-integration-press-contact-chain: generate-drone-usd
 	@TEST_TARGET='test-integration-press-contact-chain' \

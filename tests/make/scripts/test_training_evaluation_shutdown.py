@@ -75,7 +75,7 @@ if [[ "$*" == *data/environment* ]]; then
     fi
     exit 0
 fi
-printf '{"Train/mean_reward": {}}\\n'
+printf '{"train/20_mean_episode_reward": {}}\\n'
 exit 0
 """,
     )
@@ -209,14 +209,14 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
     console = next((tmp_path / "logs").glob("*.console.log")).read_text(encoding="utf-8")
     assert "shutdown=disabled" in console
     assert (
-        "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in console
+        "TensorBoard URL: http://127.0.0.1:6006/?smoothing=0&tagFilter=" in console
         and "scalar data loaded" in console
     )
     assert (
-        "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in result.stdout
+        "TensorBoard URL: http://127.0.0.1:6006/?smoothing=0&tagFilter=" in result.stdout
         and "scalar data loaded" in result.stdout
     )
-    assert "set Smoothing=0 for all metrics" in console
+    assert "seven primary validation charts with Smoothing=0" in console
     assert "training_report.json" in console
     assert "unbound variable" not in result.stderr
 
@@ -227,7 +227,7 @@ def test_wrapper_uses_requested_tensorboard_port(tmp_path: Path) -> None:
     assert result.returncode == 0
     calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
     assert "RL_TENSORBOARD_PORT=6008" in calls
-    assert "TensorBoard URL: http://127.0.0.1:6008/" in result.stdout
+    assert "TensorBoard URL: http://127.0.0.1:6008/?smoothing=0&tagFilter=" in result.stdout
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:

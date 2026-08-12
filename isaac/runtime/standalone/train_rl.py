@@ -51,6 +51,12 @@ from robotics_experiments.controller import (
 )
 from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
 from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
+from robotics_experiments.rl.training._monitoring import (
+    metric_registry_payload,
+    write_evaluation_scalars,
+    write_system_scalars,
+)
+from robotics_experiments.rl.training._telemetry import TelemetrySampler, probe_telemetry
 from robotics_experiments.rl.training.progress import (
     AcceptanceResult,
     EvaluationMetric,
@@ -70,9 +76,11 @@ _RUN_ID_ENV = "RL_RUN_ID"
 _CONTROLLER_ARTIFACT_ENV = "CONTROLLER_ARTIFACT"
 _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
-_REPORT_SCHEMA_VERSION = 2
-_CACHE_SCHEMA_VERSION = 3
-_EVALUATOR_REVISION = 2
+_ATTEMPT_REPORT_FILENAME = "attempt_report.json"
+_TELEMETRY_FILENAME = "telemetry.json"
+_REPORT_SCHEMA_VERSION = 3
+_CACHE_SCHEMA_VERSION = 4
+_EVALUATOR_REVISION = 3
 
 
 def _report(message: str) -> None:
@@ -182,9 +190,59 @@ def _artifact_metadata(
 
 
 def _write_json(*, path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.parent / f".{path.name}.{os.getpid()}.tmp"
     temporary.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
     temporary.replace(path)
+
+
+def _record_telemetry(*, path: Path, interval: dict[str, Any], target_rate: float) -> None:
+    summary = interval.get("summary")
+    if interval.get("status") == "complete" and isinstance(summary, dict) and summary:
+        measured = float(summary["gpu_utilization_rate_mean"])
+        interval["diagnostic"] = {
+            "gpu_utilization_target_rate": target_rate,
+            "gpu_utilization_target_met": measured >= target_rate,
+            "measured_bottleneck": (
+                "none_observed"
+                if measured >= target_rate
+                else "gpu_utilization_below_diagnostic_target"
+            ),
+        }
+    if path.is_file():
+        payload = json.loads(path.read_text())
+    else:
+        payload = {
+            "schema_version": 1,
+            "diagnostic_gpu_utilization_target_rate": target_rate,
+            "intervals": [],
+        }
+    intervals = payload.get("intervals")
+    if not isinstance(intervals, list):
+        raise ValueError(f"telemetry artifact is invalid: {path}")
+    intervals.append(interval)
+    _write_json(path=path, payload=payload)
+
+
+def _require_telemetry_interval(*, interval: dict[str, Any]) -> dict[str, float]:
+    summary = interval.get("summary")
+    if interval.get("status") != "complete" or not isinstance(summary, dict) or not summary:
+        raise RuntimeError(str(interval.get("error") or "telemetry interval failed"))
+    return {str(name): float(value) for name, value in summary.items()}
+
+
+def _telemetry_report_summary(*, summary: dict[str, float], target_rate: float) -> dict[str, Any]:
+    measured = summary["gpu_utilization_rate_mean"]
+    return {
+        **summary,
+        "gpu_utilization_target_rate": target_rate,
+        "gpu_utilization_target_met": measured >= target_rate,
+        "measured_bottleneck": (
+            "none_observed"
+            if measured >= target_rate
+            else "gpu_utilization_below_diagnostic_target"
+        ),
+    }
 
 
 def _write_artifact_metadata(*, run_dir: Path, metadata: dict[str, Any]) -> None:
@@ -425,6 +483,9 @@ def _evaluation_worker_main(
             controller_settings=metadata.controller_settings,
             policy_contract=metadata.contract,
         )
+        telemetry = TelemetrySampler(
+            sample_interval_s=config.rl.training.telemetry_sample_interval_s
+        )
         try:
             result_queue.put(("ready", None))
             while True:
@@ -447,15 +508,21 @@ def _evaluation_worker_main(
                     press_policy_evaluation,
                 )
 
-                rollout = evaluate_press_approach_policy(
-                    env=env,
-                    policy=policy,
-                    seeds=seeds,
-                    episodes_per_seed=evaluation_config.episodes_per_seed,
-                    goal_config=config.rl.press.goal,
-                    report=_report,
-                    trace_worst_episode=False,
-                )
+                telemetry.start(role="val" if workload_role == "validation" else "test")
+                try:
+                    rollout = evaluate_press_approach_policy(
+                        env=env,
+                        policy=policy,
+                        seeds=seeds,
+                        episodes_per_seed=evaluation_config.episodes_per_seed,
+                        goal_config=config.rl.press.goal,
+                        report=_report,
+                        trace_worst_episode=False,
+                    )
+                finally:
+                    telemetry_interval = telemetry.finish(
+                        work_items=len(seeds) * evaluation_config.episodes_per_seed
+                    )
                 evaluation = press_policy_evaluation(
                     iteration=int(iteration),
                     checkpoint_path=Path(checkpoint_name),
@@ -464,7 +531,7 @@ def _evaluation_worker_main(
                     evaluation_config=evaluation_config,
                     source=f"fresh-{workload_role}",
                 )
-                result_queue.put(("evaluation", evaluation))
+                result_queue.put(("evaluation", (evaluation, telemetry_interval)))
         finally:
             env.close()
     except Exception:  # noqa: BLE001 - propagate the complete worker failure
@@ -521,12 +588,18 @@ class _EvaluationWorker:
         checkpoint_path: Path,
         artifact_dir: Path,
         policy_digest: str,
-    ) -> PolicyEvaluation:
+    ) -> tuple[PolicyEvaluation, dict[str, Any]]:
         self._tasks.put((iteration, str(checkpoint_path), str(artifact_dir), policy_digest))
         kind, payload = self._receive()
         if kind == "error":
             raise RuntimeError(f"held-out evaluator failed:\n{payload}")
-        if kind != "evaluation" or not isinstance(payload, PolicyEvaluation):
+        if (
+            kind != "evaluation"
+            or not isinstance(payload, tuple)
+            or len(payload) != 2
+            or not isinstance(payload[0], PolicyEvaluation)
+            or not isinstance(payload[1], dict)
+        ):
             raise RuntimeError("held-out evaluator returned an invalid evaluation")
         return payload
 
@@ -714,16 +787,28 @@ def _training_report(
     test_evaluation: PolicyEvaluation | None,
     acceptance,
     status: str,
+    active_attempt: dict[str, Any] | None = None,
+    telemetry_probe: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     criteria = config.rl.training.plateau
     return {
         "schema_version": _REPORT_SCHEMA_VERSION,
+        "report_kind": "campaign",
         "artifact_run_id": run_dir.name,
         "policy_name": config.rl.training.policy_name,
         "policy_interface": rl.PolicyInterface.PRESS_APPROACH.value,
         "comparison_fingerprint": comparison_fingerprint,
         "phases": [asdict(phase) for phase in phases],
         "plateau_criteria": asdict(criteria),
+        "metric_registry": metric_registry_payload(),
+        "telemetry": {
+            "sample_interval_s": config.rl.training.telemetry_sample_interval_s,
+            "diagnostic_gpu_utilization_target_rate": (
+                config.rl.training.gpu_utilization_target_rate
+            ),
+            "policy_decision_input": False,
+            "preflight_probe": telemetry_probe,
+        },
         "attempt_execution": "isolated_process",
         "training_attempt_seeds": list(config.rl.training.attempt_seeds),
         "workloads": {
@@ -731,6 +816,7 @@ def _training_report(
             "test": _workload_payload(role="test", config=config),
         },
         "attempts": attempts,
+        "active_attempt": active_attempt,
         "status": status,
         "selected_attempt_index": selected_attempt_index,
         "selected_iteration": selected.iteration if selected is not None else None,
@@ -766,6 +852,34 @@ def _training_report(
         ),
         "acceptance": _acceptance_payload(acceptance=acceptance) if acceptance else None,
     }
+
+
+def _attempt_report(
+    *,
+    run_dir: Path,
+    config: ExperimentConfig,
+    phases: tuple[RlTrainingPhaseConfig, ...],
+    comparison_fingerprint: str,
+    attempt: dict[str, Any],
+    selected: PolicyEvaluation | None,
+    selected_policy_path: Path | None,
+    status: str,
+) -> dict[str, Any]:
+    payload = _training_report(
+        run_dir=run_dir,
+        config=config,
+        phases=phases,
+        comparison_fingerprint=comparison_fingerprint,
+        attempts=[attempt],
+        selected=selected,
+        selected_attempt_index=int(attempt["attempt_index"]) if selected is not None else None,
+        selected_policy_path=selected_policy_path,
+        test_evaluation=None,
+        acceptance=None,
+        status=status,
+    )
+    payload["report_kind"] = "attempt"
+    return payload
 
 
 def _publish_selected(
@@ -869,6 +983,7 @@ def _restore_phase_branch(
     env,
     parent_checkpoint: Path,
     phase: RlTrainingPhaseConfig,
+    phase_number: int,
     device: str,
 ) -> int:
     """Restore a learner, apply refinement settings, then reset all environments."""
@@ -879,7 +994,7 @@ def _restore_phase_branch(
         device=device,
     )
     _report(f"refinement restore COMPLETE iteration={restored_iteration}")
-    training.configure_phase(runner=runner, phase=phase)
+    training.configure_phase(runner=runner, phase=phase, phase_number=phase_number)
     if hasattr(env, "set_training_hard_case_fraction"):
         env.set_training_hard_case_fraction(float(phase.hard_case_fraction))
     elif phase.hard_case_fraction != 0.0:
@@ -907,6 +1022,7 @@ def _finalize_campaign(
     comparison_fingerprint: str,
     metadata: dict[str, Any],
     writer,
+    telemetry_probe: dict[str, float],
 ) -> None:
     from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
@@ -921,7 +1037,7 @@ def _finalize_campaign(
         workload_role="test",
     )
     try:
-        test_evaluation = test_worker.evaluate(
+        test_evaluation, telemetry_interval = test_worker.evaluate(
             iteration=selected.iteration,
             checkpoint_path=selected.checkpoint_path,
             artifact_dir=selection.artifact_dir,
@@ -933,16 +1049,62 @@ def _finalize_campaign(
         raise RuntimeError("final test evaluation was not executed freshly")
     if test_evaluation.policy_digest != selected.policy_digest:
         raise RuntimeError("final test evaluated a different actor digest")
+    attempt_dir = selection.artifact_dir.parents[1]
+    attempt_record = attempts[selected_attempt_index]
+    tensorboard_step = int(attempt_record["attempted_updates"])
+    telemetry_interval["tensorboard_step"] = tensorboard_step
+    _record_telemetry(
+        path=attempt_dir / _TELEMETRY_FILENAME,
+        interval=telemetry_interval,
+        target_rate=config.rl.training.gpu_utilization_target_rate,
+    )
+    try:
+        telemetry_summary = _require_telemetry_interval(interval=telemetry_interval)
+    except RuntimeError:
+        telemetry_failed_report = _training_report(
+            run_dir=run_dir,
+            config=config,
+            phases=phases,
+            comparison_fingerprint=comparison_fingerprint,
+            attempts=attempts,
+            selected=selected,
+            selected_attempt_index=selected_attempt_index,
+            selected_policy_path=selected_policy,
+            test_evaluation=test_evaluation,
+            acceptance=None,
+            status="telemetry_failed",
+            telemetry_probe=telemetry_probe,
+        )
+        _write_json(path=run_dir / _REPORT_FILENAME, payload=telemetry_failed_report)
+        raise
     acceptance = evaluate_press_acceptance(
         evaluation=test_evaluation,
         evaluation_config=config.rl.press.evaluation,
         minimum_range_m=config.rl.press.goal.range_min_m,
     )
-    for metric in test_evaluation.metrics:
-        if metric.value is not None and math.isfinite(metric.value):
-            writer.add_scalar(f"Acceptance/{metric.name}", metric.value, 0)
-    for gate in acceptance.gates:
-        writer.add_scalar(f"Acceptance/gate_{gate.name.replace(' ', '_')}", gate.passed, 0)
+    write_evaluation_scalars(
+        writer=writer,
+        role="test",
+        evaluation=test_evaluation,
+        all_gates_passed=acceptance.passed,
+        step=tensorboard_step,
+    )
+    write_system_scalars(
+        writer=writer,
+        role="test",
+        summary=telemetry_summary,
+        step=tensorboard_step,
+    )
+    attempt_record["telemetry"]["summaries"].append(
+        {
+            "role": "test",
+            "tensorboard_step": tensorboard_step,
+            **_telemetry_report_summary(
+                summary=telemetry_summary,
+                target_rate=config.rl.training.gpu_utilization_target_rate,
+            ),
+        }
+    )
     writer.flush()
     final_report = _training_report(
         run_dir=run_dir,
@@ -956,6 +1118,7 @@ def _finalize_campaign(
         test_evaluation=test_evaluation,
         acceptance=acceptance,
         status="accepted" if acceptance.passed else "test_failed",
+        telemetry_probe=telemetry_probe,
     )
     _write_json(path=run_dir / _REPORT_FILENAME, payload=final_report)
     if not acceptance.passed:
@@ -1019,16 +1182,36 @@ def _run_new_training(
 
     from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
-    writer = SummaryWriter(log_dir=str(run_dir / "logs"))
+    writer = None
     validation_worker: _EvaluationWorker | None = None
     metadata: dict[str, Any] | None = None
     comparison_fingerprint: str | None = None
     attempts: list[dict[str, Any]] = []
+    partial_attempt_report_path: Path | None = None
+    partial_attempt_record: dict[str, Any] | None = None
+    partial_candidates: list[_AttemptSelection] = []
     try:
         for attempt_index, seed in enumerate(attempt_seeds, start=attempt_index_offset):
             _seed_everything(seed)
             attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
             attempt_dir.mkdir()
+            attempt_report_path = attempt_dir / _ATTEMPT_REPORT_FILENAME
+            partial_attempt_report_path = attempt_report_path
+            _write_json(
+                path=attempt_report_path,
+                payload={
+                    "schema_version": _REPORT_SCHEMA_VERSION,
+                    "report_kind": "attempt",
+                    "status": "initializing",
+                    "artifact_run_id": run_dir.name,
+                    "attempt_index": attempt_index,
+                    "training_seed": seed,
+                },
+            )
+            attempt_writer = SummaryWriter(
+                log_dir=str(run_dir / "logs" / f"attempt_{attempt_index + 1:02d}")
+            )
+            writer = attempt_writer
             setup_started = time.monotonic()
             _report(f"attempt setup START attempt={attempt_index + 1} seed={seed}")
             env, env_cfg = _build_env(
@@ -1080,8 +1263,14 @@ def _run_new_training(
                     training_config=training_config,
                     phase=phases[0],
                     policy_config=env_cfg.policy_config,
-                    log_dir=str(run_dir / "logs" / f"attempt_{attempt_index + 1:02d}"),
+                    log_dir=None,
                     device=device,
+                )
+                training.configure_monitoring(
+                    runner=runner,
+                    writer=writer,
+                    phase=phases[0],
+                    phase_number=1,
                 )
                 training.initialize_actor_output(
                     runner=runner,
@@ -1095,8 +1284,22 @@ def _run_new_training(
                     checkpoint_path=initial_checkpoint,
                     iteration=0,
                 )
-                cache_dir = policy_root / ".validation-cache-v3"
+                cache_dir = policy_root / ".validation-cache-v4"
+                telemetry = TelemetrySampler(
+                    sample_interval_s=training_config.telemetry_sample_interval_s
+                )
+                _write_json(
+                    path=attempt_dir / _TELEMETRY_FILENAME,
+                    payload={
+                        "schema_version": 1,
+                        "diagnostic_gpu_utilization_target_rate": (
+                            training_config.gpu_utilization_target_rate
+                        ),
+                        "intervals": [],
+                    },
+                )
                 candidates: list[_AttemptSelection] = []
+                partial_candidates = candidates
                 evaluation_records: list[dict[str, Any]] = []
                 phase_results: list[dict[str, Any]] = []
                 attempt_record: dict[str, Any] = {
@@ -1105,11 +1308,17 @@ def _run_new_training(
                     "worker_pid": os.getpid(),
                     "evaluations": evaluation_records,
                     "phase_results": phase_results,
+                    "attempted_updates": 0,
+                    "telemetry": {
+                        "artifact": str((attempt_dir / _TELEMETRY_FILENAME).relative_to(run_dir)),
+                        "summaries": [],
+                    },
                     "selected_policy_digest": None,
                     "selected_checkpoint": None,
                     "validation": None,
                 }
                 attempts.append(attempt_record)
+                partial_attempt_record = attempt_record
                 evaluation_index = 0
 
                 _report(
@@ -1132,6 +1341,8 @@ def _run_new_training(
                     candidates: list[_AttemptSelection] = candidates,
                     evaluation_records: list[dict[str, Any]] = evaluation_records,
                     attempt_index: int = attempt_index,
+                    writer=attempt_writer,
+                    attempt_record: dict[str, Any] = attempt_record,
                 ) -> PolicyEvaluation:
                     nonlocal evaluation_index, validation_worker
                     artifact_dir = attempt_dir / "evaluated" / f"candidate_{evaluation_index:03d}"
@@ -1165,11 +1376,35 @@ def _run_new_training(
                                 timeout_s=training_config.evaluation_worker_timeout_s,
                                 workload_role="validation",
                             )
-                        evaluation = validation_worker.evaluate(
+                        evaluation, telemetry_interval = validation_worker.evaluate(
                             iteration=iteration,
                             checkpoint_path=checkpoint_path,
                             artifact_dir=artifact_dir,
                             policy_digest=policy_digest,
+                        )
+                        tensorboard_step = training.monitoring_step(runner=runner)
+                        telemetry_interval["tensorboard_step"] = tensorboard_step
+                        _record_telemetry(
+                            path=attempt_dir / _TELEMETRY_FILENAME,
+                            interval=telemetry_interval,
+                            target_rate=training_config.gpu_utilization_target_rate,
+                        )
+                        telemetry_summary = _require_telemetry_interval(interval=telemetry_interval)
+                        write_system_scalars(
+                            writer=writer,
+                            role="val",
+                            summary=telemetry_summary,
+                            step=tensorboard_step,
+                        )
+                        attempt_record["telemetry"]["summaries"].append(
+                            {
+                                "role": "val",
+                                "tensorboard_step": tensorboard_step,
+                                **_telemetry_report_summary(
+                                    summary=telemetry_summary,
+                                    target_rate=training_config.gpu_utilization_target_rate,
+                                ),
+                            }
                         )
                         _write_cached_evaluation(
                             cache_path=candidate_cache,
@@ -1206,16 +1441,14 @@ def _run_new_training(
                             validation=validation,
                         )
                     )
-                    tensorboard_step = attempt_index * 1_000_000 + evaluation_index
-                    for metric in evaluation.metrics:
-                        if metric.value is not None and math.isfinite(metric.value):
-                            writer.add_scalar(
-                                f"Validation/{metric.name}", metric.value, tensorboard_step
-                            )
-                    writer.add_scalar(
-                        "Validation/all_gates_passed",
-                        float(validation.passed),
-                        tensorboard_step,
+                    tensorboard_step = training.monitoring_step(runner=runner)
+                    evaluation_records[-1]["tensorboard_step"] = tensorboard_step
+                    write_evaluation_scalars(
+                        writer=writer,
+                        role="val",
+                        evaluation=evaluation,
+                        all_gates_passed=validation.passed,
+                        step=tensorboard_step,
                     )
                     writer.flush()
 
@@ -1228,6 +1461,8 @@ def _run_new_training(
                     attempt_record: dict[str, Any] = attempt_record,
                     comparison_fingerprint: str = fingerprint,
                     attempt_index: int = attempt_index,
+                    runner=runner,
+                    attempt_report_path: Path = attempt_report_path,
                 ) -> None:
                     current_selection = _select_attempt_candidate(
                         criteria=training_config.plateau,
@@ -1244,19 +1479,17 @@ def _run_new_training(
                             ),
                         }
                     )
+                    attempt_record["attempted_updates"] = training.monitoring_step(runner=runner)
                     _write_json(
-                        path=run_dir / _REPORT_FILENAME,
-                        payload=_training_report(
+                        path=attempt_report_path,
+                        payload=_attempt_report(
                             run_dir=run_dir,
                             config=config,
                             phases=phases,
                             comparison_fingerprint=comparison_fingerprint,
-                            attempts=attempts,
+                            attempt=attempt_record,
                             selected=current_selection.evaluation,
-                            selected_attempt_index=attempt_index,
                             selected_policy_path=(current_selection.artifact_dir / POLICY_FILENAME),
-                            test_evaluation=None,
-                            acceptance=None,
                             status="training",
                         ),
                     )
@@ -1298,10 +1531,15 @@ def _run_new_training(
                             env=env,
                             parent_checkpoint=parent.evaluation.checkpoint_path,
                             phase=phase,
+                            phase_number=phase_index + 1,
                             device=device,
                         )
                     else:
-                        training.configure_phase(runner=runner, phase=phase)
+                        training.configure_phase(
+                            runner=runner,
+                            phase=phase,
+                            phase_number=phase_index + 1,
+                        )
                         if hasattr(env, "set_training_hard_case_fraction"):
                             env.set_training_hard_case_fraction(float(phase.hard_case_fraction))
                         elif phase.hard_case_fraction != 0.0:
@@ -1321,11 +1559,45 @@ def _run_new_training(
                             phase.evaluation_interval,
                             phase.max_iterations - phase_iteration,
                         )
-                        result = training.train_chunk(
-                            runner=runner,
-                            completed_iterations=branch_iteration,
-                            iterations=chunk,
-                            randomize_initial_episode_lengths=randomize_episode_lengths,
+                        telemetry.start(role="train")
+                        try:
+                            result = training.train_chunk(
+                                runner=runner,
+                                completed_iterations=branch_iteration,
+                                iterations=chunk,
+                                randomize_initial_episode_lengths=randomize_episode_lengths,
+                            )
+                        finally:
+                            telemetry_interval = telemetry.finish(
+                                work_items=(
+                                    chunk
+                                    * int(training_config.num_steps_per_env)
+                                    * int(env.num_envs)
+                                )
+                            )
+                        tensorboard_step = training.monitoring_step(runner=runner)
+                        telemetry_interval["tensorboard_step"] = tensorboard_step
+                        _record_telemetry(
+                            path=attempt_dir / _TELEMETRY_FILENAME,
+                            interval=telemetry_interval,
+                            target_rate=training_config.gpu_utilization_target_rate,
+                        )
+                        telemetry_summary = _require_telemetry_interval(interval=telemetry_interval)
+                        write_system_scalars(
+                            writer=writer,
+                            role="train",
+                            summary=telemetry_summary,
+                            step=tensorboard_step,
+                        )
+                        attempt_record["telemetry"]["summaries"].append(
+                            {
+                                "role": "train",
+                                "tensorboard_step": tensorboard_step,
+                                **_telemetry_report_summary(
+                                    summary=telemetry_summary,
+                                    target_rate=training_config.gpu_utilization_target_rate,
+                                ),
+                            }
                         )
                         randomize_episode_lengths = False
                         branch_iteration += result.iterations
@@ -1398,19 +1670,17 @@ def _run_new_training(
                         "validation": _acceptance_payload(acceptance=attempt_selection.validation),
                     }
                 )
+                attempt_record["attempted_updates"] = training.monitoring_step(runner=runner)
                 _write_json(
-                    path=run_dir / _REPORT_FILENAME,
-                    payload=_training_report(
+                    path=attempt_report_path,
+                    payload=_attempt_report(
                         run_dir=run_dir,
                         config=config,
                         phases=phases,
                         comparison_fingerprint=comparison_fingerprint,
-                        attempts=attempts,
+                        attempt=attempt_record,
                         selected=attempt_selection.evaluation,
-                        selected_attempt_index=attempt_index,
                         selected_policy_path=attempt_selection.artifact_dir / POLICY_FILENAME,
-                        test_evaluation=None,
-                        acceptance=None,
                         status="validation_passed"
                         if attempt_selection.validation.passed
                         else "training",
@@ -1436,17 +1706,14 @@ def _run_new_training(
         if validation_worker is not None:
             validation_worker.close()
             validation_worker = None
-        worker_report = _training_report(
+        worker_report = _attempt_report(
             run_dir=run_dir,
             config=config,
             phases=phases,
             comparison_fingerprint=comparison_fingerprint or "",
-            attempts=attempts,
+            attempt=attempt_record,
             selected=attempt_selection.evaluation,
-            selected_attempt_index=attempt_index,
             selected_policy_path=attempt_selection.artifact_dir / POLICY_FILENAME,
-            test_evaluation=None,
-            acceptance=None,
             status=(
                 "procedural_smoke_complete"
                 if args.procedural_smoke
@@ -1457,13 +1724,44 @@ def _run_new_training(
                 )
             ),
         )
-        _write_json(path=run_dir / _REPORT_FILENAME, payload=worker_report)
+        _write_json(path=attempt_report_path, payload=worker_report)
         _report(
             f"attempt worker COMPLETE attempt={attempt_index + 1} "
             f"validation={str(attempt_selection.validation.passed).lower()}"
         )
+    except (Exception, KeyboardInterrupt) as exc:
+        if partial_attempt_report_path is not None and partial_attempt_record is not None:
+            partial_selection = (
+                _select_attempt_candidate(
+                    criteria=training_config.plateau,
+                    candidates=tuple(partial_candidates),
+                )
+                if partial_candidates
+                else None
+            )
+            _write_json(
+                path=partial_attempt_report_path,
+                payload=_attempt_report(
+                    run_dir=run_dir,
+                    config=config,
+                    phases=phases,
+                    comparison_fingerprint=comparison_fingerprint or "",
+                    attempt=partial_attempt_record,
+                    selected=(
+                        partial_selection.evaluation if partial_selection is not None else None
+                    ),
+                    selected_policy_path=(
+                        partial_selection.artifact_dir / POLICY_FILENAME
+                        if partial_selection is not None
+                        else None
+                    ),
+                    status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
+                ),
+            )
+        raise
     finally:
-        writer.close()
+        if writer is not None:
+            writer.close()
         if validation_worker is not None:
             validation_worker.close()
 
@@ -1516,6 +1814,7 @@ def _run_isolated_campaign(
             maximum_iterations=args.max_iterations,
         )
     )
+    telemetry_probe = probe_telemetry()
     run_dir = _make_run_dir(out_root=policy_root, run_id=os.environ.get(_RUN_ID_ENV))
     attempts: list[dict[str, Any]] = []
     selections: list[tuple[int, _AttemptSelection]] = []
@@ -1535,6 +1834,7 @@ def _run_isolated_campaign(
             test_evaluation=None,
             acceptance=None,
             status="training",
+            telemetry_probe=telemetry_probe,
         ),
     )
     _report(
@@ -1547,19 +1847,85 @@ def _run_isolated_campaign(
         worker_environment[_CAMPAIGN_RUN_DIR_ENV] = str(run_dir)
         worker_environment[_RUN_ID_ENV] = run_dir.name
         started = time.monotonic()
+        attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
+        attempt_report_path = attempt_dir / _ATTEMPT_REPORT_FILENAME
+        active_attempt = {
+            "attempt_index": attempt_index,
+            "training_seed": seed,
+            "report": str(attempt_report_path.relative_to(run_dir)),
+        }
+        current_selection = (
+            _select_attempt_candidate(
+                criteria=training_config.plateau,
+                candidates=tuple(candidate for _, candidate in selections),
+            )
+            if selections
+            else None
+        )
+        current_index = (
+            next(index for index, candidate in selections if candidate is current_selection)
+            if current_selection is not None
+            else None
+        )
+        _write_json(
+            path=run_dir / _REPORT_FILENAME,
+            payload=_training_report(
+                run_dir=run_dir,
+                config=config,
+                phases=phases,
+                comparison_fingerprint=comparison_fingerprint,
+                attempts=attempts,
+                selected=(current_selection.evaluation if current_selection is not None else None),
+                selected_attempt_index=current_index,
+                selected_policy_path=(
+                    current_selection.artifact_dir / POLICY_FILENAME
+                    if current_selection is not None
+                    else None
+                ),
+                test_evaluation=None,
+                acceptance=None,
+                status="training",
+                active_attempt=active_attempt,
+                telemetry_probe=telemetry_probe,
+            ),
+        )
         _report(
             f"attempt process START attempt={attempt_index + 1} seed={seed} "
             f"completed_attempts={len(attempts)}"
         )
-        subprocess.run(
-            _attempt_worker_command(args=args, attempt_index=attempt_index, seed=seed),
-            cwd=repo_root,
-            env=worker_environment,
-            check=True,
-        )
-        payload = json.loads((run_dir / _REPORT_FILENAME).read_text())
-        if not isinstance(payload, dict) or payload.get("schema_version") != _REPORT_SCHEMA_VERSION:
-            raise ValueError("attempt worker wrote an invalid campaign report")
+        try:
+            subprocess.run(
+                _attempt_worker_command(args=args, attempt_index=attempt_index, seed=seed),
+                cwd=repo_root,
+                env=worker_environment,
+                check=True,
+            )
+        except KeyboardInterrupt:
+            interrupted = json.loads((run_dir / _REPORT_FILENAME).read_text())
+            interrupted["status"] = "interrupted"
+            _write_json(path=run_dir / _REPORT_FILENAME, payload=interrupted)
+            raise
+        except subprocess.CalledProcessError:
+            failed = json.loads((run_dir / _REPORT_FILENAME).read_text())
+            failed["status"] = "attempt_failed"
+            _write_json(path=run_dir / _REPORT_FILENAME, payload=failed)
+            raise
+        payload = json.loads(attempt_report_path.read_text())
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != _REPORT_SCHEMA_VERSION
+            or payload.get("report_kind") != "attempt"
+        ):
+            raise ValueError("attempt worker wrote an invalid attempt report")
+        if payload.get("status") not in {
+            "validation_passed",
+            "validation_failed",
+            "procedural_smoke_complete",
+        }:
+            failed = json.loads((run_dir / _REPORT_FILENAME).read_text())
+            failed["status"] = "attempt_failed"
+            _write_json(path=run_dir / _REPORT_FILENAME, payload=failed)
+            raise RuntimeError("attempt worker did not complete successfully")
         attempt_payloads = payload.get("attempts")
         if not isinstance(attempt_payloads, list) or len(attempt_payloads) != 1:
             raise ValueError("attempt worker did not report exactly one isolated attempt")
@@ -1611,6 +1977,7 @@ def _run_isolated_campaign(
                 test_evaluation=None,
                 acceptance=None,
                 status=status,
+                telemetry_probe=telemetry_probe,
             ),
         )
         _report(
@@ -1644,6 +2011,7 @@ def _run_isolated_campaign(
             test_evaluation=None,
             acceptance=None,
             status="procedural_smoke_complete",
+            telemetry_probe=telemetry_probe,
         )
         _write_json(path=run_dir / _REPORT_FILENAME, payload=smoke_report)
         _report(
@@ -1665,6 +2033,7 @@ def _run_isolated_campaign(
             test_evaluation=None,
             acceptance=None,
             status="validation_failed",
+            telemetry_probe=telemetry_probe,
         )
         _write_json(path=run_dir / _REPORT_FILENAME, payload=failed_report)
         raise RuntimeError("all training attempts failed the validation gates")
@@ -1674,7 +2043,9 @@ def _run_isolated_campaign(
         raise ValueError("selected attempt metadata is not an object")
     from torch.utils.tensorboard import SummaryWriter
 
-    writer = SummaryWriter(log_dir=str(run_dir / "logs"))
+    writer = SummaryWriter(
+        log_dir=str(run_dir / "logs" / f"attempt_{selected_attempt_index + 1:02d}")
+    )
     try:
         _finalize_campaign(
             run_dir=run_dir,
@@ -1688,6 +2059,7 @@ def _run_isolated_campaign(
             comparison_fingerprint=comparison_fingerprint,
             metadata=metadata_payload,
             writer=writer,
+            telemetry_probe=telemetry_probe,
         )
     finally:
         writer.close()

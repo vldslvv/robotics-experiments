@@ -156,7 +156,8 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance=None,
         status="training",
     )
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
+    assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
         "validation": {
@@ -266,21 +267,18 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
             "selected_checkpoint": str(checkpoint.relative_to(run_dir)),
             "validation": validation,
         }
-        report = train_rl._training_report(  # noqa: SLF001
+        report = train_rl._attempt_report(  # noqa: SLF001
             run_dir=run_dir,
             config=config,
             phases=(config.rl.training.phases[0],),
             comparison_fingerprint="fingerprint",
-            attempts=[attempt],
+            attempt=attempt,
             selected=evaluation,
-            selected_attempt_index=attempt_index,
             selected_policy_path=candidate_dir / "policy.pt",
-            test_evaluation=None,
-            acceptance=None,
             status="validation_passed" if passed else "validation_failed",
         )
         train_rl._write_json(  # noqa: SLF001
-            path=run_dir / "training_report.json",
+            path=attempt_dir / "attempt_report.json",
             payload=report,
         )
         assert kwargs["env"]["RL_CAMPAIGN_RUN_DIR"] == str(run_dir)
@@ -288,6 +286,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
 
     finalized = {}
     monkeypatch.setattr(train_rl, "_make_run_dir", make_run_dir)
+    monkeypatch.setattr(train_rl, "probe_telemetry", lambda: {"gpu_utilization_rate": 0.5})
     monkeypatch.setattr(train_rl.subprocess, "run", run_worker)
     monkeypatch.setattr(
         train_rl,
@@ -321,12 +320,71 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
     assert len({attempt["worker_pid"] for attempt in finalized["attempts"]}) == 2
 
 
+def test_campaign_parent_preserves_active_attempt_on_interruption(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+
+    config_path = REPO_ROOT / "configs" / "train_press_approach_quad.yaml"
+    config = load_config(config_path)
+    policy_root = tmp_path / "training" / "press-approach"
+    run_dir = policy_root / "campaign"
+
+    def make_run_dir(**_kwargs):
+        run_dir.mkdir(parents=True)
+        return run_dir
+
+    def interrupt(command, **_kwargs):
+        attempt_index = int(command[command.index("--attempt-index") + 1])
+        seed = int(command[command.index("--seed") + 1])
+        attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
+        attempt_dir.mkdir()
+        (attempt_dir / "attempt_report.json").write_text(
+            '{"schema_version": 3, "report_kind": "attempt", "status": "training"}\n'
+        )
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(train_rl, "_make_run_dir", make_run_dir)
+    monkeypatch.setattr(train_rl, "probe_telemetry", lambda: {"gpu_utilization_rate": 0.5})
+    monkeypatch.setattr(train_rl.subprocess, "run", interrupt)
+    monkeypatch.delenv("RL_RUN_ID", raising=False)
+    with pytest.raises(KeyboardInterrupt):
+        train_rl._run_isolated_campaign(  # noqa: SLF001
+            args=SimpleNamespace(
+                procedural_smoke=False,
+                max_iterations=1,
+                num_envs=64,
+                controller_artifact=None,
+                scene=None,
+                strict=False,
+            ),
+            config=config,
+            config_path=config_path,
+            attempt_seeds=(42, 43, 44),
+            policy_root=policy_root,
+            repo_root=tmp_path,
+        )
+    report = json.loads((run_dir / "training_report.json").read_text())
+    assert report["status"] == "interrupted"
+    assert report["attempts"] == []
+    assert report["active_attempt"] == {
+        "attempt_index": 0,
+        "training_seed": 42,
+        "report": "attempt_01_seed_42/attempt_report.json",
+    }
+    assert (run_dir / report["active_attempt"]["report"]).is_file()
+    assert not (policy_root / "latest").exists()
+    assert not (policy_root / "best").exists()
+
+
 def test_training_tensorboard_rates_are_fraction_valued_and_namespaced() -> None:
     source = (
         REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py"
     ).read_text()
-    assert '"Training/cumulative_collision_rate"' in source
-    assert '"Training/cumulative_flight_failure_rate"' in source
+    assert '"train/12_cumulative_collision_rate"' in source
+    assert '"train/11_cumulative_other_flight_failure_rate"' in source
     assert "_percent" not in source
     assert "100.0 * self._" not in source
 
@@ -612,12 +670,14 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
         env=FakeEnv(),
         parent_checkpoint=checkpoint,
         phase=phase,
+        phase_number=2,
         device="cuda:0",
     )
     assert restored == 17
     assert [call[0] for call in calls] == ["restore", "configure", "mixture", "reset"]
     assert calls[0][1]["checkpoint_path"] == checkpoint
     assert calls[1][1]["phase"] is phase
+    assert calls[1][1]["phase_number"] == 2
     assert calls[-1] == ("reset", True)
 
 

@@ -308,6 +308,8 @@ class RlTrainingConfig(_FreezableConfig):
         controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
         phases: Ordered curriculum phases executed by each fresh attempt.
+        telemetry_sample_interval_s: Diagnostic hardware sampling cadence.
+        gpu_utilization_target_rate: Diagnostic GPU-utilization target in [0, 1].
         num_steps_per_env: On-policy rollout length per env per iteration.
         gamma: Discount factor.
         lam: GAE lambda.
@@ -327,6 +329,8 @@ class RlTrainingConfig(_FreezableConfig):
     phases: List[RlTrainingPhaseConfig]
     plateau: RlPlateauCriteriaConfig
     evaluation_worker_timeout_s: float
+    telemetry_sample_interval_s: float
+    gpu_utilization_target_rate: float
     num_steps_per_env: int
     gamma: float
     lam: float

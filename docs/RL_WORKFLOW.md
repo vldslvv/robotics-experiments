@@ -111,15 +111,18 @@ and patience. It never reads the PPO reward or any gate. The uniform rule
 minimizes raw task cost, requires a `0.003` reduction from the phase reference,
 and declares a plateau after 10 consecutive stale evaluations.
 
-The press configuration currently runs:
+The press configuration runs:
 
-1. 241 iterations at `1e-4`, fixed schedule, `1e-4` entropy, full handoff reset;
-2. 11 iterations at `3e-5`, fixed schedule, zero entropy, 20% difficult resets;
-3. 31 iterations at `1e-5`, fixed schedule, zero entropy, 40% difficult resets.
+1. 180 iterations at `1e-4`, fixed schedule, `1e-4` entropy, full handoff reset;
+2. 100 iterations at `3e-5`, fixed schedule, zero entropy, 20% difficult resets;
+3. 100 iterations at `1e-5`, fixed schedule, zero entropy, 40% difficult resets.
 
 The broad phase evaluates every ten updates and both refinement phases evaluate
-every five. Model zero and every phase boundary are also evaluated. Training
-advances after a phase reaches its maximum or the same plateau rule fires.
+every five. Model zero and every cadence-aligned phase boundary are evaluated;
+there is no extra boundary update. The broad phase stops before the observed
+late collapse region, while each refinement phase provides twenty evaluation
+windows. Training advances after a phase reaches its maximum or the same
+plateau rule fires.
 
 Run training with:
 
@@ -141,21 +144,48 @@ attempt, including full attempt teardown/recreation, and stops without using
 the reserved test seeds.
 
 Use the campaign-scoped TensorBoard log directory under
-`.build/training/press-approach/<run-id>/logs`. The standard monitor is:
+`.build/training/press-approach/<run-id>/logs`. Each attempt is exactly one
+TensorBoard run containing its `train/`, `val/`, and `system/` metrics; the
+selected attempt also receives `test/`. The standard monitor is:
 
 ```bash
 make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-approach/<run-id>/logs
 ```
 
-and is served at `http://127.0.0.1:6006` by default. Set
+and is served at `http://127.0.0.1:6006` by default. The training wrapper prints
+a run-scoped URL with `smoothing=0` and a filter for the primary validation
+charts: all-gates pass, approach success, other flight failure, collision,
+minimum range, finite traces, and held-out task cost. Set
 `RL_TENSORBOARD_PORT=<port>` when that address is occupied. The Make target
 passes `--reload_interval 5` and retains up to one million scalar samples per tag.
-TensorBoard 2.21 stores one smoothing value in browser-local global settings;
-set the Time Series smoothing control to zero once for the origin so raw values
-remain visible for every `Validation/*`, `Acceptance/*`, and `Training/*` chart.
-The exact unsmoothed validation X/Y values are also recorded under each
-attempt's `evaluations` list in `training_report.json`. All rate metrics are
-fractions in `[0, 1]`.
+TensorBoard 2.21 also stores one smoothing value in browser-local global
+settings, so keep that global setting at zero. The exact selected-step values
+are recorded under each attempt's `evaluations` list in `training_report.json`.
+All rate metrics end in `_rate` and are fractions in `[0, 1]`.
+
+TensorBoard uses only the lowercase `train/`, `val/`, `test/`, and `system/`
+namespaces. Validation and test share one ordered registry: gate status,
+success/failure/collision rates, minimum range, trace finiteness, task cost,
+secondary terminal rates, range/completion measurements, and mean cost
+components. Undefined values such as successful completion time when there are
+no successes remain `null` in the report and are not emitted as a scalar.
+Acceptance is report metadata, not a TensorBoard namespace. Total attempted PPO
+updates are the X coordinate and never rewind when a refinement phase restores
+an earlier learner checkpoint; `train/03_checkpoint_iteration` records that
+learner position separately.
+
+`system/` is diagnostic-only and cannot influence PPO, plateau progress,
+selection, retry choice, validation/test gates, or acceptance. At the
+Hydra-configured one-second cadence, every training chunk and fresh validation
+or test evaluation samples NVIDIA utilization, memory, power, temperature, and
+the owning process's resident memory and CPU use. NVIDIA percentages are stored
+as fractional rates. Per-update rollout/PPO timing and Torch allocator peaks are
+also emitted during training. Raw samples live in each attempt's
+`telemetry.json`; interval summaries live in the strict campaign report. A
+preflight probe fails before rollout when telemetry is unavailable, and a
+sampler failure terminates at the interval boundary with evidence preserved.
+The configured `0.95` GPU-utilization target is diagnostic: a miss is recorded
+as the measured bottleneck and never changes policy qualification.
 
 The press-approach reward has eleven named signed terms, including the
 current-range barrier, three-axis state-velocity tracking, and physical
@@ -192,9 +222,20 @@ content digest, comparison fingerprint, controller digest, and evaluator
 revision. The content digest
 excludes only PyTorch's generated archive serialization ID; the raw SHA-256 of
 the exact exported `policy.pt` remains in every evaluation and published
-artifact record. `training_report.json` schema 2 records every attempt, phase
-parent, raw validation metrics, cache source, plateau state, phase termination,
-selection, final test, and gate-by-gate acceptance.
+artifact record. The campaign parent is the only writer of
+`training_report.json`. Before each worker launch it records the active attempt
+identity and its report path. The worker atomically writes
+`attempt_report.json` below its attempt directory; the parent validates and
+incorporates that report after the worker exits. An interruption preserves
+completed attempts, the active pointer, and the partial attempt report, marks
+the campaign interrupted, exits nonzero, and publishes nothing. Process resume
+remains unsupported.
+
+`training_report.json` schema 3 records every attempt, phase parent, raw
+validation metrics, exact TensorBoard step, telemetry summaries, cache source,
+plateau state, phase termination, selection, final test, and gate-by-gate
+acceptance. The evaluator, cache, metric registry, and comparison fingerprint
+carry matching strict revisions; older metric/report shapes are unsupported.
 
 After selection, the exported actor is immutable. A new uncached worker runs the
 disjoint final workload: 100 episodes for each of seeds 404, 505, and 606. The

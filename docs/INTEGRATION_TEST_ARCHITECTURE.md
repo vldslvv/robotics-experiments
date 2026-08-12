@@ -56,8 +56,11 @@ fit/publication, and the alignment target-envelope gate.
   forward-pad contact and pusher/button displacement, advances the production
   N-step latch, verifies exactly one lamp transition, and retreats within the
   stability envelope. A test-local no-dones environment keeps these physical
-  measurements independent of Stage 1's contact-failure termination. It is
-  part of `test-integration-all` and requires no PX4 container or trained policy.
+  measurements independent of Stage 1's contact-failure termination. The gate
+  selects the production press experiment config so its scripted post-contact
+  ramp retains the authority required to cross the real latch threshold; it
+  does not load or execute the policy named by that config. It is part of
+  `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
   Isaac Lab image. It needs the automatically published artifact from
   `make train-rl`, so it is deliberately not part of

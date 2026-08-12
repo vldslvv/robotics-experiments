@@ -239,7 +239,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"
-    assert tuple(phase.max_iterations for phase in training.phases) == (241, 11, 31)
+    assert tuple(phase.max_iterations for phase in training.phases) == (180, 100, 100)
     assert tuple(phase.learning_rate for phase in training.phases) == (
         1.0e-4,
         3.0e-5,
@@ -255,6 +255,8 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert training.plateau.direction == "minimize"
     assert training.plateau.minimum_delta == 0.003
     assert training.plateau.patience_evaluations == 10
+    assert training.telemetry_sample_interval_s == 1.0
+    assert training.gpu_utilization_target_rate == 0.95
     assert training.attempt_seeds == (42, 43, 44)
     assert tuple(phase.hard_case_fraction for phase in training.phases) == (
         0.0,

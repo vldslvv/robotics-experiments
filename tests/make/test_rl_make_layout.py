@@ -128,6 +128,22 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
     assert result.returncode == 0, result.stderr
     assert "run_isaac_integration_test.sh" in result.stdout
 
+    contact_result = subprocess.run(
+        [
+            "make",
+            "-n",
+            "-o",
+            "generate-drone-usd",
+            "test-integration-press-contact-chain",
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert contact_result.returncode == 0, contact_result.stderr
+    assert "configs/policy_press_approach_quad.yaml" in contact_result.stdout
+
 
 def test_training_uses_one_merged_container_invocation() -> None:
     result = subprocess.run(

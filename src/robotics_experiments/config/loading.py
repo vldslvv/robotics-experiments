@@ -280,6 +280,15 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
         or training.evaluation_worker_timeout_s <= 0.0
     ):
         raise ValueError("rl.training.evaluation_worker_timeout_s must be finite and positive")
+    if (
+        not math.isfinite(training.telemetry_sample_interval_s)
+        or training.telemetry_sample_interval_s <= 0.0
+    ):
+        raise ValueError("rl.training.telemetry_sample_interval_s must be finite and positive")
+    if not math.isfinite(training.gpu_utilization_target_rate) or not (
+        0.0 < training.gpu_utilization_target_rate <= 1.0
+    ):
+        raise ValueError("rl.training.gpu_utilization_target_rate must be in (0, 1]")
     policies = {
         "rl.hover.policy": experiment.rl.hover.policy,
         "rl.press.policy": experiment.rl.press.policy,

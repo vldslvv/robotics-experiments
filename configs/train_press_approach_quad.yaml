@@ -31,19 +31,19 @@ rl:
     # Each attempt starts from scratch. Refinement phases restore the
     # attempt-wide validation-selected checkpoint before changing curriculum.
     phases:
-      - max_iterations: 241
+      - max_iterations: 180
         evaluation_interval: 10
         learning_rate: 1.0e-4
         schedule: fixed
         entropy_coef: 0.0001
         hard_case_fraction: 0.0
-      - max_iterations: 11
+      - max_iterations: 100
         evaluation_interval: 5
         learning_rate: 3.0e-5
         schedule: fixed
         entropy_coef: 0.0
         hard_case_fraction: 0.2
-      - max_iterations: 31
+      - max_iterations: 100
         evaluation_interval: 5
         learning_rate: 1.0e-5
         schedule: fixed
@@ -55,6 +55,8 @@ rl:
       minimum_delta: 0.003
       patience_evaluations: 10
     evaluation_worker_timeout_s: 600.0
+    telemetry_sample_interval_s: 1.0
+    gpu_utilization_target_rate: 0.95
     num_steps_per_env: 32
     gamma: 0.995
     lam: 0.95

@@ -143,7 +143,9 @@ tensorboard_monitor_pid=""
 sudo_validated=false
 tensorboard_host="127.0.0.1"
 tensorboard_port="${RL_TENSORBOARD_PORT:-6006}"
-tensorboard_url="http://${tensorboard_host}:${tensorboard_port}/"
+tensorboard_base_url="http://${tensorboard_host}:${tensorboard_port}/"
+tensorboard_primary_filter='^(val/00_all_gates_passed|val/01_approach_success_rate|val/02_other_flight_failure_rate|val/03_collision_rate|val/04_minimum_closest_range_m|val/05_all_traces_finite|val/06_held_out_task_cost)$'
+tensorboard_url="${tensorboard_base_url}?smoothing=0&tagFilter=${tensorboard_primary_filter}"
 tensorboard_container_name="vv-rl-tensorboard.${artifact_run_id}"
 tensorboard_logdir=".build/training/${policy_name}/${artifact_run_id}/logs"
 tensorboard_ready_file="${log_dir}/${run_id}.tensorboard-ready"
@@ -240,7 +242,7 @@ serve_tensorboard_when_ready() {
 
     trap 'if [ -n "${server_pid}" ]; then kill "${server_pid}" 2>/dev/null; fi; exit 0' HUP INT TERM
     until find "${tensorboard_logdir}" \
-        -maxdepth 1 \
+        -maxdepth 2 \
         -type f \
         -name 'events.out.tfevents.*' \
         -size +0c \
@@ -264,15 +266,15 @@ serve_tensorboard_when_ready() {
                 tee -a "${console_log}" >&2
             return 1
         fi
-        if curl --fail --silent --output /dev/null "${tensorboard_url}"; then
+        if curl --fail --silent --output /dev/null "${tensorboard_base_url}"; then
             environment="$(
                 curl --fail --silent \
-                    "${tensorboard_url}data/environment" ||
+                    "${tensorboard_base_url}data/environment" ||
                     true
             )"
             scalar_tags="$(
                 curl --fail --silent \
-                    "${tensorboard_url}data/plugin/scalars/tags" ||
+                    "${tensorboard_base_url}data/plugin/scalars/tags" ||
                     true
             )"
             if [[ "${environment}" == *'"data_location":'*"${tensorboard_logdir}"'"'* ]] &&
@@ -283,7 +285,7 @@ serve_tensorboard_when_ready() {
                     "${policy_name}" \
                     "${artifact_run_id}" |
                     tee -a "${console_log}"
-                printf '[%s] TensorBoard Time Series uses one browser-global setting: set Smoothing=0 for all metrics; exact validation values are in %s/training_report.json\n' \
+                printf '[%s] TensorBoard opens the seven primary validation charts with Smoothing=0; exact selected-step values are in %s/training_report.json\n' \
                     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     ".build/training/${policy_name}/${artifact_run_id}" |
                     tee -a "${console_log}"

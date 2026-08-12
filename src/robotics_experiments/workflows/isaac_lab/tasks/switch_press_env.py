@@ -438,27 +438,27 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._timeout_episode_count += (ended & result.termination.time_out).count_nonzero()
         episode_denominator = self._completed_episode_count.clamp_min(1.0)
         self.extras["log"] = {
-            "Training/cumulative_completed_episodes": self._completed_episode_count,
-            "Training/cumulative_success_rate": (
+            "train/16_cumulative_completed_episodes": self._completed_episode_count,
+            "train/10_cumulative_approach_success_rate": (
                 self._successful_episode_count / episode_denominator
             ),
-            "Training/cumulative_collision_rate": (
+            "train/12_cumulative_collision_rate": (
                 self._collision_episode_count / episode_denominator
             ),
-            "Training/cumulative_body_collision_rate": (
+            "train/14_cumulative_body_collision_rate": (
                 self._body_collision_episode_count / episode_denominator
             ),
-            "Training/cumulative_pusher_collision_rate": (
+            "train/15_cumulative_pusher_collision_rate": (
                 self._pusher_collision_episode_count / episode_denominator
             ),
-            "Training/cumulative_flight_failure_rate": (
+            "train/11_cumulative_other_flight_failure_rate": (
                 self._flight_failure_episode_count / episode_denominator
             ),
-            "Training/cumulative_timeout_rate": (self._timeout_episode_count / episode_denominator),
+            "train/13_cumulative_timeout_rate": (self._timeout_episode_count / episode_denominator),
         }
         self.extras["log"].update(
             {
-                f"Training/reward_{name}": getattr(result.rewards, name).mean()
+                f"train/30_reward_{name}_mean": getattr(result.rewards, name).mean()
                 for name in _TRAINING_REWARD_TERMS
             }
         )

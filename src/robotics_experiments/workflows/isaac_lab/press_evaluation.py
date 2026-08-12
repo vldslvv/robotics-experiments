@@ -538,22 +538,28 @@ def press_policy_evaluation(
         policy_digest=policy_digest,
         metrics=(
             EvaluationMetric("approach_success_rate", summary.approach_success_rate),
+            EvaluationMetric("other_flight_failure_rate", summary.other_flight_failure_rate),
             EvaluationMetric("collision_rate", summary.collision_rate),
+            EvaluationMetric("minimum_closest_range_m", summary.min_closest_range_m),
+            EvaluationMetric("all_traces_finite", float(traces_finite)),
+            EvaluationMetric("held_out_task_cost", float(task_cost)),
+            EvaluationMetric("timeout_rate", summary.timeout_rate),
             EvaluationMetric("body_collision_rate", summary.body_collision_rate),
             EvaluationMetric("pusher_collision_rate", summary.pusher_collision_rate),
-            EvaluationMetric("other_flight_failure_rate", summary.other_flight_failure_rate),
-            EvaluationMetric("timeout_rate", summary.timeout_rate),
             EvaluationMetric("mean_closest_range_m", summary.mean_closest_range_m),
-            EvaluationMetric("min_closest_range_m", summary.min_closest_range_m),
-            EvaluationMetric("median_completion_time_s", summary.median_completion_time_s),
-            EvaluationMetric("terminal_range_cost", summary.mean_terminal_range_cost),
-            EvaluationMetric("trajectory_alignment_cost", summary.mean_trajectory_alignment_cost),
-            EvaluationMetric("velocity_tracking_cost", summary.mean_velocity_tracking_cost),
-            EvaluationMetric("upright_error_cost", summary.mean_upright_error_cost),
-            EvaluationMetric("action_delta_cost", summary.mean_action_delta_cost),
-            EvaluationMetric("completion_time_fraction", summary.mean_completion_time_fraction),
-            EvaluationMetric("traces_finite", float(traces_finite)),
-            EvaluationMetric("held_out_task_cost", float(task_cost)),
+            EvaluationMetric(
+                "median_successful_completion_time_s", summary.median_completion_time_s
+            ),
+            EvaluationMetric("mean_terminal_range_cost", summary.mean_terminal_range_cost),
+            EvaluationMetric(
+                "mean_trajectory_alignment_cost", summary.mean_trajectory_alignment_cost
+            ),
+            EvaluationMetric("mean_velocity_tracking_cost", summary.mean_velocity_tracking_cost),
+            EvaluationMetric("mean_upright_error_cost", summary.mean_upright_error_cost),
+            EvaluationMetric("mean_action_delta_cost", summary.mean_action_delta_cost),
+            EvaluationMetric(
+                "mean_completion_time_fraction", summary.mean_completion_time_fraction
+            ),
         ),
         reward_means=result.reward_means,
         source=source,
@@ -570,7 +576,7 @@ def evaluate_press_acceptance(
     predicates = (
         (
             "trace finiteness",
-            evaluation.metric("traces_finite"),
+            evaluation.metric("all_traces_finite"),
             "==",
             1.0,
         ),
@@ -588,7 +594,7 @@ def evaluate_press_acceptance(
         ),
         (
             "minimum closest range",
-            evaluation.metric("min_closest_range_m"),
+            evaluation.metric("minimum_closest_range_m"),
             ">=",
             float(minimum_range_m),
         ),

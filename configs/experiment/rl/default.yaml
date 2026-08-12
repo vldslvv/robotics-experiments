@@ -42,6 +42,8 @@ training:
     minimum_delta: 0.003
     patience_evaluations: 10
   evaluation_worker_timeout_s: 600.0
+  telemetry_sample_interval_s: 1.0
+  gpu_utilization_target_rate: 0.95
   num_steps_per_env: 24
   gamma: 0.99
   lam: 0.95
