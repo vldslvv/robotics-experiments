@@ -259,8 +259,9 @@ provenance are unsupported.
 On acceptance, publication copies the already-tested actor bytes and verifies
 their digest. Metadata and the report record both workloads, selected and tested
 digests, raw metrics, gate thresholds, individual results, overall status, and
-failure reasons. Only accepted campaigns advance `latest`; `best` advances only
-for a strictly lower validation cost within the same comparison fingerprint.
+failure reasons. An accepted campaign automatically advances `latest`; `best`
+advances only for a strictly lower validation cost within the same comparison
+fingerprint.
 Independent audit remains available with:
 
 ```bash
@@ -279,6 +280,16 @@ The transfer gate is downstream evidence. It must never mutate alignment,
 controller settings, policy weights, or the held-out evaluator.
 
 ## Deployment
+
+`latest` is the active operator-selected deployment label, not an acceptance
+claim. Automatic campaign publication assigns it only to an accepted, exactly
+tested actor. An operator may explicitly assign it to another strict policy
+artifact, including a validation-selected diagnostic candidate. That assignment
+must preserve the campaign report and failed or unavailable validation/test
+evidence, must not advance `best`, and does not make downstream execution an
+acceptance or qualification result. Runtime preflight validates the stored policy
+and controller contracts but does not reinterpret an operator deployment as a
+passed gate.
 
 Runtime policy composition is private to `runtime/_policy.py`. A `{kind:
 policy}` routine step resolves the strict policy artifact, builds the matching

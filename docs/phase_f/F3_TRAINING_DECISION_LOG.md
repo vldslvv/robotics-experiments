@@ -12347,3 +12347,26 @@ Final implementation verification passed `make check` with 789 tests and one
 skip, the complete all-files pre-commit gate, and all eight targets in
 `make test-integration-all`. The work therefore closes with preserved failure
 evidence and verified infrastructure, not with a qualified policy.
+
+### 396. Explicit operator deployment selects the failed seed-44 candidate
+
+Date: 2026-08-12.
+
+At the operator's explicit request, `latest` changes from an acceptance-only
+publication label to the active deployment label. Automatic campaigns still
+advance it only after the fresh final test passes, while an operator may point it
+at a strict diagnostic policy artifact. `best` remains acceptance-only. An
+operator override preserves and reports the source campaign's qualification
+state and does not synthesize validation, test, acceptance, audit, transfer, or
+routine evidence.
+
+The selected deployment is seed 44's validation-selected checkpoint at learner
+iteration 210 from campaign `20260812T054123Z.124480`, stored under
+`attempt_03_seed_44/evaluated/candidate_046`. Its actor SHA-256 is
+`d045bcf97aef593d2619c02f83f8596caa90a59752bbda273b5aecef38d97e53`.
+The preserved attempt report remains `validation_failed`: success was 0.956667
+and collision was zero, while minimum range was 0.398083 m against 0.400 m and
+other-flight-failure rate was 0.043333 against exactly zero. No final test or
+acceptance exists for this actor. The deployment must therefore be described as
+operator-selected and unqualified even when runtime preflight and execution
+succeed.

@@ -34,6 +34,8 @@ steps:
     hold_s: 1.0
   - kind: policy
     label: press-approach
+    # `latest` is the active operator deployment and is not itself an
+    # acceptance claim; inspect the originating campaign report when needed.
     artifact: .build/training/press-approach/latest
     switch_index: 0
     timeout_s: 20.0

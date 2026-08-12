@@ -236,8 +236,13 @@ the current contents and the intended home for that kind of code.
   selection eligibility only. A completed validation-passing attempt freezes
   its exact exported actor and runs one fresh, uncached, disjoint test workload.
   Acceptance reads only that test `PolicyEvaluation`; failure ends the campaign
-  without retry or publication. `latest` and comparable `best` advance only
-  after acceptance and always point to the exact tested actor bytes.
+  without retry or automatic publication. `best` advances only after acceptance
+  and always points to exact tested actor bytes. `latest` is the active
+  operator-selected deployment label: an accepted campaign advances it
+  automatically, while an explicit operator deployment may point it at any
+  strict policy artifact. Such an override does not create test evidence,
+  acceptance, or a `best` candidate, and its failed or unavailable qualification
+  evidence must remain visible.
 - Alignment invariants: read `docs/SIM_TO_SIM_ALIGNMENT.md` before touching
   `src/robotics_experiments/controller/`,
   `src/robotics_experiments/alignment/`, controller definitions, alignment Make

@@ -155,7 +155,10 @@ New campaigns capture both the task contract and alignment provenance before
 PPO, validate every checkpoint on seeds 101/202/303, and test the first eligible
 attempt's immutable selected actor on seeds 404/505/606. `rl.press.evaluation`
 owns the held-out cost weights, both workload seed sets, workload size, and gate
-thresholds. `latest` and comparable `best` advance only after the fresh test
-passes. Only the tested actor is exported.
+thresholds. Accepted campaigns automatically advance `latest`, and comparable
+`best` advances only after the fresh test passes. An explicit operator deployment
+may instead assign `latest` to a strict diagnostic candidate without changing
+`best` or its recorded qualification status. Only an accepted actor is exported
+as a campaign publication.
 `configs/train_press_approach_quad.yaml` selects the press task, the
 `press-approach` artifact namespace, ten-second episodes, and its PPO settings.
