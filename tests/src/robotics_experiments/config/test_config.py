@@ -377,10 +377,19 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
     assert steps[3]["y"] == 17.40
     assert steps[3]["ground_speed_m_s"] == 0.5
     assert steps[3]["position_tol_m"] == 0.05
-    assert steps[5]["y"] == 17.51
+    assert steps[5]["y"] == 17.52
     assert steps[5]["ground_speed_m_s"] == 0.08
     assert steps[5]["position_tol_m"] == 0.02
     assert steps[5]["timeout_s"] == 10.0
+    assert steps[6]["hold_s"] == 2.0
+    switch_y = deployment.switches.spawn_bounds[0].min[1]
+    staged_range_m = switch_y - steps[5]["y"]
+    staging_tolerance_m = steps[5]["position_tol_m"]
+    assert staged_range_m == pytest.approx(0.47)
+    assert staged_range_m - staging_tolerance_m == pytest.approx(
+        deployment.rl.press.handoff.switch_range_min_m
+    )
+    assert staged_range_m + staging_tolerance_m <= deployment.rl.press.handoff.switch_range_max_m
     assert steps[8]["ground_speed_m_s"] == 0.5
     assert "ground_speed_m_s" not in steps[2]
     assert all(float(step.get("timeout_s", 20.0)) <= 20.0 for step in steps)

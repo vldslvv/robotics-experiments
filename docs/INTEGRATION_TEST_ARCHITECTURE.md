@@ -79,8 +79,10 @@ fit/publication, and the alignment target-envelope gate.
 - `make test-integration-press-approach-routine` runs the Stage 1 deployment
   flight from `configs/policy_press_approach_quad.yaml`: takeoff, settle at a
   safe staging point about 0.59 m from the switch at a requested 0.5 m/s, make
-  the short move into the 0.48 m handoff range at 0.08 m/s, execute the
-  artifact-selected approach policy, return at 0.5 m/s to the landing point,
+  the short move to a 0.47 m handoff target at 0.08 m/s with its complete
+  waypoint-tolerance band inside the training entry envelope, settle for two
+  seconds, execute the artifact-selected approach policy, return at 0.5 m/s to
+  the landing point,
   land, and disarm. It requires stable contact-free approach completion and no
   lamp transition. Like the hover artifact gate, it is excluded from
   `test-integration-all` because it needs an independently accepted artifact

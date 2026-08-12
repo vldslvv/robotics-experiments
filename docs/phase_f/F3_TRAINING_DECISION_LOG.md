@@ -12370,3 +12370,42 @@ other-flight-failure rate was 0.043333 against exactly zero. No final test or
 acceptance exists for this actor. The deployment must therefore be described as
 operator-selected and unqualified even when runtime preflight and execution
 succeed.
+
+### 397. Center manual actor entry inside the training handoff envelope
+
+Date: 2026-08-12.
+
+Five consecutive manual warehouse logs separate actor behavior from actor-entry
+staging. Runs `13_09_25` and `13_10_28` entered the actor at 0.4840 m and
+0.4660 m. The actor reached the target wall-normal band but did not complete the
+combined stable goal. Runs `13_12_04` and `13_13_22` never evaluated the actor:
+all 401 policy samples in each run were `handoff_wait` with reason `too_far`,
+zero velocity was transmitted, and the policy step timed out after 20 seconds.
+The retained timeout state measured approximately 0.506 m, just outside the
+0.50 m actor-entry maximum.
+
+Training resets directly into the shared 0.45-0.50 m handoff distribution with
+bounded wall-normal/lateral speed and angular rate. The manual route instead
+targeted 0.48 m with a 0.02 m three-dimensional waypoint tolerance, placing its
+outer completion boundary at the exact actor-entry maximum before subsequent
+settling error. A live diagnostic run at
+`.build/docker/integration/test-integration-press-approach-routine.20260812T132521Z.249616`
+confirmed that tightening the tolerance to 0.01 m prevents PX4 guided-position
+completion and stops the routine before actor entry. The route therefore keeps
+the proven 0.02 m tolerance, moves the target to 0.47 m, and settles for two
+seconds. With the fixed switch at 17.99 m and the drone target at 17.52 m, the
+complete axial waypoint band is 0.45-0.49 m: inside the same training envelope
+with 10 mm of margin at the farther boundary. This changes only pre-policy
+staging and does not change the actor, its failed qualification status, the
+handoff thresholds, or acceptance.
+
+The revised live routine at
+`.build/docker/integration/test-integration-press-approach-routine.20260812T133104Z.252597`
+completed both guided-position legs and the two-second final settle. The policy
+handoff passed on its first evaluation at 0.489262 m, with the gate latched and
+no handoff failure. This verifies that the production route now enters the same
+accepted state envelope as training. The diagnostic actor subsequently reached
+0.384762 m but accumulated zero stable-goal steps and timed out after 20 seconds.
+That downstream failure is consistent with the explicitly deployed actor's
+failed qualification status; it is not a handoff failure and does not qualify
+the policy for publication.
