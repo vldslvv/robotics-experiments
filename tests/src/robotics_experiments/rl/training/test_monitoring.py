@@ -181,6 +181,8 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
             self.writer.add_scalar("Policy/mean_noise_std", 0.1, it)
             self.writer.add_scalar("Train/mean_reward", 4.0, it)
             self.writer.add_scalar("Train/mean_episode_length", 5.0, it)
+            self.writer.add_scalar("Train/mean_reward/time", 4.0, it * 6)
+            self.writer.add_scalar("Train/mean_episode_length/time", 5.0, it * 6)
             self.writer.add_scalar("Perf/collection_time", 0.2, it)
             self.writer.add_scalar("Perf/learning_time", 0.3, it)
 
@@ -197,13 +199,18 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
         phase_number=2,
     )
     runner.logger.log(it=141)
-    assert rsl_rl.monitoring_step(runner=runner) == 2
+    runner.logger.writer.configure_phase(
+        phase=SimpleNamespace(learning_rate=1.0e-5, hard_case_fraction=0.4),
+        phase_number=3,
+    )
+    runner.logger.log(it=141)
+    assert rsl_rl.monitoring_step(runner=runner) == 3
     checkpoint_events = [
         (value, step)
         for tag, value, step in writer.events
         if tag == "train/03_checkpoint_iteration"
     ]
-    assert checkpoint_events == [(170.0, 1), (141.0, 2)]
+    assert checkpoint_events == [(170.0, 1), (141.0, 2), (141.0, 3)]
     assert all(
         tag.startswith(("train/", "val/", "test/", "system/"))
         for tag, _value, _step in writer.events
@@ -232,3 +239,43 @@ def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
         "system/21_train_ppo_update_time_s",
         "system/22_train_total_iteration_time_s",
     }
+
+
+def test_training_chunk_advances_when_restored_learner_iteration_repeats() -> None:
+    writer = _Writer()
+    phase = SimpleNamespace(learning_rate=1.0e-4, hard_case_fraction=0.0)
+    runner = SimpleNamespace(current_learning_iteration=0)
+    rsl_rl.configure_monitoring(
+        runner=runner,
+        writer=writer,
+        phase=phase,
+        phase_number=1,
+    )
+
+    def learn(*, num_learning_iterations: int, init_at_random_ep_len: bool) -> None:
+        del num_learning_iterations, init_at_random_ep_len
+        runner.writer.add_scalar("Loss/value_function", 1.0, 1)
+        runner.writer.add_scalar("Perf/collection time", 0.2, 1)
+        runner.writer.add_scalar("Perf/learning_time", 0.3, 1)
+
+    runner.learn = learn
+    rsl_rl.train_chunk(
+        runner=runner,
+        completed_iterations=0,
+        iterations=1,
+        randomize_initial_episode_lengths=True,
+    )
+    runner.writer.configure_phase(phase=phase, phase_number=2)
+    rsl_rl.train_chunk(
+        runner=runner,
+        completed_iterations=0,
+        iterations=1,
+        randomize_initial_episode_lengths=False,
+    )
+
+    assert rsl_rl.monitoring_step(runner=runner) == 2
+    assert [
+        (value, step)
+        for tag, value, step in writer.events
+        if tag == "train/03_checkpoint_iteration"
+    ] == [(1.0, 1), (1.0, 2)]

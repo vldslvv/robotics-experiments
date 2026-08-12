@@ -1,6 +1,6 @@
 # F3 training and parameter-tuning decision log
 
-Status: TRAINING COMPLETE; ACCEPTANCE EVALUATION PAUSED (2026-07-21).
+Status: CLEAN-ROOM QUALIFICATION STOPPED AT VALIDATION (2026-08-12).
 
 This is a chronological record of the decisions made while training the first
 press policy for `Isaac-Switch-Press-Direct-v0`. Each entry first states the intuition for someone learning RL,
@@ -12245,3 +12245,105 @@ alone is pending because the pre-v1 `best` label is unsupported by the strict
 controller loader. Replace unsupported labels atomically without loading or
 migrating their contents, publish this accepted bundle, then proceed to the
 controller/RL/deployment dependency audit before scratch policy training.
+
+### 395. Clean-room qualification stops at policy validation
+
+Date: 2026-08-12.
+
+The monitoring and campaign contracts were implemented and committed before a
+new qualification began. TensorBoard now presents only the lowercase
+`train/`, `val/`, `test/`, and `system/` namespaces, validation and test share
+one ordered semantic metric registry, rates remain fractions, unavailable
+values remain absent, and the monitoring URL pins the primary validation
+charts with zero smoothing. Each worker atomically owns its attempt report and
+telemetry artifact while the campaign parent alone owns `training_report.json`.
+The configured training budget is 180/100/100 updates with validation cadence
+10/5/5, learning rates 1e-4/3e-5/1e-5, entropy 1e-4/0/0, and difficult-reset
+rates 0.0/0.2/0.4.
+
+The from-scratch controller campaign is
+`.build/alignment/x500-px4-v1/qualification-20260812T051417Z`. It used clean
+source commit `2833cc58835444a2f8ed6c95df0cbe573b38a0cf`, captured fresh PX4
+evidence, evaluated 135 unique candidates, and passed advisory quality, the
+22-profile actuator audit, all 22 controller-boundary replays, and the live
+integration gate. Its exact run-local `controller.json` has SHA-256
+`fa32081cbce39da9a2c82dee8a67dd1f4db937f901373ed4e6a31156e8b8b30d`,
+settings fingerprint
+`d8eaadea73b9a95b05904b7b53a48431f69a164b88c7624b17cd77e110b17235`,
+and comparison fingerprint
+`8e4418b73d78b6189f4789b559653e2fb33615afb30b844f0761b57b475121bd`.
+Search GPU utilization averaged 0.320, reached p95 0.490 and peak 0.520, and
+therefore did not meet the diagnostic 0.95 target. No artificial work was
+added to raise it.
+
+Policy campaign `20260812T054123Z.124480` loaded that exact controller and ran
+three isolated scratch attempts with training seeds 42, 43, and 44 and fixed
+validation seeds 101, 202, and 303. Seed 42 completed phase budgets 180/55/100,
+restoring learner iterations 180 and 230; seed 43 completed 180/95/100,
+restoring 130 and 175; seed 44 completed 180/85/100, restoring 120 and 155.
+Every later phase applied its new configuration and reset the environments.
+The actual PPO update counts were 335, 375, and 365. The selected checkpoint
+iterations and actor digests were 280/
+`27404e9a664aa0c863ea23b25056b3f4fffd355f7e27fc65b330252372b26979`,
+260/`91e6bec7d2a0aea21f07a7033b99966788b90bd4a2387ed82bdeef8af8b6cbc2`,
+and 210/`d045bcf97aef593d2619c02f83f8596caa90a59752bbda273b5aecef38d97e53`.
+
+All three attempts failed validation. Seed 42 reached success 0.906667,
+collision 0, minimum closest range 0.398629 m, other-flight-failure rate
+0.093333, and task cost 0.712906. Seed 43 reached 0.880000, 0, 0.398767 m,
+0.120000, and 0.839458. Seed 44 was best by the gate-first rule at success
+0.956667 and collision 0, but its 0.398083 m minimum range missed the 0.400 m
+gate and its 0.043333 other-flight-failure rate missed the exact-zero gate;
+its task cost was 0.513296. The campaign ended nonzero with status
+`validation_failed`, no selected campaign actor, and no publication.
+
+The three attempt telemetry artifacts contain 321 complete intervals: 161
+training and 160 validation intervals backed by 13,076 raw one-second samples.
+Across intervals, mean training GPU utilization was 0.768332 and mean
+validation utilization was 0.473944. Peak GPU memory was 17.6582 GiB, peak
+training-process resident memory was 9.8383 GiB, and peak temperature was
+62 C. Every interval identified GPU utilization below the diagnostic 0.95
+target; telemetry remained excluded from policy decisions. No sampler error
+occurred.
+
+An independent TensorBoard audit found 72 tags in every attempt, 18 validation
+tags, no test tags, no legacy namespaces, and strictly increasing steps per
+tag. It matched all 2,947 finite report values bit-for-bit to event values and
+confirmed that five unavailable values were absent. That audit also exposed
+that ignored RSL `/time` tags had advanced the shared presentation step before
+being discarded, doubling the reported attempted-update coordinates to
+670/750/730. The writer now discards those tags before opening a step and marks
+each update at the production training-chunk boundary. Procedural GPU smoke
+`monitoring-axis-smoke-verified-20260812` then completed all three attempts in
+distinct processes with exactly one update in each phase. Every attempt reports
+three attempted updates and TensorBoard steps 1/2/3. Attempt 1 deliberately
+restored learner iteration 1 before phase 3, so its learner positions 1/2/2
+also prove that restoration does not rewind or collapse the presentation axis.
+An event-file audit found 71 allowed-namespace tags, 17 validation tags, no
+test tags, and no legacy tags per attempt. All telemetry intervals completed,
+only validation workloads were present, and no label changed. The metric values
+and validation decision from the qualification are unaffected.
+
+Cancellation was also exercised. Pre-fix runs `20260812T052442Z.89266` and
+`20260812T053229Z.107138` retained partial evidence but exposed a signal path
+that left the parent report at `training`. The container wrapper now owns the
+Python process group and forwards termination as an interrupt, and the Python
+entrypoint converts HUP, INT, and TERM into `KeyboardInterrupt` in both parent
+and worker. Live run `interrupt-signal-smoke-20260812d` then exited 130 with
+root status `interrupted`, retained its active-attempt pointer and atomic
+partial attempt report at `initializing`, and changed no publication label.
+
+Because no validation-passing actor exists, test seeds 404, 505, and 606 were
+never used, the fresh final test and independent acceptance audit were not run,
+and `make eval-press`, policy transfer, and the complete approach routine were
+not started. The `latest` label remains
+`20260811T154439Z-scratch-action050-main241`, `best` remains
+`20260811T093944Z-scratch-predictive-reference400ms`, and no `qualification`
+label exists. There is therefore no accepted digest to load or claim for the
+routine driver. This is the required stop: the alignment evidence is accepted,
+but the policy is unqualified and unpublished.
+
+Final implementation verification passed `make check` with 789 tests and one
+skip, the complete all-files pre-commit gate, and all eight targets in
+`make test-integration-all`. The work therefore closes with preserved failure
+evidence and verified infrastructure, not with a qualified policy.

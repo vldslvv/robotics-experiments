@@ -17,6 +17,14 @@ The standalone Isaac test scripts these targets run live under
 `isaac/runtime/standalone/tests/`; see that directory's `README.md` for
 scenario-specific notes.
 
+Inside the container, `run_isaac_test_in_container.sh` launches the Python test
+as a distinct process group while a separate pipeline filters and persists its
+output. Container HUP, INT, and TERM signals are forwarded to that complete
+Python process group as SIGINT, and the runner waits for it before exiting with
+the corresponding shell status. This lets campaign parents and workers finish
+their atomic interruption reports instead of leaving a live-looking partial
+report when a host wrapper is canceled.
+
 `make/integration-tests.mk` owns the general integration harness variables,
 aggregate suite, and non-RL target definitions. `make/rl.mk` owns merged
 training/evaluation, independent press evaluation, and all press/Isaac Lab task

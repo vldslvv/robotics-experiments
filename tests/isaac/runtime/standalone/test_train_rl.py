@@ -379,6 +379,29 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
     assert not (policy_root / "best").exists()
 
 
+def test_interrupt_handlers_raise_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    train_rl = _load_train_rl_module()
+    installed: dict[int, object] = {}
+    monkeypatch.setattr(
+        train_rl.signal,
+        "signal",
+        lambda signal_number, handler, /: installed.__setitem__(signal_number, handler),
+    )
+
+    train_rl._install_interrupt_handlers()  # noqa: SLF001
+
+    assert set(installed) == {
+        train_rl.signal.SIGHUP,
+        train_rl.signal.SIGINT,
+        train_rl.signal.SIGTERM,
+    }
+    for handler in installed.values():
+        with pytest.raises(KeyboardInterrupt):
+            handler(0, None)  # type: ignore[operator]
+
+
 def test_training_tensorboard_rates_are_fraction_valued_and_namespaced() -> None:
     source = (
         REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py"

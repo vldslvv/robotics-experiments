@@ -103,6 +103,7 @@ class _PresentationWriter:
         self._phase = phase
         self._phase_number = phase_number
         self._last_learner_step: int | None = None
+        self._new_update_pending = False
         self._presentation_step = 0
         self._collection_time_s = 0.0
         if torch.cuda.is_available():
@@ -116,6 +117,9 @@ class _PresentationWriter:
         self._phase = phase
         self._phase_number = phase_number
 
+    def begin_update(self) -> None:
+        self._new_update_pending = True
+
     def _write(self, *, tag: str, value, step: int) -> None:
         self._writer.add_scalar(
             tag,
@@ -126,8 +130,9 @@ class _PresentationWriter:
         )
 
     def _start_step(self, *, learner_step: int) -> None:
-        if learner_step == self._last_learner_step:
+        if not self._new_update_pending and learner_step == self._last_learner_step:
             return
+        self._new_update_pending = False
         self._last_learner_step = learner_step
         self._presentation_step += 1
         step = self._presentation_step
@@ -142,6 +147,13 @@ class _PresentationWriter:
 
     def add_scalar(self, tag: str, scalar_value, global_step: int, /, *args, **kwargs) -> None:
         del args, kwargs
+        if tag in {
+            "Loss/learning_rate",
+            "Perf/total_fps",
+            "Train/mean_episode_length/time",
+            "Train/mean_reward/time",
+        }:
+            return
         self._start_step(learner_step=int(global_step))
         step = self._presentation_step
         if tag.startswith("train/"):
@@ -152,16 +164,12 @@ class _PresentationWriter:
             mapped = "train/41_ppo_surrogate_loss"
         elif tag == "Loss/entropy":
             mapped = "train/42_ppo_entropy"
-        elif tag == "Loss/learning_rate":
-            return
         elif tag == "Policy/mean_noise_std":
             mapped = "train/43_policy_noise_standard_deviation"
         elif tag == "Train/mean_reward":
             mapped = "train/20_mean_episode_reward"
         elif tag == "Train/mean_episode_length":
             mapped = "train/21_mean_episode_length_steps"
-        elif tag in {"Train/mean_reward/time", "Train/mean_episode_length/time"}:
-            return
         elif tag in {"Perf/collection_time", "Perf/collection time"}:
             self._collection_time_s = float(scalar_value)
             mapped = "system/20_train_rollout_collection_time_s"
@@ -185,8 +193,6 @@ class _PresentationWriter:
                 )
                 torch.cuda.reset_peak_memory_stats()
             mapped = "system/21_train_ppo_update_time_s"
-        elif tag == "Perf/total_fps":
-            return
         else:
             raise ValueError(f"unregistered RSL-RL metric tag {tag!r}")
         self._write(tag=mapped, value=scalar_value, step=step)
@@ -216,6 +222,7 @@ class _MetricLogger:
         self._call_enabled(self._base.process_env_step, *args, **kwargs)
 
     def log(self, *args, **kwargs) -> None:
+        self.writer.begin_update()
         self._call_enabled(self._base.log, *args, **kwargs)
 
     def save_model(self, *args, **kwargs) -> None:
@@ -356,6 +363,11 @@ def train_chunk(
     """Train exact new updates and number the terminal model by completed updates."""
     if completed_iterations < 0 or iterations <= 0:
         raise ValueError("completed_iterations must be non-negative and iterations positive")
+    logger = getattr(runner, "logger", None)
+    if isinstance(logger, _MetricLogger):
+        logger.writer.begin_update()
+    elif isinstance(getattr(runner, "writer", None), _PresentationWriter):
+        runner.writer.begin_update()
     runner.current_learning_iteration = completed_iterations + 1
     runner.learn(
         num_learning_iterations=iterations,

@@ -23,6 +23,7 @@ import queue
 import random
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -85,6 +86,15 @@ _EVALUATOR_REVISION = 3
 
 def _report(message: str) -> None:
     print(f"[isaac-standalone-test] {message}", file=sys.stderr, flush=True)
+
+
+def _raise_keyboard_interrupt(_signum: int, _frame: Any, /) -> None:
+    raise KeyboardInterrupt
+
+
+def _install_interrupt_handlers() -> None:
+    for signal_number in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        signal.signal(signal_number, _raise_keyboard_interrupt)
 
 
 def _seed_everything(seed: int) -> None:
@@ -2165,6 +2175,7 @@ def main() -> None:
 
             app_launcher = AppLauncher(headless=True)
             simulation_app = app_launcher.app
+        _install_interrupt_handlers()
         _run(args=args, config=config, config_path=config_path)
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
