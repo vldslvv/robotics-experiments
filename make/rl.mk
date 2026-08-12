@@ -60,7 +60,8 @@ tensorboard-rl:
 	    --host '$(RL_TENSORBOARD_HOST)' \
 	    --port '$(RL_TENSORBOARD_PORT)' \
 	    --reload_interval 5 \
-	    --samples_per_plugin 'scalars=$(RL_TENSORBOARD_SCALAR_SAMPLES)'
+	    --samples_per_plugin 'scalars=$(RL_TENSORBOARD_SCALAR_SAMPLES)' \
+	    --load_fast=false
 
 .PHONY: test-integration-press-hover-goto
 test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)

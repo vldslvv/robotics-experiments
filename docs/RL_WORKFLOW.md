@@ -157,7 +157,8 @@ a run-scoped URL with `smoothing=0` and a filter for the primary validation
 charts: all-gates pass, approach success, other flight failure, collision,
 minimum range, finite traces, and held-out task cost. Set
 `RL_TENSORBOARD_PORT=<port>` when that address is occupied. The Make target
-passes `--reload_interval 5` and retains up to one million scalar samples per tag.
+uses the stable loader for the double-precision scalar tensors, passes
+`--reload_interval 5`, and retains up to one million scalar samples per tag.
 TensorBoard 2.21 also stores one smoothing value in browser-local global
 settings, so keep that global setting at zero. The exact selected-step values
 are recorded under each attempt's `evaluations` list in `training_report.json`.

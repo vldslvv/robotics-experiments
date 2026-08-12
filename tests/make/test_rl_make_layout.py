@@ -37,6 +37,7 @@ def test_tensorboard_uses_five_second_reload_and_preserves_scalar_points() -> No
     )[0]
     assert "--reload_interval 5" in tensorboard
     assert "--samples_per_plugin 'scalars=$(RL_TENSORBOARD_SCALAR_SAMPLES)'" in tensorboard
+    assert "--load_fast=false" in tensorboard
     assert "RL_TENSORBOARD_SCALAR_SAMPLES ?= 1000000" in makefile
 
 
