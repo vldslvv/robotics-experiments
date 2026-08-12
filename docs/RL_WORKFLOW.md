@@ -161,6 +161,8 @@ passes `--reload_interval 5` and retains up to one million scalar samples per ta
 TensorBoard 2.21 also stores one smoothing value in browser-local global
 settings, so keep that global setting at zero. The exact selected-step values
 are recorded under each attempt's `evaluations` list in `training_report.json`.
+The wrapper keeps the live server under supervision while it waits for the
+first validation scalars; readiness is not bounded by a fixed wall-clock delay.
 All rate metrics end in `_rate` and are fractions in `[0, 1]`.
 
 TensorBoard uses only the lowercase `train/`, `val/`, `test/`, and `system/`

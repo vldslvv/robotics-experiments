@@ -259,7 +259,7 @@ serve_tensorboard_when_ready() {
         "RL_TENSORBOARD_PORT=${tensorboard_port}" \
         >>"${console_log}" 2>&1 &
     server_pid=$!
-    for _ in {1..30}; do
+    while true; do
         if ! kill -0 "${server_pid}" 2>/dev/null; then
             printf 'ERROR: TensorBoard exited before becoming ready; see %s\n' \
                 "${console_log}" |
@@ -296,13 +296,6 @@ serve_tensorboard_when_ready() {
         fi
         sleep 1
     done
-    printf 'ERROR: TensorBoard did not become ready at %s; see %s\n' \
-        "${tensorboard_url}" \
-        "${console_log}" |
-        tee -a "${console_log}" >&2
-    kill "${server_pid}" 2>/dev/null
-    wait "${server_pid}" 2>/dev/null
-    return 1
 }
 
 run_stage() {
