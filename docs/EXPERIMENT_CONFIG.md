@@ -118,25 +118,40 @@ finite and non-negative, and the output initialization is
 
 `rl.press.curriculum_stage` is required and currently accepts only `approach`.
 `handoff` owns the single actor-entry envelope used by both Lab reset and live
-deployment; `goal` owns the stable range/alignment/speed/upright predicate and
+deployment. `navigation_noise` records the accepted, repo-relative production
+waypoint measurement summary, independent sample count, explicit position and
+rotation margins, observed switch-range extrema, observed maximum combined
+lateral/vertical error, and maximum full quaternion-geodesic attitude error.
+Configuration requires at least ten samples and the handoff pose bounds to
+cover those observations plus their margins;
+`make measure-press-navigation-handoff` refreshes the raw evidence after sensor,
+estimator, controller, route, or scene changes. `goal` owns the 100-sample
+range/alignment/full-attitude/linear-speed/angular-speed predicate and
 three-axis velocity reference, including its positive-motion alignment gate;
-`reward` owns the ten reward-term parameters,
-including the positive lower-range barrier margin; `reset` owns only the
-physical scene; `termination` owns contact
-sensing and flight envelopes; and `evaluation` owns disjoint validation/test
+`reward` owns the position-progress/stabilization stage transition, one
+predictive range-undershoot barrier, strict hold, and the terminal outcome;
+`reset` owns only the physical scene;
+`termination` owns contact
+sensing and production flight envelopes, including a range-undershoot limit
+equal to the strict goal minimum; and `evaluation` owns disjoint validation/test
 seeds, 100 episodes per seed, cost weights, and the 95% success and 1%
 maximum-contact gates. Training-attempt, validation, and test seed sets must be
 nonempty, internally unique, and mutually disjoint; the final test set contains
 exactly three seeds. Independent reset
 velocity/range tunables are intentionally absent so training and deployment
-cannot resolve different entry bounds. Invalid handoff/goal/velocity-reference
-bounds, negative or non-finite reward weights, invalid rates, and unknown
-stages fail during `load_config`.
+cannot resolve different entry bounds. Invalid or uncovered navigation
+measurements, handoff/goal/velocity-reference bounds, negative or non-finite
+reward weights, invalid rates, and unknown stages fail during `load_config`.
 
 `rl.training` owns the ordered phases in each PPO attempt, rollout settings,
 task selection, artifact namespace, ordered `attempt_seeds`, and
 `controller_artifact`. Each phase owns its iteration count, checkpoint cadence,
-learning rate, schedule, entropy, and difficult-reset fraction. The campaign
+learning rate, schedule, entropy, and optional training-only range-undershoot
+recovery limit. Press recovery limits are positive, no greater than the strict
+range minimum, nondecreasing across phases, and equal to the strict range
+minimum in the final phase. They change only episode termination; every phase
+uses the same full handoff reset distribution and strict 100-sample goal.
+The campaign
 coordinator starts every attempt in a distinct Isaac process and waits for that
 process to exit before considering the next seed. Each later phase restores the
 attempt-wide validation-selected actor, critic, optimizer, and iteration before
@@ -161,4 +176,4 @@ may instead assign `latest` to a strict diagnostic candidate without changing
 `best` or its recorded qualification status. Only an accepted actor is exported
 as a campaign publication.
 `configs/train_press_approach_quad.yaml` selects the press task, the
-`press-approach` artifact namespace, ten-second episodes, and its PPO settings.
+`press-approach` artifact namespace, 15-second episodes, and its PPO settings.

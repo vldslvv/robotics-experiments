@@ -10,7 +10,7 @@ import pytest
 from tests.support.paths import REPO_ROOT
 
 
-def test_press_episode_counters_exist_before_any_curriculum_update():
+def test_press_episode_counters_exist_before_phase_configuration():
     path = (
         REPO_ROOT
         / "src"
@@ -46,10 +46,15 @@ def test_press_episode_counters_exist_before_any_curriculum_update():
         "_body_collision_episode_count",
         "_pusher_collision_episode_count",
         "_flight_failure_episode_count",
+        "_crash_episode_count",
+        "_altitude_failure_episode_count",
+        "_range_undershoot_episode_count",
+        "_relative_envelope_episode_count",
         "_timeout_episode_count",
     }
     assert counters <= assigned_attributes(methods["__init__"])
-    assert not counters & assigned_attributes(methods["set_training_hard_case_fraction"])
+    assert "_training_termination_cfg" in assigned_attributes(methods["__init__"])
+    assert "_training_termination_cfg" in assigned_attributes(methods["configure_training_phase"])
 
 
 class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):
@@ -189,7 +194,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     assert env == "environment"
     assert returned_cfg is env_cfg
     assert calls["factory"]["policy_contract"] is contract
-    assert not calls["factory"]["use_training_reset_distribution"]
+    assert "use_training_reset_distribution" not in calls["factory"]
     assert calls["gym"][1]["policy_contract"] is contract
     assert calls["gym"][1]["controller_settings"] == "aligned-controller"
     assert env_cfg.scene.num_envs == 8

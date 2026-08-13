@@ -40,9 +40,18 @@ from omni.timeline import TimelineEventType
 from omni.usd import StageEventType
 
 from ExperimentRuntime_python.global_variables import EXTENSION_TITLE
+from ExperimentRuntime_python.status import (
+    MotionRuntimeSnapshot,
+    NavigationRuntimeSnapshot,
+    PolicyRuntimeSnapshot,
+    PressRuntimeSnapshot,
+    RoutineStepRuntimeSnapshot,
+    SetpointRuntimeSnapshot,
+    VehicleRuntimeSnapshot,
+    _vehicle_runtime_snapshot,
+)
 from robotics_experiments.commanding import FailureKind
 from robotics_experiments.config import load_config
-from robotics_experiments.px4_bridge import BridgeStatus
 from robotics_experiments.runtime import (
     FleetDriverEnv,
     SwitchToggleEvent,
@@ -61,6 +70,12 @@ from robotics_experiments.runtime import (
 __all__ = [
     "ExperimentRuntimeSnapshot",
     "Extension",
+    "MotionRuntimeSnapshot",
+    "NavigationRuntimeSnapshot",
+    "PolicyRuntimeSnapshot",
+    "PressRuntimeSnapshot",
+    "RoutineStepRuntimeSnapshot",
+    "SetpointRuntimeSnapshot",
     "VehicleRuntimeSnapshot",
     "get_instance",
 ]
@@ -68,19 +83,6 @@ __all__ = [
 _LOG_PREFIX = f"[{EXTENSION_TITLE}]"
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _INSTANCE: Extension | None = None
-
-
-@dataclass(frozen=True)
-class VehicleRuntimeSnapshot:
-    """Immutable progress and bridge status for one flying vehicle."""
-
-    label: str
-    sim_time_us: int
-    bridge_status: BridgeStatus | None
-    completed_steps: int
-    driver_phase: str
-    failure: str | None
-    recovery_outcome: str | None
 
 
 @dataclass(frozen=True)
@@ -163,16 +165,11 @@ class Extension(omni.ext.IExt):
                     f"{_LOG_PREFIX} flying vehicle {flying.spawned.label!r} has no bridge host"
                 )
             host_status = read_bridge_host_status(host=host)
-            failure = flying.driver.failure
             vehicles.append(
-                VehicleRuntimeSnapshot(
-                    label=flying.spawned.label,
-                    sim_time_us=host_status.sim_time_us,
-                    bridge_status=host_status.bridge_status,
-                    completed_steps=flying.driver.previous_cursor,
-                    driver_phase=flying.driver.phase.name,
-                    failure=None if failure is None else failure.message,
-                    recovery_outcome=(None if failure is None else failure.recovery_outcome.name),
+                _vehicle_runtime_snapshot(
+                    config=self._fleet.config,
+                    flying=flying,
+                    host_status=host_status,
                 )
             )
         return ExperimentRuntimeSnapshot(

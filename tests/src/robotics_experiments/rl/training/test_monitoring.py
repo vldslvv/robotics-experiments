@@ -33,19 +33,33 @@ class _Writer:
 def _evaluation(*, undefined_completion_time: bool = False) -> PolicyEvaluation:
     values = {
         "approach_success_rate": 0.96,
-        "other_flight_failure_rate": 0.0,
         "collision_rate": 0.01,
+        "other_flight_failure_rate": 0.0,
+        "range_undershoot_rate": 0.0,
+        "timeout_rate": 0.03,
+        "completed_episodes": 300.0,
+        "range_pass_rate": 0.9,
+        "alignment_pass_rate": 0.8,
+        "attitude_pass_rate": 0.95,
+        "linear_speed_pass_rate": 0.7,
+        "angular_speed_pass_rate": 0.85,
+        "contact_clear_pass_rate": 0.99,
+        "complete_goal_pass_rate": 0.6,
+        "mean_max_stable_goal_fraction": 0.8,
+        "maximum_stable_goal_fraction": 1.0,
+        "mean_normalized_pose_error": 0.5,
         "minimum_closest_range_m": 0.405,
+        "mean_closest_range_m": 0.41,
         "all_traces_finite": 1.0,
         "held_out_task_cost": 0.25,
-        "timeout_rate": 0.03,
         "body_collision_rate": 0.006,
         "pusher_collision_rate": 0.004,
-        "mean_closest_range_m": 0.41,
         "median_successful_completion_time_s": None if undefined_completion_time else 1.5,
         "mean_terminal_range_cost": 0.1,
         "mean_trajectory_alignment_cost": 0.2,
+        "mean_relative_attitude_error_cost": 0.25,
         "mean_velocity_tracking_cost": 0.3,
+        "mean_angular_velocity_cost": 0.35,
         "mean_upright_error_cost": 0.4,
         "mean_action_delta_cost": 0.5,
         "mean_completion_time_fraction": 0.6,
@@ -94,7 +108,7 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
 
 def test_metric_registry_names_rates_units_and_unavailable_values() -> None:
     registry = metric_registry_payload()
-    assert registry["revision"] == 2
+    assert registry["revision"] == 12
     assert all(spec.suffix == spec.suffix.lower() for spec in EVALUATION_METRICS)
     assert all(not spec.suffix.endswith("_percent") for spec in EVALUATION_METRICS)
     rate_specs = tuple(spec for spec in EVALUATION_METRICS if spec.suffix.endswith("_rate"))
@@ -109,7 +123,7 @@ def test_metric_registry_names_rates_units_and_unavailable_values() -> None:
         all_gates_passed=False,
         step=0,
     )
-    assert "val/14_median_successful_completion_time_s" not in tags
+    assert "val/outcome/median_successful_completion_time_s" not in tags
     assert all(tag.startswith(("train/", "val/", "test/", "system/")) for tag in tags)
 
 
@@ -150,16 +164,16 @@ def test_system_metric_tags_are_complete_ordered_and_namespaced() -> None:
     writer = _Writer()
     tags = write_system_scalars(writer=writer, role="val", summary=summary, step=20)
     assert tags == (
-        "system/10_val_gpu_utilization_rate_mean",
-        "system/11_val_gpu_utilization_rate_p95",
-        "system/12_val_gpu_memory_used_gib_peak",
-        "system/13_val_gpu_memory_utilization_rate_peak",
-        "system/14_val_gpu_power_w_mean",
-        "system/15_val_gpu_temperature_c_max",
-        "system/16_val_process_resident_memory_gib_peak",
-        "system/17_val_process_cpu_cores_used_mean",
-        "system/18_val_duration_s",
-        "system/19_val_work_items_per_s",
+        "system/val/gpu_utilization_rate_mean",
+        "system/val/gpu_utilization_rate_p95",
+        "system/val/gpu_memory_used_gib_peak",
+        "system/val/gpu_memory_utilization_rate_peak",
+        "system/val/gpu_power_w_mean",
+        "system/val/gpu_temperature_c_max",
+        "system/val/process_resident_memory_gib_peak",
+        "system/val/process_cpu_cores_used_mean",
+        "system/val/duration_s",
+        "system/val/work_items_per_s",
     )
 
 
@@ -189,18 +203,24 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
     writer = _Writer()
     phase = SimpleNamespace(
         learning_rate=1.0e-4,
-        hard_case_fraction=0.0,
+        range_undershoot_min_m=0.38,
     )
     runner = SimpleNamespace(logger=BaseLogger())
     rsl_rl.configure_monitoring(runner=runner, writer=writer, phase=phase, phase_number=1)
     runner.logger.log(it=170)
     runner.logger.writer.configure_phase(
-        phase=SimpleNamespace(learning_rate=3.0e-5, hard_case_fraction=0.2),
+        phase=SimpleNamespace(
+            learning_rate=3.0e-5,
+            range_undershoot_min_m=0.39,
+        ),
         phase_number=2,
     )
     runner.logger.log(it=141)
     runner.logger.writer.configure_phase(
-        phase=SimpleNamespace(learning_rate=1.0e-5, hard_case_fraction=0.4),
+        phase=SimpleNamespace(
+            learning_rate=1.0e-5,
+            range_undershoot_min_m=0.40,
+        ),
         phase_number=3,
     )
     runner.logger.log(it=141)
@@ -208,7 +228,7 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
     checkpoint_events = [
         (value, step)
         for tag, value, step in writer.events
-        if tag == "train/03_checkpoint_iteration"
+        if tag == "train/schedule/checkpoint_update"
     ]
     assert checkpoint_events == [(170.0, 1), (141.0, 2), (141.0, 3)]
     assert all(
@@ -225,7 +245,10 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
 
 def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
     writer = _Writer()
-    phase = SimpleNamespace(learning_rate=1.0e-4, hard_case_fraction=0.0)
+    phase = SimpleNamespace(
+        learning_rate=1.0e-4,
+        range_undershoot_min_m=None,
+    )
     runner = SimpleNamespace()
     rsl_rl.configure_monitoring(runner=runner, writer=writer, phase=phase, phase_number=1)
     runner.writer.add_scalar("Loss/value_function", 1.0, 7)
@@ -234,16 +257,19 @@ def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
     assert rsl_rl.monitoring_step(runner=runner) == 1
     assert runner.log_dir == "logs"
     assert {tag for tag, _value, _step in writer.events} >= {
-        "train/40_ppo_value_function_loss",
-        "system/20_train_rollout_collection_time_s",
-        "system/21_train_ppo_update_time_s",
-        "system/22_train_total_iteration_time_s",
+        "train/optimization/value_loss",
+        "train/performance/rollout_time_s",
+        "train/performance/optimizer_update_time_s",
+        "train/performance/total_update_time_s",
     }
 
 
 def test_training_chunk_advances_when_restored_learner_iteration_repeats() -> None:
     writer = _Writer()
-    phase = SimpleNamespace(learning_rate=1.0e-4, hard_case_fraction=0.0)
+    phase = SimpleNamespace(
+        learning_rate=1.0e-4,
+        range_undershoot_min_m=None,
+    )
     runner = SimpleNamespace(current_learning_iteration=0)
     rsl_rl.configure_monitoring(
         runner=runner,
@@ -277,5 +303,5 @@ def test_training_chunk_advances_when_restored_learner_iteration_repeats() -> No
     assert [
         (value, step)
         for tag, value, step in writer.events
-        if tag == "train/03_checkpoint_iteration"
+        if tag == "train/schedule/checkpoint_update"
     ] == [(1.0, 1), (1.0, 2)]

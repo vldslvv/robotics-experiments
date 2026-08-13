@@ -128,14 +128,26 @@ completion.
 `make test-integration-press-approach-routine` runs the artifact-dependent
 Stage 1 mission in `configs/policy_press_approach_quad.yaml`: takeoff, navigate
 to a safe 0.59 m staging point at a requested 0.5 m/s, settle, make the short
-move to a 0.47 m handoff target at 0.08 m/s with a 0.02 m position tolerance,
-settle for two seconds, execute the `press-approach` / `approach` artifact
-through the generic `policy` step, return at 0.5 m/s, land, and disarm. The
-strict hook requires stable contact-free completion and no lamp transition. Run
-it only after the fresh final test within `make train-rl`
-publishes `.build/training/press-approach/latest` and `make eval-press`
-independently reproduces that exact digest and test workload; it is excluded from
-`test-integration-all`.
+move to the unchanged 0.47 m handoff waypoint at 0.08 m/s with a measured
+0.06 m completion radius, settle for two seconds, and execute the
+`press-approach` / `approach` artifact through the generic `policy` step. The
+strict hook ends after the handoff latches, one valid real actor evaluation is
+returned, and that evaluation's first setpoint is transmitted. It does not
+require later actor success, contact-free completion, return, landing, or lamp
+state. It requires a strict artifact at
+`.build/training/press-approach/latest`; an accepted campaign normally publishes
+that label, while an operator may select a diagnostic unqualified artifact
+without turning this smoke result into qualification evidence. The target is
+excluded from `test-integration-all`. Policy quality remains a separate
+held-out/transfer contract.
+
+`make measure-press-navigation-handoff` repeats the same production config at
+least ten times but stops on the first exact observation after waypoint settling,
+before actor gating. It summarizes switch-relative entry-position noise beneath
+`.build/benchmarks/press-navigation-handoff-campaigns/`; rerun it after changes
+to navigation sensors, PX4 estimation/navigation, the controller, route, or
+warehouse geometry, then update the Hydra measurement evidence and shared
+training/handoff envelope.
 
 `make test-integration-press-policy-transfer` is the separate post-training PX4
 acceptance in the production warehouse. It runs the trained press actor at

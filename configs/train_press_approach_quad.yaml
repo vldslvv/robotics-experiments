@@ -8,22 +8,17 @@ scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
   num_envs: 32768
-  episode_length_s: 10.0
+  episode_length_s: 15.0
   action:
     max_body_velocity_mps: 0.5
   press:
     policy:
       actor:
-        initial_noise_std: 0.12
+        initial_noise_std: 0.03
     goal:
       velocity_reference:
         range_center_m: 0.415
         wall_normal_max_mps: 0.04
-    reward:
-      range_barrier_margin_m: 0.02
-      flight_failure_weight: 300.0
-      velocity_tracking_weight: 300.0
-      wall_normal_braking_command_weight: 30.0
   training:
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
@@ -31,26 +26,26 @@ rl:
     # Each attempt starts from scratch. Refinement phases restore the
     # attempt-wide validation-selected checkpoint before changing curriculum.
     phases:
-      - max_iterations: 180
+      - max_iterations: 50
         evaluation_interval: 10
         learning_rate: 1.0e-4
         schedule: fixed
-        entropy_coef: 0.0001
-        hard_case_fraction: 0.0
-      - max_iterations: 100
+        entropy_coef: 0.0
+        range_undershoot_min_m: 0.38
+      - max_iterations: 30
         evaluation_interval: 5
         learning_rate: 3.0e-5
         schedule: fixed
         entropy_coef: 0.0
-        hard_case_fraction: 0.2
+        range_undershoot_min_m: 0.39
       - max_iterations: 100
         evaluation_interval: 5
         learning_rate: 1.0e-5
         schedule: fixed
         entropy_coef: 0.0
-        hard_case_fraction: 0.4
+        range_undershoot_min_m: 0.40
     plateau:
-      metric_name: held_out_task_cost
+      metric_name: mean_normalized_pose_error
       direction: minimize
       minimum_delta: 0.003
       patience_evaluations: 10

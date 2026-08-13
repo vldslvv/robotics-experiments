@@ -24,7 +24,9 @@ __all__ = [
     "PressApproachTerminationFlags",
     "initial_press_approach_state",
     "press_approach_goal_satisfied",
+    "press_approach_pose_error",
     "press_approach_target_velocity",
+    "quaternion_geodesic_error_rad",
     "reset_press_approach_state",
     "step_press_approach",
 ]
@@ -38,12 +40,11 @@ EnvironmentIndices: TypeAlias = Sequence[int] | np.ndarray | torch.Tensor
 class PressApproachState(Generic[ArrayT]):
     """Batched approach memory.
 
-    Scalar fields have shape ``[N]`` and ``previous_action`` has shape
-    ``[N, action_dim]``.
+    Every field has shape ``[N]``.
     """
 
-    previous_range_m: ArrayT
-    previous_action: ArrayT
+    normalized_position_error: ArrayT
+    normalized_pose_error: ArrayT
     stable_goal_steps: ArrayT
     closest_range_m: ArrayT
 
@@ -58,48 +59,35 @@ class PressApproachInput(Generic[ArrayT]):
     """
 
     relative_switch_pos_m: ArrayT
+    relative_switch_quat_xyzw: ArrayT
     linear_velocity_mps: ArrayT
-    wall_normal_velocity_command_mps: ArrayT
     angular_velocity_radps: ArrayT
     body_z_world_z: ArrayT
     altitude_m: ArrayT
     body_collision_flag: ArrayT
     pusher_collision_flag: ArrayT
-    action: ArrayT
     time_out: ArrayT
 
 
 @dataclass(frozen=True)
 class PressApproachRewardTerms(Generic[ArrayT]):
-    """The eleven signed per-step Stage 1 reward contributions."""
+    """The signed per-step Stage 1 reward contributions."""
 
-    range_progress: ArrayT
-    range_barrier: ArrayT
-    alignment_error: ArrayT
-    velocity_tracking: ArrayT
-    wall_normal_braking_command: ArrayT
-    upright_error: ArrayT
-    action_delta: ArrayT
-    success: ArrayT
-    collision: ArrayT
-    flight_failure: ArrayT
-    timeout: ArrayT
+    position_progress: ArrayT
+    stabilization: ArrayT
+    predictive_barrier: ArrayT
+    strict_hold: ArrayT
+    terminal_outcome: ArrayT
 
     @property
     def total(self) -> ArrayT:
         """Sum every named reward contribution."""
         return (
-            self.range_progress
-            + self.range_barrier
-            + self.alignment_error
-            + self.velocity_tracking
-            + self.wall_normal_braking_command
-            + self.upright_error
-            + self.action_delta
-            + self.success
-            + self.collision
-            + self.flight_failure
-            + self.timeout
+            self.position_progress
+            + self.stabilization
+            + self.predictive_barrier
+            + self.strict_hold
+            + self.terminal_outcome
         )
 
 
@@ -135,6 +123,14 @@ class PressApproachResult(Generic[ArrayT]):
     state: PressApproachState[ArrayT]
     rewards: PressApproachRewardTerms[ArrayT]
     termination: PressApproachTerminationFlags[ArrayT]
+    range_m: ArrayT
+    range_error_m: ArrayT
+    alignment_error_m: ArrayT
+    attitude_error_rad: ArrayT
+    linear_speed_mps: ArrayT
+    angular_speed_radps: ArrayT
+    contact_clear: ArrayT
+    strict_goal: ArrayT
 
 
 def _where(condition: ArrayT, yes: ArrayT | Scalar, no: ArrayT | Scalar) -> ArrayT:
@@ -155,22 +151,16 @@ def _norm(value: ArrayT) -> ArrayT:
     return np.linalg.norm(value, axis=-1)
 
 
-def _mean_square(value: ArrayT) -> ArrayT:
-    if isinstance(value, torch.Tensor):
-        return value.square().mean(dim=-1)
-    return np.square(value).mean(axis=-1)
-
-
-def _sum_square(value: ArrayT) -> ArrayT:
-    if isinstance(value, torch.Tensor):
-        return value.square().sum(dim=-1)
-    return np.square(value).sum(axis=-1)
-
-
 def _square(value: ArrayT) -> ArrayT:
     if isinstance(value, torch.Tensor):
         return value.square()
     return np.square(value)
+
+
+def _sqrt(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
+        return torch.sqrt(value)
+    return np.sqrt(value)
 
 
 def _clip(value: ArrayT, minimum: float, maximum: float) -> ArrayT:
@@ -185,17 +175,48 @@ def _minimum(left: ArrayT, right: ArrayT) -> ArrayT:
     return np.minimum(left, right)
 
 
+def _maximum(left: ArrayT, right: Scalar) -> ArrayT:
+    if isinstance(left, torch.Tensor):
+        return left.clamp_min(right)
+    return np.maximum(left, right)
+
+
+def _pairwise_maximum(left: ArrayT, right: ArrayT) -> ArrayT:
+    if isinstance(left, torch.Tensor):
+        return torch.maximum(left, right)
+    return np.maximum(left, right)
+
+
+def quaternion_geodesic_error_rad(*, quaternion_xyzw: ArrayT) -> ArrayT:
+    """Return the full rotation error to identity for normalized quaternion batches."""
+    norm = _norm(quaternion_xyzw)
+    scalar = abs(quaternion_xyzw[..., 3] / norm)
+    if isinstance(quaternion_xyzw, torch.Tensor):
+        return 2.0 * torch.acos(scalar.clamp(0.0, 1.0))
+    return 2.0 * np.arccos(np.clip(scalar, 0.0, 1.0))
+
+
 def initial_press_approach_state(
     *,
-    relative_switch_range_m: ArrayT,
-    action: ArrayT,
+    relative_switch_pos_m: ArrayT,
+    relative_switch_quat_xyzw: ArrayT,
+    goal_cfg: PressApproachGoalConfig,
 ) -> PressApproachState[ArrayT]:
     """Create zero progress matching a NumPy or torch batch."""
+    normalized_position_error = _press_approach_position_reward_error(
+        relative_switch_pos_m=relative_switch_pos_m,
+        goal_cfg=goal_cfg,
+    )
+    normalized_pose_error = press_approach_pose_error(
+        relative_switch_pos_m=relative_switch_pos_m,
+        relative_switch_quat_xyzw=relative_switch_quat_xyzw,
+        goal_cfg=goal_cfg,
+    )
     return PressApproachState(
-        previous_range_m=relative_switch_range_m,
-        previous_action=_zeros_like(value=action),
-        stable_goal_steps=_zeros_like(value=relative_switch_range_m, integer=True),
-        closest_range_m=relative_switch_range_m,
+        normalized_position_error=normalized_position_error,
+        normalized_pose_error=normalized_pose_error,
+        stable_goal_steps=_zeros_like(value=normalized_pose_error, integer=True),
+        closest_range_m=relative_switch_pos_m[..., 0],
     )
 
 
@@ -203,13 +224,15 @@ def reset_press_approach_state(
     *,
     state: PressApproachState[ArrayT],
     env_ids: EnvironmentIndices,
-    relative_switch_range_m: ArrayT,
-    action: ArrayT,
+    relative_switch_pos_m: ArrayT,
+    relative_switch_quat_xyzw: ArrayT,
+    goal_cfg: PressApproachGoalConfig,
 ) -> PressApproachState[ArrayT]:
     """Return ``state`` with only the selected environments reset."""
     fresh = initial_press_approach_state(
-        relative_switch_range_m=relative_switch_range_m,
-        action=action,
+        relative_switch_pos_m=relative_switch_pos_m,
+        relative_switch_quat_xyzw=relative_switch_quat_xyzw,
+        goal_cfg=goal_cfg,
     )
 
     def replaced(current: ArrayT, replacement: ArrayT) -> ArrayT:
@@ -288,9 +311,9 @@ def press_approach_target_velocity(
 def press_approach_goal_satisfied(
     *,
     relative_switch_pos_m: ArrayT,
+    relative_switch_quat_xyzw: ArrayT,
     linear_velocity_mps: ArrayT,
     angular_velocity_radps: ArrayT,
-    body_z_world_z: ArrayT,
     contact_flag: ArrayT,
     goal_cfg: PressApproachGoalConfig,
 ) -> ArrayT:
@@ -300,11 +323,59 @@ def press_approach_goal_satisfied(
         (current_range >= goal_cfg.range_min_m)
         & (current_range <= goal_cfg.range_max_m)
         & (_norm(relative_switch_pos_m[..., 1:3]) <= goal_cfg.alignment_error_max_m)
+        & (
+            quaternion_geodesic_error_rad(quaternion_xyzw=relative_switch_quat_xyzw)
+            <= goal_cfg.relative_attitude_error_max_rad
+        )
         & (_norm(linear_velocity_mps) <= goal_cfg.linear_speed_max_mps)
         & (_norm(angular_velocity_radps) <= goal_cfg.angular_speed_max_radps)
-        & (_clip(body_z_world_z, 0.0, 1.0) >= goal_cfg.body_z_alignment_min)
         & ~contact_flag
     )
+
+
+def press_approach_pose_error(
+    *,
+    relative_switch_pos_m: ArrayT,
+    relative_switch_quat_xyzw: ArrayT,
+    goal_cfg: PressApproachGoalConfig,
+) -> ArrayT:
+    """Return the worst pose error normalized by its strict tolerance."""
+    normalized_range_error, normalized_alignment_error = _press_approach_position_components(
+        relative_switch_pos_m=relative_switch_pos_m,
+        goal_cfg=goal_cfg,
+    )
+    attitude_error = (
+        quaternion_geodesic_error_rad(quaternion_xyzw=relative_switch_quat_xyzw)
+        / goal_cfg.relative_attitude_error_max_rad
+    )
+    return _pairwise_maximum(
+        _pairwise_maximum(normalized_range_error, normalized_alignment_error),
+        attitude_error,
+    )
+
+
+def _press_approach_position_components(
+    *,
+    relative_switch_pos_m: ArrayT,
+    goal_cfg: PressApproachGoalConfig,
+) -> tuple[ArrayT, ArrayT]:
+    range_center = 0.5 * (goal_cfg.range_min_m + goal_cfg.range_max_m)
+    range_tolerance = 0.5 * (goal_cfg.range_max_m - goal_cfg.range_min_m)
+    range_error = abs(relative_switch_pos_m[..., 0] - range_center) / range_tolerance
+    alignment_error = _norm(relative_switch_pos_m[..., 1:3]) / goal_cfg.alignment_error_max_m
+    return range_error, alignment_error
+
+
+def _press_approach_position_reward_error(
+    *,
+    relative_switch_pos_m: ArrayT,
+    goal_cfg: PressApproachGoalConfig,
+) -> ArrayT:
+    range_error, alignment_error = _press_approach_position_components(
+        relative_switch_pos_m=relative_switch_pos_m,
+        goal_cfg=goal_cfg,
+    )
+    return _sqrt(0.5 * (_square(range_error) + _square(alignment_error)))
 
 
 def step_press_approach(
@@ -318,25 +389,36 @@ def step_press_approach(
     """Advance the stable, contact-free approach objective exactly once."""
     current_range = sample.relative_switch_pos_m[..., 0]
     alignment_error = _norm(sample.relative_switch_pos_m[..., 1:3])
-    upright_alignment = _clip(sample.body_z_world_z, 0.0, 1.0)
-    range_barrier_start = goal_cfg.range_min_m + reward_cfg.range_barrier_margin_m
-    range_barrier_deficit = _clip(
-        (range_barrier_start - current_range) / reward_cfg.range_barrier_margin_m,
-        0.0,
-        float("inf"),
+    relative_attitude_error = quaternion_geodesic_error_rad(
+        quaternion_xyzw=sample.relative_switch_quat_xyzw
     )
-    target_velocity = press_approach_target_velocity(
+    linear_speed = _norm(sample.linear_velocity_mps)
+    angular_speed = _norm(sample.angular_velocity_radps)
+    normalized_pose_error = press_approach_pose_error(
         relative_switch_pos_m=sample.relative_switch_pos_m,
-        linear_velocity_mps=sample.linear_velocity_mps,
-        reference_cfg=goal_cfg.velocity_reference,
+        relative_switch_quat_xyzw=sample.relative_switch_quat_xyzw,
+        goal_cfg=goal_cfg,
+    )
+    normalized_position_error = _press_approach_position_reward_error(
+        relative_switch_pos_m=sample.relative_switch_pos_m,
+        goal_cfg=goal_cfg,
+    )
+    normalized_range_error, normalized_alignment_error = _press_approach_position_components(
+        relative_switch_pos_m=sample.relative_switch_pos_m,
+        goal_cfg=goal_cfg,
+    )
+    range_center = 0.5 * (goal_cfg.range_min_m + goal_cfg.range_max_m)
+    position_ready = (
+        _sqrt(_square(current_range - range_center) + _square(alignment_error))
+        <= reward_cfg.stabilization_capture_radius_m
     )
 
     stable_goal = press_approach_goal_satisfied(
         relative_switch_pos_m=sample.relative_switch_pos_m,
+        relative_switch_quat_xyzw=sample.relative_switch_quat_xyzw,
         linear_velocity_mps=sample.linear_velocity_mps,
         angular_velocity_radps=sample.angular_velocity_radps,
-        body_z_world_z=sample.body_z_world_z,
-        contact_flag=sample.pusher_collision_flag,
+        contact_flag=sample.pusher_collision_flag | sample.body_collision_flag,
         goal_cfg=goal_cfg,
     )
     stable_goal_steps = _where(
@@ -347,7 +429,7 @@ def step_press_approach(
 
     crash = sample.body_z_world_z < termination_cfg.crash_tilt_cos
     altitude = sample.altitude_m < termination_cfg.min_altitude_m
-    range_undershoot = current_range < goal_cfg.range_min_m
+    range_undershoot = current_range < termination_cfg.range_undershoot_min_m
     relative_envelope = (
         (abs(current_range) > termination_cfg.max_wall_normal_distance_m)
         | (abs(sample.relative_switch_pos_m[..., 1]) > termination_cfg.max_lateral_error_m)
@@ -372,42 +454,52 @@ def step_press_approach(
         terminated=terminated,
     )
 
+    unsuccessful_termination = failure | time_out
+    predicted_range = current_range - (
+        goal_cfg.velocity_reference.wall_normal_prediction_horizon_s
+        * _maximum(sample.linear_velocity_mps[..., 0], 0.0)
+    )
+    normalized_predicted_undershoot = _maximum(
+        goal_cfg.range_min_m - predicted_range,
+        0.0,
+    ) / (goal_cfg.range_max_m - goal_cfg.range_min_m)
+    normalized_attitude_error = relative_attitude_error / goal_cfg.relative_attitude_error_max_rad
+    normalized_linear_speed = linear_speed / goal_cfg.linear_speed_max_mps
+    normalized_angular_speed = angular_speed / goal_cfg.angular_speed_max_radps
+    normalized_stabilization_error = _sqrt(
+        0.2
+        * (
+            _square(normalized_range_error)
+            + _square(normalized_alignment_error)
+            + _square(normalized_attitude_error)
+            + _square(normalized_linear_speed)
+            + _square(normalized_angular_speed)
+        )
+    )
     rewards = PressApproachRewardTerms(
-        range_progress=(
-            reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
+        position_progress=_where(
+            position_ready,
+            _zeros_like(value=normalized_position_error),
+            reward_cfg.position_progress_weight
+            * (state.normalized_position_error - normalized_position_error),
         ),
-        range_barrier=(-reward_cfg.range_barrier_weight * _square(range_barrier_deficit)),
-        alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
-        velocity_tracking=(
-            -reward_cfg.velocity_tracking_weight
-            * _sum_square(sample.linear_velocity_mps - target_velocity)
+        stabilization=_where(
+            position_ready,
+            reward_cfg.stabilization_weight / (1.0 + normalized_stabilization_error),
+            _zeros_like(value=normalized_position_error),
         ),
-        wall_normal_braking_command=(
-            -reward_cfg.wall_normal_braking_command_weight
-            * _where(
-                target_velocity[..., 0] < 0.0,
-                _square(
-                    _clip(
-                        sample.wall_normal_velocity_command_mps - target_velocity[..., 0],
-                        0.0,
-                        float("inf"),
-                    )
-                ),
-                _zeros_like(value=target_velocity[..., 0]),
-            )
+        predictive_barrier=(
+            -reward_cfg.predictive_barrier_weight * _square(normalized_predicted_undershoot)
         ),
-        upright_error=(-reward_cfg.upright_error_weight * _square(1.0 - upright_alignment)),
-        action_delta=(
-            -reward_cfg.action_delta_weight * _mean_square(sample.action - state.previous_action)
+        strict_hold=reward_cfg.strict_hold_weight * stable_goal,
+        terminal_outcome=(
+            reward_cfg.terminal_success_weight * success
+            - reward_cfg.terminal_failure_weight * unsuccessful_termination
         ),
-        success=reward_cfg.success_weight * success,
-        collision=-reward_cfg.collision_weight * collision,
-        flight_failure=-reward_cfg.flight_failure_weight * ordinary_flight_failure,
-        timeout=-reward_cfg.timeout_weight * time_out,
     )
     successor = PressApproachState(
-        previous_range_m=current_range,
-        previous_action=sample.action,
+        normalized_position_error=normalized_position_error,
+        normalized_pose_error=normalized_pose_error,
         stable_goal_steps=stable_goal_steps,
         closest_range_m=_minimum(state.closest_range_m, current_range),
     )
@@ -415,4 +507,12 @@ def step_press_approach(
         state=successor,
         rewards=rewards,
         termination=termination,
+        range_m=current_range,
+        range_error_m=abs(current_range - 0.5 * (goal_cfg.range_min_m + goal_cfg.range_max_m)),
+        alignment_error_m=alignment_error,
+        attitude_error_rad=relative_attitude_error,
+        linear_speed_mps=linear_speed,
+        angular_speed_radps=angular_speed,
+        contact_clear=~collision,
+        strict_goal=stable_goal,
     )

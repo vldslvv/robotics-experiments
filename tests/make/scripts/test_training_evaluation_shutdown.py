@@ -83,7 +83,7 @@ if [ "${scalar_poll_count}" -lt "${SCALAR_READY_AFTER_POLLS}" ]; then
     printf '{}\\n'
     exit 0
 fi
-printf '{"train/20_mean_episode_reward": {}}\\n'
+printf '{"train/reward/episode_mean": {}}\\n'
 exit 0
 """,
     )
@@ -236,7 +236,7 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
         "TensorBoard URL: http://127.0.0.1:6006/?smoothing=0&tagFilter=" in result.stdout
         and "scalar data loaded" in result.stdout
     )
-    assert "seven primary validation charts with Smoothing=0" in console
+    assert "primary learning and validation charts with Smoothing=0" in console
     assert "training_report.json" in console
     assert "unbound variable" not in result.stderr
 

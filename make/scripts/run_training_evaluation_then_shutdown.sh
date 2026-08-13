@@ -144,7 +144,7 @@ sudo_validated=false
 tensorboard_host="127.0.0.1"
 tensorboard_port="${RL_TENSORBOARD_PORT:-6006}"
 tensorboard_base_url="http://${tensorboard_host}:${tensorboard_port}/"
-tensorboard_primary_filter='^(val/00_all_gates_passed|val/01_approach_success_rate|val/02_other_flight_failure_rate|val/03_collision_rate|val/04_minimum_closest_range_m|val/05_all_traces_finite|val/06_held_out_task_cost)$'
+tensorboard_primary_filter='^(train/reward/(episode_mean|per_step_mean)|train/outcome/(success_rate|collision_rate|flight_failure_rate|range_undershoot_rate)|train/goal/(complete_pass_rate|mean_dwell_fraction|maximum_dwell_fraction)|train/state/mean_normalized_pose_error|train/schedule/recovery_boundary_m|val/acceptance/all_gates_passed|val/outcome/(success_rate|collision_rate|flight_failure_rate|range_undershoot_rate)|val/goal/(complete_pass_rate|mean_dwell_fraction|maximum_dwell_fraction)|val/state/(mean_normalized_pose_error|minimum_closest_range_m)|val/trace/all_finite|val/cost/total)$'
 tensorboard_url="${tensorboard_base_url}?smoothing=0&tagFilter=${tensorboard_primary_filter}"
 tensorboard_container_name="vv-rl-tensorboard.${artifact_run_id}"
 tensorboard_logdir=".build/training/${policy_name}/${artifact_run_id}/logs"
@@ -285,7 +285,7 @@ serve_tensorboard_when_ready() {
                     "${policy_name}" \
                     "${artifact_run_id}" |
                     tee -a "${console_log}"
-                printf '[%s] TensorBoard opens the seven primary validation charts with Smoothing=0; exact selected-step values are in %s/training_report.json\n' \
+                printf '[%s] TensorBoard opens the primary learning and validation charts with Smoothing=0; exact selected-step values are in %s/training_report.json\n' \
                     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     ".build/training/${policy_name}/${artifact_run_id}" |
                     tee -a "${console_log}"

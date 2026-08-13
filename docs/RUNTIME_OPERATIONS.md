@@ -36,6 +36,18 @@ the host. They are meant to be used in the Dockerized environment.
   tmux CMD so the first pane auto-launches the custom runtime
   (`isaac/runtime/standalone/runapp_custom.sh`) and then drops to a login shell,
   leaving the second pane a plain shell.
+- The manual GUI launcher enables the pure-observer `experiment_runtime_hud`
+  extension. Its dockable `Experiment Runtime HUD` window opens by default and
+  can be reopened from `Window > Robotics Experiments > Runtime HUD`. Each
+  vehicle card identifies the current command owner and separates navigation,
+  handoff, actor output, successfully transmitted policy setpoints, actual
+  motion, and recovery. Closing or disabling the HUD cannot affect flight: it
+  only polls the immutable runtime snapshot from Kit's post-update stream and
+  has no physics, sensor, policy, MAVLink, or USD side effects. The current and
+  previous semantic states are retained by default; change the presentation-only
+  Kit setting
+  `/exts/experiment_runtime_hud/transition_history_capacity` to adjust that
+  sliding window.
 - `make preflight-policy-artifacts HYDRA_CONFIG=<experiment.yaml>` validates
   every configured policy artifact without importing Torch or starting a
   container. `run` and `run-isaac` invoke it automatically so a missing model,

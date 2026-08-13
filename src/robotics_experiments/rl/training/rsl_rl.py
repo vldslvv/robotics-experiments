@@ -136,20 +136,24 @@ class _PresentationWriter:
         self._last_learner_step = learner_step
         self._presentation_step += 1
         step = self._presentation_step
-        self._write(tag="train/00_phase_number", value=self._phase_number, step=step)
-        self._write(tag="train/01_learning_rate", value=self._phase.learning_rate, step=step)
+        self._write(tag="train/schedule/phase", value=self._phase_number, step=step)
         self._write(
-            tag="train/02_difficult_reset_rate",
-            value=self._phase.hard_case_fraction,
+            tag="train/optimization/learning_rate",
+            value=self._phase.learning_rate,
             step=step,
         )
-        self._write(tag="train/03_checkpoint_iteration", value=learner_step, step=step)
+        if self._phase.range_undershoot_min_m is not None:
+            self._write(
+                tag="train/schedule/recovery_boundary_m",
+                value=self._phase.range_undershoot_min_m,
+                step=step,
+            )
+        self._write(tag="train/schedule/checkpoint_update", value=learner_step, step=step)
 
     def add_scalar(self, tag: str, scalar_value, global_step: int, /, *args, **kwargs) -> None:
         del args, kwargs
         if tag in {
             "Loss/learning_rate",
-            "Perf/total_fps",
             "Train/mean_episode_length/time",
             "Train/mean_reward/time",
         }:
@@ -159,40 +163,42 @@ class _PresentationWriter:
         if tag.startswith("train/"):
             mapped = tag
         elif tag in {"Loss/value", "Loss/value_function"}:
-            mapped = "train/40_ppo_value_function_loss"
+            mapped = "train/optimization/value_loss"
         elif tag == "Loss/surrogate":
-            mapped = "train/41_ppo_surrogate_loss"
+            mapped = "train/optimization/policy_loss"
         elif tag == "Loss/entropy":
-            mapped = "train/42_ppo_entropy"
+            mapped = "train/optimization/entropy"
         elif tag == "Policy/mean_noise_std":
-            mapped = "train/43_policy_noise_standard_deviation"
+            mapped = "train/optimization/policy_noise_standard_deviation"
         elif tag == "Train/mean_reward":
-            mapped = "train/20_mean_episode_reward"
+            mapped = "train/reward/episode_mean"
         elif tag == "Train/mean_episode_length":
-            mapped = "train/21_mean_episode_length_steps"
+            mapped = "train/outcome/mean_episode_length_steps"
+        elif tag == "Perf/total_fps":
+            mapped = "train/performance/fps"
         elif tag in {"Perf/collection_time", "Perf/collection time"}:
             self._collection_time_s = float(scalar_value)
-            mapped = "system/20_train_rollout_collection_time_s"
+            mapped = "train/performance/rollout_time_s"
         elif tag == "Perf/learning_time":
             learning_time_s = float(scalar_value)
             self._write(
-                tag="system/22_train_total_iteration_time_s",
+                tag="train/performance/total_update_time_s",
                 value=self._collection_time_s + learning_time_s,
                 step=step,
             )
             if torch.cuda.is_available():
                 self._write(
-                    tag="system/23_train_torch_gpu_memory_allocated_gib_peak",
+                    tag="system/train/torch_gpu_memory_allocated_gib_peak",
                     value=torch.cuda.max_memory_allocated() / 1024.0**3,
                     step=step,
                 )
                 self._write(
-                    tag="system/24_train_torch_gpu_memory_reserved_gib_peak",
+                    tag="system/train/torch_gpu_memory_reserved_gib_peak",
                     value=torch.cuda.max_memory_reserved() / 1024.0**3,
                     step=step,
                 )
                 torch.cuda.reset_peak_memory_stats()
-            mapped = "system/21_train_ppo_update_time_s"
+            mapped = "train/performance/optimizer_update_time_s"
         else:
             raise ValueError(f"unregistered RSL-RL metric tag {tag!r}")
         self._write(tag=mapped, value=scalar_value, step=step)

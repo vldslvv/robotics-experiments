@@ -57,26 +57,57 @@ emits four normalized velocity actions. The observation contains relative switch
 pose, vehicle motion and attitude, pusher state, contact and lamp state, previous
 action, handoff mode, estimator health, and availability bits. Training and
 runtime use the same packing function. Its scratch experiment maps a unit
-translation action to 0.5 m/s. Normalized exploration starts at 0.12 standard
-deviation, retaining a 0.06 m/s physical standard deviation while resolving the
-task's 0.10 m/s-or-less velocity references with useful action-head range.
+translation action to 0.5 m/s. Normalized scratch exploration starts at 0.03
+standard deviation, or 0.015 m/s for a
+translation component at the task scale.
 
 The current stage learns a contact-free approach and stable hover within
-0.40-0.42 m of the switch, not switch activation. Success requires five
-consecutive 20 Hz samples satisfying:
+0.40-0.42 m of the switch, not switch activation. Success requires 100
+consecutive 20 Hz samples (five continuous seconds) satisfying:
 
-- combined lateral/vertical error <= 0.03 m;
-- linear speed <= 0.10 m/s;
-- angular speed <= 0.40 rad/s;
-- body-Z alignment >= 0.965926;
+- combined lateral/vertical error <= 0.01 m;
+- full switch-relative quaternion geodesic error <= 1 degree;
+- linear speed <= 0.03 m/s;
+- angular speed <= 0.05 rad/s;
 - no pusher or body collision.
 
-The reset distribution is the deployable handoff envelope: range 0.45-0.50 m,
-combined lateral/vertical error <= 0.08 m, low translational/angular speed,
-upright attitude, fresh valid pose, no contact, and healthy estimation. The
-task also exposes a configured difficult-region mixture for the later phase of
-the same scratch run. Evaluation always uses the complete held-out handoff
-distribution.
+The reset distribution is the deployable handoff envelope: its range and
+combined lateral/vertical position bounds cover the measured production
+waypoint-and-settle arrivals plus the configured margins, together with low
+translational/angular speed, fresh valid pose, no contact, and healthy
+estimation. Every training and held-out reset samples the complete position
+envelope and a volume-uniform axis-angle rotation ball bounded by the measured
+rotation envelope. The same Hydra handoff
+bounds drive Lab reset and live actor entry, so new scratch training is never
+initialized with less pose variation than production navigation. Training,
+validation, and test all use this complete distribution.
+
+The accepted 2026-08-12 schema-2 production campaign recorded ten successful
+arrivals: switch range 0.464594-0.498991 m, maximum combined lateral/vertical
+error 0.033746 m, and maximum full relative-attitude error 0.016339 rad
+(0.93616 degree). With the explicit 0.005 m position and 0.25 degree rotation
+margins, the authored shared handoff/reset envelope retains its 0.44-0.52 m
+range and 0.08 m alignment disk and uses a 0.020702 rad (1.18616 degree)
+rotation ball. The accepted sample summary is
+`benchmarks/press_navigation_handoff/waypoint_settle_20260812.json`.
+
+Refresh the navigation evidence after changes to the GPS/IMU sensor models,
+PX4 estimator/navigation behavior, vehicle controller, waypoint routine, or
+warehouse geometry:
+
+```bash
+make measure-press-navigation-handoff
+```
+
+The target runs at least ten independent executions of the exact production
+config through the final waypoint and two-second settle, then records the
+switch-relative entry-pose extrema and the 0.005 m position / 0.25 degree
+rotation margins under
+`.build/benchmarks/press-navigation-handoff-campaigns/`. Accepting a new
+measurement means committing its summary, updating `rl.press.navigation_noise`,
+and expanding (never narrowing past that evidence) the shared handoff bounds.
+It does not qualify an existing actor; retrain to qualify against the expanded
+reset distribution.
 
 Collision is privileged training/evaluation state and is not added to the actor
 observation. Success, collision, other flight failure, and timeout remain
@@ -96,7 +127,7 @@ fine-tuning remain unsupported.
 
 Hydra `rl.training.phases` defines an ordered schedule within each attempt. Each
 phase declares maximum iterations, validation cadence, learning rate, schedule,
-entropy coefficient, and difficult-reset fraction. The first phase starts from
+entropy coefficient, and the training-only recovery boundary. The first phase starts from
 the new scratch actor. Before every later phase, the campaign restores the
 attempt-wide best checkpoint's actor, critic, optimizer, and learner iteration,
 then applies the new phase settings and resets every training environment. This
@@ -108,21 +139,28 @@ The evaluator and phase driver have separate contracts. Validation receives an
 exact exported actor and returns raw named metrics plus `held_out_task_cost`.
 The plateau detector reads only the configured metric, direction, minimum delta,
 and patience. It never reads the PPO reward or any gate. The uniform rule
-minimizes raw task cost, requires a `0.003` reduction from the phase reference,
-and declares a plateau after 10 consecutive stale evaluations.
+minimizes held-out mean normalized pose error, requires a `0.003` reduction
+from the phase reference, and declares a plateau after 10 consecutive stale
+evaluations. Raw aggregate task cost remains diagnostic and cannot select a
+timeout-heavy checkpoint over demonstrated pose progress.
 
-The press configuration runs:
+Training and held-out evaluation use a 15-second episode horizon so the actor
+can approach and then satisfy the five-second dwell. The press configuration
+runs:
 
-1. 180 iterations at `1e-4`, fixed schedule, `1e-4` entropy, full handoff reset;
-2. 100 iterations at `3e-5`, fixed schedule, zero entropy, 20% difficult resets;
-3. 100 iterations at `1e-5`, fixed schedule, zero entropy, 40% difficult resets.
+1. 50 iterations at `1e-4`, fixed schedule and zero entropy, with recovery
+   permitted down to 0.38 m;
+2. 30 iterations at `3e-5`, fixed schedule and zero entropy, with recovery
+   permitted down to 0.39 m;
+3. 100 iterations at `1e-5`, fixed schedule and zero entropy, with the strict
+   0.40 m undershoot boundary.
 
 The broad phase evaluates every ten updates and both refinement phases evaluate
 every five. Model zero and every cadence-aligned phase boundary are evaluated;
-there is no extra boundary update. The broad phase stops before the observed
-late collapse region, while each refinement phase provides twenty evaluation
-windows. Training advances after a phase reaches its maximum or the same
-plateau rule fires.
+there is no extra boundary update. Every phase uses the strict 100-sample goal
+and the complete handoff reset envelope. The campaign totals 180 attempted PPO
+updates. Training advances after a phase reaches its maximum or the same plateau
+rule fires.
 
 Run training with:
 
@@ -153,9 +191,10 @@ make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-approach/<run-id
 ```
 
 and is served at `http://127.0.0.1:6006` by default. The training wrapper prints
-a run-scoped URL with `smoothing=0` and a filter for the primary validation
-charts: all-gates pass, approach success, other flight failure, collision,
-minimum range, finite traces, and held-out task cost. Set
+a run-scoped URL with `smoothing=0` and a filter for the primary learning and
+validation charts: training return, signed per-sample reward, all-gates pass,
+approach success, dwell progress, other flight failure, collision, minimum
+range, finite traces, and held-out task cost. Set
 `RL_TENSORBOARD_PORT=<port>` when that address is occupied. The Make target
 uses the stable loader for the double-precision scalar tensors, passes
 `--reload_interval 5`, and retains up to one million scalar samples per tag.
@@ -168,13 +207,15 @@ All rate metrics end in `_rate` and are fractions in `[0, 1]`.
 
 TensorBoard uses only the lowercase `train/`, `val/`, `test/`, and `system/`
 namespaces. Validation and test share one ordered registry: gate status,
-success/failure/collision rates, minimum range, trace finiteness, task cost,
-secondary terminal rates, range/completion measurements, and mean cost
-components. Undefined values such as successful completion time when there are
+success/failure/collision rates, minimum range, trace finiteness, maximum dwell
+progress, task cost,
+secondary terminal rates, every strict-predicate pass rate, mean and maximum
+dwell, normalized pose error, range/completion measurements, and every mean
+cost component. Undefined values such as successful completion time when there are
 no successes remain `null` in the report and are not emitted as a scalar.
 Acceptance is report metadata, not a TensorBoard namespace. Total attempted PPO
 updates are the X coordinate and never rewind when a refinement phase restores
-an earlier learner checkpoint; `train/03_checkpoint_iteration` records that
+an earlier learner checkpoint; `train/schedule/checkpoint_update` records that
 learner position separately.
 
 `system/` is diagnostic-only and cannot influence PPO, plateau progress,
@@ -190,19 +231,34 @@ sampler failure terminates at the interval boundary with evidence preserved.
 The configured `0.95` GPU-utilization target is diagnostic: a miss is recorded
 as the measured bottleneck and never changes policy qualification.
 
-The press-approach reward has eleven named signed terms, including the
-current-range barrier, three-axis state-velocity tracking, and physical
-wall-normal braking-command supervision. Both velocity terms use the same
-task-owned wall-normal target; the command term receives the action only after
-the Lab actuation seam maps it to a physical contact-frame velocity command.
-It is active only when the predictive target requests retreat and penalizes a
-command above that retreat target, so ordinary approach commands remain
-unconstrained by direct imitation.
-The task projects positive
-wall-normal speed through the configured controller braking horizon before
-computing that target. A projected approach past the neutral range therefore
-requests retreat directly, while retreating motion is never projected farther
-inward. The horizon and reward weights remain task-owned Hydra data.
+The press-approach PPO reward has five signed contributions split across two
+episode-level stages. The stage is derived from the current physical sample,
+not hidden policy state: outside a fixed 0.03 m radius around the target
+position, `position_progress` is ten times the
+decrease in the RMS-normalized range and alignment error. Inside that envelope,
+`stabilization` is `1 / (1 + error)`, where error is the RMS of normalized
+range, alignment, full quaternion-geodesic attitude, linear-speed, and
+angular-speed error. Leaving the position envelope returns directly to
+approach. This gives
+the policy an explicit position objective before asking it to hold position,
+pose, and motion. `strict_hold` is one on every complete strict-goal sample.
+`terminal_outcome` is +150 on 100-sample success and -300 on every unsuccessful
+termination, including timeout. The first monitored scratch campaign showed
+range undershoot as the dominant early flight failure, so the one added factor,
+`predictive_barrier`, penalizes squared projected undershoot of the strict range
+minimum. It projects positive wall-normal closing speed over the existing
+velocity-reference horizon and normalizes the deficit by the strict range
+width. Its weight is 10; weight 20 delayed the first dwell without improving
+its maximum, while a weight-50 isolation caused immediate attitude instability.
+Contact remains a binding predicate without a separate PPO shaping term.
+
+Training metrics use semantic groups without numeric prefixes:
+`train/reward/`, `train/outcome/`, `train/goal/`, `train/state/`,
+`train/optimization/`, `train/performance/`, and `train/schedule/`.
+`train/schedule/recovery_boundary_m` advances from 0.38 m through 0.39 m to the
+strict 0.40 m limit. Goal pass rates and dwell fractions always refer to the
+strict goal. Validation and test use matching `outcome/`, `goal/`, `state/`,
+`trace/`, and `cost/` subgroups. Hardware telemetry is under `system/`.
 
 ## Validation, final test, artifact, and acceptance
 
@@ -213,8 +269,12 @@ seeds, and episode count. The actor is exported before evaluation, so every
 record identifies exact `policy.pt` bytes.
 
 The raw held-out task cost is the untransformed weighted sum of collision,
-flight failure, timeout, non-success, terminal range, trajectory alignment,
-velocity tracking, upright error, action change, and completion time costs.
+flight failure, timeout, non-success, missing maximum dwell progress, terminal
+range, trajectory alignment,
+relative-attitude error, velocity tracking, angular velocity, upright error,
+action change, and completion time costs. Relative-attitude and angular-velocity
+costs each carry weight 0.10. Missing dwell progress carries weight 2.0, so
+checkpoint progress distinguishes partial settling from a zero-dwell timeout.
 Lower is better. This cost is independent of the per-step PPO reward. After all
 phases end, validation-passing checkpoints rank ahead of failures. Within each
 group the lower task cost wins, with the earlier checkpoint winning an exact
@@ -234,11 +294,14 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 3 records every attempt, phase parent, raw
+`training_report.json` schema 15 records every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries, cache source,
 plateau state, phase termination, selection, final test, and gate-by-gate
 acceptance. The evaluator, cache, metric registry, and comparison fingerprint
-carry matching strict revisions; older metric/report shapes are unsupported.
+carry evaluator revision 18, metric-registry revision 12, comparison revision 17,
+and validation-cache v17; older metric/report shapes and cached evaluations are
+unsupported. Flight failure and timeout each cost 3.0 in checkpoint ranking, so
+the selector cannot improve merely by converting failed attempts into waits.
 
 After selection, the exported actor is immutable. A new uncached worker runs the
 disjoint final workload: 100 episodes for each of seeds 404, 505, and 606. The
@@ -278,6 +341,12 @@ make test-integration-press-approach-routine
 
 The transfer gate is downstream evidence. It must never mutate alignment,
 controller settings, policy weights, or the held-out evaluator.
+The production-routine target is an invocation smoke test: it ends after the
+final waypoint and settle reach the policy step, the unchanged handoff gate
+latches, one valid real-artifact actor result is produced, and that result's
+first setpoint is transmitted. It intentionally does not claim task success;
+held-out evaluation and the transfer gate remain the policy-quality and
+physical-behavior evidence.
 
 ## Deployment
 

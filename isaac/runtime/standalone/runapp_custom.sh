@@ -12,6 +12,7 @@ EXT_FOLDER="$PROJECT_DIR/isaac/runtime/extensions"
 ROBOTICS_EXPERIMENTS_CORE_EXT="robotics_experiments_core"
 LIGHTSWITCH_EXT="lightswitch_spawner"
 EXPERIMENT_RUNTIME_EXT="experiment_runtime"
+EXPERIMENT_RUNTIME_HUD_EXT="experiment_runtime_hud"
 PX4_SITL_BRIDGE_EXT="px4_sitl_brigde"
 
 # Extensions read the active Hydra config from ROBOTICS_EXPERIMENT_CONFIG_PATH.
@@ -28,6 +29,7 @@ PX4_SITL_BRIDGE_EXT="px4_sitl_brigde"
   --enable "$ROBOTICS_EXPERIMENTS_CORE_EXT" \
   --enable "$LIGHTSWITCH_EXT" \
   --enable "$EXPERIMENT_RUNTIME_EXT" \
+  --enable "$EXPERIMENT_RUNTIME_HUD_EXT" \
   --enable "$PX4_SITL_BRIDGE_EXT" \
   --/persistent/isaac/asset_root/default="$OMNI_SERVER" \
   --merge-config="/isaac-sim/config/open_endpoint.toml" \

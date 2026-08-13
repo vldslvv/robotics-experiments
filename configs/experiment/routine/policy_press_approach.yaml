@@ -2,10 +2,11 @@ defaults:
   - default
 
 # Stop at a safe staging point before the short move to the 0.47 m actor-entry
-# target. Its 0.02 m position tolerance keeps the complete axial waypoint band
-# inside the training handoff range of 0.45-0.50 m. The long navigation leg must
-# not use the handoff point as its braking target because PX4 position-control
-# overshoot can consume the pusher-to-wall clearance.
+# target. The final completion radius covers the measured PX4 waypoint error;
+# the policy handoff and training reset cover the measured post-settle position
+# distribution. The long navigation leg must not use the handoff point as its
+# braking target because PX4 position-control overshoot can consume the
+# pusher-to-wall clearance.
 takeoff_timeout_s: 20.0
 
 steps:
@@ -29,8 +30,8 @@ steps:
     y: 17.52
     z: 2.5
     ground_speed_m_s: 0.08
-    position_tol_m: 0.02
-    timeout_s: 10.0
+    position_tol_m: 0.06
+    timeout_s: 20.0
   - kind: hover
     hold_s: 2.0
   - kind: policy

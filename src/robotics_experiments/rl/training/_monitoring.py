@@ -18,7 +18,7 @@ __all__ = [
     "write_system_scalars",
 ]
 
-METRIC_REGISTRY_REVISION = 2
+METRIC_REGISTRY_REVISION = 12
 
 
 class _ScalarWriter(Protocol):
@@ -38,130 +38,188 @@ class MetricSpec:
 
 
 EVALUATION_METRICS = (
+    MetricSpec(None, "acceptance/all_gates_passed", "boolean", "All gates passed.", "maximize"),
     MetricSpec(
-        None,
-        "00_all_gates_passed",
-        "boolean",
-        "All qualification gates passed.",
+        "approach_success_rate",
+        "outcome/success_rate",
+        "fraction",
+        "Successful episodes.",
         "maximize",
     ),
     MetricSpec(
-        "approach_success_rate",
-        "01_approach_success_rate",
-        "fraction",
-        "Fraction of episodes completing the stable approach.",
-        "maximize",
+        "collision_rate", "outcome/collision_rate", "fraction", "Collision episodes.", "minimize"
     ),
     MetricSpec(
         "other_flight_failure_rate",
-        "02_other_flight_failure_rate",
+        "outcome/flight_failure_rate",
         "fraction",
-        "Fraction of episodes ending in a non-collision flight failure.",
+        "Other flight failures.",
         "minimize",
     ),
     MetricSpec(
-        "collision_rate",
-        "03_collision_rate",
+        "range_undershoot_rate",
+        "outcome/range_undershoot_rate",
         "fraction",
-        "Fraction of episodes ending in any collision.",
+        "Range-undershoot episodes.",
+        "minimize",
+    ),
+    MetricSpec(
+        "timeout_rate", "outcome/timeout_rate", "fraction", "Timed-out episodes.", "minimize"
+    ),
+    MetricSpec(
+        "completed_episodes",
+        "outcome/completed_episodes",
+        "count",
+        "Completed episodes.",
+        "maximize",
+    ),
+    MetricSpec(
+        "range_pass_rate", "goal/range_pass_rate", "fraction", "Strict range samples.", "maximize"
+    ),
+    MetricSpec(
+        "alignment_pass_rate",
+        "goal/alignment_pass_rate",
+        "fraction",
+        "Strict alignment samples.",
+        "maximize",
+    ),
+    MetricSpec(
+        "attitude_pass_rate",
+        "goal/attitude_pass_rate",
+        "fraction",
+        "Strict attitude samples.",
+        "maximize",
+    ),
+    MetricSpec(
+        "linear_speed_pass_rate",
+        "goal/linear_speed_pass_rate",
+        "fraction",
+        "Strict linear-speed samples.",
+        "maximize",
+    ),
+    MetricSpec(
+        "angular_speed_pass_rate",
+        "goal/angular_speed_pass_rate",
+        "fraction",
+        "Strict angular-speed samples.",
+        "maximize",
+    ),
+    MetricSpec(
+        "contact_clear_pass_rate",
+        "goal/contact_clear_pass_rate",
+        "fraction",
+        "Contact-free samples.",
+        "maximize",
+    ),
+    MetricSpec(
+        "complete_goal_pass_rate",
+        "goal/complete_pass_rate",
+        "fraction",
+        "Complete strict-goal samples.",
+        "maximize",
+    ),
+    MetricSpec(
+        "mean_max_stable_goal_fraction",
+        "goal/mean_dwell_fraction",
+        "fraction",
+        "Mean maximum dwell fraction.",
+        "maximize",
+    ),
+    MetricSpec(
+        "maximum_stable_goal_fraction",
+        "goal/maximum_dwell_fraction",
+        "fraction",
+        "Maximum dwell fraction.",
+        "maximize",
+    ),
+    MetricSpec(
+        "mean_normalized_pose_error",
+        "state/mean_normalized_pose_error",
+        "normalized",
+        "Mean normalized pose error.",
         "minimize",
     ),
     MetricSpec(
         "minimum_closest_range_m",
-        "04_minimum_closest_range_m",
+        "state/minimum_closest_range_m",
         "m",
-        "Minimum closest wall-normal range over all episodes.",
+        "Minimum closest range.",
         "maximize",
     ),
     MetricSpec(
-        "all_traces_finite",
-        "05_all_traces_finite",
-        "boolean",
-        "Whether all evaluated traces and aggregates are finite.",
-        "maximize",
+        "mean_closest_range_m", "state/mean_closest_range_m", "m", "Mean closest range.", "maximize"
     ),
     MetricSpec(
-        "held_out_task_cost",
-        "06_held_out_task_cost",
-        "cost",
-        "Raw held-out task cost used for checkpoint progress and ranking.",
-        "minimize",
+        "all_traces_finite", "trace/all_finite", "boolean", "All traces are finite.", "maximize"
     ),
-    MetricSpec(
-        "timeout_rate",
-        "10_timeout_rate",
-        "fraction",
-        "Fraction of episodes ending at the configured timeout.",
-        "minimize",
-    ),
+    MetricSpec("held_out_task_cost", "cost/total", "cost", "Total held-out task cost.", "minimize"),
     MetricSpec(
         "body_collision_rate",
-        "11_body_collision_rate",
+        "outcome/body_collision_rate",
         "fraction",
-        "Fraction of episodes with a body collision.",
+        "Body-collision episodes.",
         "minimize",
     ),
     MetricSpec(
         "pusher_collision_rate",
-        "12_pusher_collision_rate",
+        "outcome/pusher_collision_rate",
         "fraction",
-        "Fraction of episodes with a pusher collision.",
+        "Pusher-collision episodes.",
         "minimize",
     ),
     MetricSpec(
-        "mean_closest_range_m",
-        "13_mean_closest_range_m",
-        "m",
-        "Mean closest wall-normal range across episodes.",
-        "maximize",
-    ),
-    MetricSpec(
         "median_successful_completion_time_s",
-        "14_median_successful_completion_time_s",
+        "outcome/median_successful_completion_time_s",
         "s",
-        "Median completion time among successful episodes.",
+        "Median successful completion time.",
         "minimize",
     ),
     MetricSpec(
         "mean_terminal_range_cost",
-        "20_mean_terminal_range_cost",
+        "cost/terminal_range",
         "cost",
-        "Mean terminal-range cost.",
+        "Terminal-range cost.",
         "minimize",
     ),
     MetricSpec(
         "mean_trajectory_alignment_cost",
-        "21_mean_trajectory_alignment_cost",
+        "cost/trajectory_alignment",
         "cost",
-        "Mean trajectory-alignment cost.",
+        "Trajectory-alignment cost.",
+        "minimize",
+    ),
+    MetricSpec(
+        "mean_relative_attitude_error_cost",
+        "cost/relative_attitude_error",
+        "cost",
+        "Relative-attitude cost.",
         "minimize",
     ),
     MetricSpec(
         "mean_velocity_tracking_cost",
-        "22_mean_velocity_tracking_cost",
+        "cost/velocity_tracking",
         "cost",
-        "Mean velocity-tracking cost.",
+        "Velocity-tracking cost.",
         "minimize",
     ),
     MetricSpec(
-        "mean_upright_error_cost",
-        "23_mean_upright_error_cost",
+        "mean_angular_velocity_cost",
+        "cost/angular_velocity",
         "cost",
-        "Mean upright-error cost.",
+        "Angular-velocity cost.",
         "minimize",
     ),
     MetricSpec(
-        "mean_action_delta_cost",
-        "24_mean_action_delta_cost",
-        "cost",
-        "Mean action-change cost.",
-        "minimize",
+        "mean_upright_error_cost", "cost/upright_error", "cost", "Upright-error cost.", "minimize"
+    ),
+    MetricSpec(
+        "mean_action_delta_cost", "cost/action_delta", "cost", "Action-change cost.", "minimize"
     ),
     MetricSpec(
         "mean_completion_time_fraction",
-        "25_mean_completion_time_fraction",
+        "cost/completion_time_fraction",
         "fraction",
-        "Mean episode completion-time fraction.",
+        "Completion-time fraction.",
         "minimize",
     ),
 )
@@ -222,26 +280,26 @@ def write_system_scalars(
     if role not in {"train", "val", "test"}:
         raise ValueError("system telemetry role must be train, val, or test")
     fields = (
-        ("10", "gpu_utilization_rate_mean"),
-        ("11", "gpu_utilization_rate_p95"),
-        ("12", "gpu_memory_used_gib_peak"),
-        ("13", "gpu_memory_utilization_rate_peak"),
-        ("14", "gpu_power_w_mean"),
-        ("15", "gpu_temperature_c_max"),
-        ("16", "process_resident_memory_gib_peak"),
-        ("17", "process_cpu_cores_used_mean"),
-        ("18", "duration_s"),
-        ("19", "work_items_per_s"),
+        "gpu_utilization_rate_mean",
+        "gpu_utilization_rate_p95",
+        "gpu_memory_used_gib_peak",
+        "gpu_memory_utilization_rate_peak",
+        "gpu_power_w_mean",
+        "gpu_temperature_c_max",
+        "process_resident_memory_gib_peak",
+        "process_cpu_cores_used_mean",
+        "duration_s",
+        "work_items_per_s",
     )
     emitted = []
-    for order, name in fields:
+    for name in fields:
         value = float(summary[name])
         if not math.isfinite(value):
             raise ValueError(f"system telemetry metric {name!r} is not finite")
         if name.endswith("_rate_mean") or name.endswith("_rate_p95") or name.endswith("_rate_peak"):
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"system telemetry rate {name!r} must be in [0, 1]")
-        tag = f"system/{order}_{role}_{name}"
+        tag = f"system/{role}/{name}"
         writer.add_scalar(tag, value, step, new_style=True, double_precision=True)
         emitted.append(tag)
     return tuple(emitted)

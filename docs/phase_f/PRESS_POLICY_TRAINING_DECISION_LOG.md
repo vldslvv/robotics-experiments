@@ -1,7 +1,7 @@
 # Press policy training decision log
 
-Status: TWENTY-FIFTH SCRATCH REJECTED; MERGED TRAINING/EVALUATION LOOP
-PROCEDURALLY VALIDATED; NEXT SCRATCH NOT STARTED (2026-08-11).
+Status: STRICT-DWELL CAMPAIGNS STOPPED EARLY; RANGE-RECOVERY CURRICULUM
+IMPLEMENTED; DIAGNOSTIC GPU RUN PENDING (2026-08-13).
 
 This is the chronological record for press-policy scratch training, checkpoint
 selection, acceptance, and deployment decisions. Controller fitting and its
@@ -42,6 +42,11 @@ are unsupported.
 | `20260811T154439Z-scratch-action050-main241` | `20260810T-accepted-reproduction` | 241 easy updates at `1e-4`, then the unchanged 20% and 40% refinement phases | Iteration 150 selected; cost 0.870737, 87.7% success, advisory rejected | Stop extending the fixed high-rate phase; merge full evaluation into training before the next attempt |
 | `20260811T-merged-loop-smoke2` | `20260810T-accepted-reproduction` | One-update procedural smoke at the representative 32,768 environments | Iteration 1 selected from two fresh exact evaluations; cost 4.006851, intentionally rejected | Merged loop passes; verify stable cache identity across equivalent TorchScript exports |
 | `20260811T-merged-loop-content-cache-replay` | `20260810T-accepted-reproduction` | Deterministic replay of the one-update smoke | Both evaluations reused by executable-content digest; identical cost and selection in 34.3 s | Procedure and cache optimization validated; next execution is a full scratch attempt |
+| `20260812T191858Z-push-ready-scratch` | `20260810T-accepted-reproduction` | Strict 100-sample dwell; broad phase then 20% difficult-reset refinement | Stopped at phase-2 iteration 85; peak success 0.3%, and best cost 3.767904 came from 92.3% timeout behavior | Replace conflicting and sparse shaping before another scratch campaign |
+| `20260812T203643Z-push-ready-readiness-smoke` | `20260810T-accepted-reproduction` | Three-seed, three-phase procedural smoke for dense readiness and settling resets | Passed in 954.2 s; distinct worker PIDs 57, 1231, and 2402; no reserved test workload | Start one monitored scratch attempt with dwell-based early stopping |
+| `20260812T205331Z-push-ready-readiness` | `20260810T-accepted-reproduction` | Dense readiness with 30% tightly valid resets and normalized action noise 0.12 | Stopped at iteration 60; success and mean maximum dwell stayed exactly zero while cost plateaued near 5.94 | Lower exploration below the terminal speed scale and make phase 1 a predominantly centered settling curriculum |
+| `20260812T211331Z-push-ready-lownoise-smoke` | `20260810T-accepted-reproduction` | Three-seed procedural smoke for 0.03 noise and the 80%/40%/15% settling schedule | Passed in 754.1 s with distinct processes and no reserved test workload | Start one full attempt and require early training completions |
+| `20260812T212630Z-push-ready-lownoise` | `20260810T-accepted-reproduction` | Normalized action noise 0.03 with 80% tightly centered settling resets | Stopped after iteration-20 validation; zero training and held-out completion, zero held-out dwell | Add an explicit short-to-full training hold curriculum while keeping validation strict |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1539,3 +1544,665 @@ browser-global local setting rather than a server flag; setting Time Series
 Smoothing to zero applies to every namespace. The wrapper states that contract,
 supports `RL_TENSORBOARD_PORT` for a run-scoped collision-free address, and
 points to `training_report.json` for exact validation X/Y values.
+
+### 48. Replace approach completion with a push-ready five-second dwell
+
+Date: 2026-08-12.
+
+Plain-language view: The manual production flight exposed a task-definition
+problem rather than a reason to tune the old actor. The approach stage could
+finish after only 0.25 seconds inside loose position, speed, and upright bounds,
+then allow return navigation even though the pose was not ready for a later
+switch push. The replacement objective asks the new actor to hold the actual
+handoff pose for five continuous seconds before the routine can advance.
+
+Technical view: Preserve the schema-1 34-value observation and four-value
+velocity action, but use the relative quaternion already present in that
+observation. Success now requires 100 consecutive 20 Hz samples at 0.40-0.42 m
+range, at most 0.01 m combined lateral/vertical error, at most 1 degree full
+quaternion-geodesic attitude error, at most 0.03 m/s linear speed, at most 0.05
+rad/s angular speed, and no contact. Training and deployment call the same pure
+goal predicate, and completion retains the zero terminal setpoint.
+
+The reward keeps the range, predictive velocity, braking, upright,
+action-change, terminal success, collision, flight-failure, and timeout terms.
+Alignment weight increases from 50 to 200; squared full-attitude and
+angular-speed penalties enter at weight 10 each; every strict-goal sample earns
+one dwell reward. Episodes increase from 10 to 15 seconds. Held-out checkpoint
+cost adds mean full-attitude and angular-velocity costs at weight 0.10 each.
+Training schedule, PPO settings, action scaling, and independent seeds remain
+unchanged so the next scratch campaign isolates this task and reward change.
+
+Navigation evidence moves to schema 2. Ten new production waypoint-and-settle
+runs must retain both relative position and a normalized relative quaternion.
+The accepted rotation envelope is the maximum full attitude error plus 0.25
+degree; the existing 0.005 m position margin and position envelope remain unless
+the new samples require expansion. Every training and held-out reset samples
+the complete measured position envelope plus one volume-uniform axis-angle
+rotation ball, including difficult-position resets. Training-report schema 4,
+evaluator revision 4, metric-registry revision 3, and comparison revision 3
+prevent reuse of evaluations from the looser objective. No new campaign result
+is claimed until measurement, host gates, procedural GPU smoke, validation, and
+the reserved-seed final test complete.
+
+The schema-2 measurement campaign
+`20260812T181320Z.140147` completed ten fresh production routes successfully.
+It measured range 0.464594-0.498991 m, maximum combined lateral/vertical error
+0.033746 m, and maximum full relative-attitude error 0.0163389954 rad
+(0.93616 degree). The existing 0.44-0.52 m range and 0.08 m alignment envelope
+already covers the new positions with the 0.005 m margin. Adding exactly 0.25
+degree to the measured attitude maximum sets the shared live-handoff and Lab
+reset rotation envelope to 0.0207023186 rad (1.18616 degree). The accepted
+schema-2 summary is
+`benchmarks/press_navigation_handoff/waypoint_settle_20260812.json`.
+
+### 49. Replace the zero-dwell timeout attractor with dense readiness
+
+Date: 2026-08-12.
+
+Plain-language view: The first five-second campaign learned mostly to wait
+until timeout. Stop it early rather than spend two more seeds repeating a
+reward conflict. Give the actor useful credit for becoming push-ready and show
+it successful settling states early, without changing what counts as success.
+
+Technical view: Campaign `20260812T191858Z-push-ready-scratch` completed the
+180-update broad phase and 85 updates of the 20% difficult-reset refinement for
+seed 42 before operator-directed early stop. Across 300-episode validations,
+strict success was normally zero and peaked at one episode (0.3%). The best
+reported cost, 3.767904 at iteration 215, had zero success, 7.7% other flight
+failure, and 92.3% timeout. Later one-success checkpoints alternated between
+37.7% and 86.7% flight failure. Zero collision was expected because crossing
+the 0.400 m range boundary terminates before sustained contact. No reserved
+test seed ran and no deployment label advanced.
+
+The reward diagnosis is structural. At the configured 0.410 m goal center,
+the former current-position barrier contributed -2.5 per sample while the
+complete-goal dwell reward contributed +1. Over 100 samples that canceled the
++150 terminal success reward before motion, attitude, or action penalties.
+Meanwhile the new raw-unit attitude, angular-speed, and alignment terms were
+small at their strict thresholds, and the all-condition dwell reward supplied
+no gradient until every predicate was already true.
+
+Keep the 100-sample goal and every acceptance gate unchanged. Make the range
+barrier zero for a stationary pose anywhere in 0.40-0.42 m and apply it only
+when positive closing motion projected through the existing 0.4-second horizon
+would cross below 0.400 m. Add one bounded readiness reward using range,
+alignment, full attitude, linear speed, and angular speed normalized by their
+strict tolerances. Add a training-only push-ready reset tranche strictly inside
+all five limits at 30%, 20%, and 10% across the existing phases; the remaining
+samples keep the full handoff and difficult-position mixtures, and held-out
+resets remain full-envelope only.
+
+Evaluation now reports mean maximum continuous dwell progress as a fraction of
+100 and weights its missing fraction by 2.0 in held-out cost. Evaluator revision
+5, metric-registry revision 4, comparison revision 4, and validation-cache v5
+prevent reuse of the stopped campaign's evaluations. TensorBoard's primary
+filter includes training return, signed total reward, dwell progress, success,
+and held-out cost so learning direction is visible without knowing internal tag
+ordering. Qualify this change with host gates and the three-seed procedural
+smoke before starting another scratch campaign; stop that campaign early if
+dwell progress and success remain flat after the settling curriculum has had a
+representative learning window.
+
+### 50. Make the settling curriculum learnable under stochastic actions
+
+Date: 2026-08-12.
+
+Plain-language view: Dense readiness improved ordinary reward and taught the
+drone to avoid many flight failures, but it still learned to wait instead of
+holding the switch-ready pose. Stop after the promised evidence window. Start
+the replacement from easier, quieter hover states so complete five-second
+dwell trajectories occur early, then taper those states as approach training
+takes over.
+
+Technical view: The three-seed procedural smoke
+`20260812T203643Z-push-ready-readiness-smoke` passed every phase restore in
+distinct worker processes and did not run reserved seeds. Full campaign
+`20260812T205331Z-push-ready-readiness` was then stopped during seed 42 after
+the iteration-60 validation. Iterations 0, 10, 20, 30, 40, 50, and 60 all had
+zero strict success and exactly zero mean maximum dwell progress over 300 held-
+out episodes. Cost reached 5.945210 at iteration 20, stayed near that value
+through iteration 40, regressed to 6.212895 at iteration 50, and only narrowly
+improved to 5.935788 at iteration 60. The actor was selecting a low-failure
+timeout regime: iteration 60 ended 12.3% in other flight failure and 87.7% in
+timeout.
+
+Training reward and exploration isolate the remaining problem. Readiness rose
+from about 0.10 to 0.33 per sample and the signed total reward improved, but
+strict-goal samples remained near 0.01% and no training episode completed. The
+learned action standard deviation was still 0.0888 after starting at 0.12. At
+the configured 0.5 m/s translation scale, that initial normalized deviation is
+about 0.06 m/s, twice the strict 0.03 m/s terminal speed limit. The 30% settling
+tranche also began as far as half of each strict pose and speed tolerance, so
+noise normally broke the predicate before a long dwell could supply terminal
+credit.
+
+Keep the goal, reward weights, PPO optimizer, held-out distribution, and all
+acceptance gates unchanged. Reduce scratch action noise to 0.03. Tighten
+settling resets around the 0.415 m reference to 0.412-0.418 m, 0.002 m
+alignment, 0.2 degree attitude error, 0.005 m/s linear speed, and 0.01 rad/s
+angular speed. Use settling fractions 80%, 40%, and 15% across the existing
+three phases; difficult fractions remain 0%, 20%, and 40%, leaving the balance
+for complete handoff-envelope resets. Re-run host gates and the procedural
+smoke before a new scratch campaign. The next early decision must first see
+training completions from the phase-1 settling tranche, followed by nonzero
+held-out dwell progress; otherwise stop and redesign rather than merely extend
+the schedule.
+
+### 51. Stage the training hold without weakening validation
+
+Date: 2026-08-12.
+
+Plain-language view: Easier starting poses and quieter actions were still not
+enough: the actor never saw a completed five-second training episode. Teach the
+temporal behavior directly by requiring a short continuous hold first, then a
+longer hold, and finally the complete five seconds. Every held-out checkpoint
+still has to satisfy the full five seconds, so this changes learning difficulty
+without weakening acceptance.
+
+Technical view: The low-noise procedural smoke
+`20260812T211331Z-push-ready-lownoise-smoke` passed all three seeds and phase
+boundaries in 754.1 seconds. Campaign
+`20260812T212630Z-push-ready-lownoise` was then stopped after the iteration-20
+validation. Despite 80% tightly centered settling resets and normalized action
+noise 0.03, cumulative training success stayed exactly zero over more than
+423,000 completed episodes. Strict-sample reward occupied only 0.06-0.29% of
+samples, decreased during the first updates, and held-out mean maximum dwell
+remained zero at iterations 0, 10, and 20. Cost improved from 6.375080 to
+6.026219 because flight failures fell, which is the same non-dwell attractor in
+a less severe form.
+
+Add a generic optional `success_hold_steps` phase field. The press training
+environment alone applies it; evaluation and test environments retain the
+immutable 100-step goal. Configure 10, 40, and 100 samples over phases of 60,
+80, and 240 updates, preserving the 380-update campaign total and the existing
+learning rates. Lower normalized action noise once more to 0.01, while keeping
+the 80%/40%/15% settling mixture and 0%/20%/40% difficult mixture. TensorBoard
+reports the active hold as `train/04_success_hold_steps` and labels episode
+completion as `train/10_cumulative_training_success_rate`; the strict held-out
+signals remain `val/01_approach_success_rate` and
+`val/06_mean_max_stable_goal_fraction`. Configuration requires positive,
+nondecreasing hold lengths and a final value equal to the strict goal.
+
+The first temporal procedural smoke was stopped after seed 42 phase 1 because
+even the 10-sample target had zero training completion. A one-update diagnostic
+run, `20260812T215000Z-push-ready-predicate-diagnostic`, then measured the
+individual training predicates: 67.9% range, 18.8% alignment, 96.3% attitude,
+5.0% linear speed, 89.1% angular speed, and 0.007% complete-goal samples. The
+maximum-streak signal remained far below one complete 10-sample hold. This
+rules out attitude, angular speed, and exploration as the primary early
+blockers and identifies controller settling velocity plus translational
+alignment.
+
+Extend the training-only phase contract with `success_tolerance_scale`. Keep
+the unsafe 0.400 m lower range boundary unchanged, but scale the safe upper
+range margin and alignment, attitude, linear-speed, and angular-speed limits by
+10x, 3x, and 1x across the 10-, 40-, and 100-sample phases. Scales must be
+finite, at least one, nonincreasing, and exactly one in the final phase.
+TensorBoard reports each predicate's sample rate and mean/maximum goal-streak
+fraction so another diagnostic can be stopped immediately if the targeted
+linear-speed and alignment bottlenecks do not respond. Strict validation and
+acceptance remain unchanged at every checkpoint.
+
+One update of `20260812T215744Z-push-ready-tolerance-diagnostic` passed that
+go/no-go check. The 10x/10-sample phase produced 69.5% cumulative training
+success, 76.1% complete-goal occupancy, 81.9% range occupancy, 90.1% alignment
+occupancy, and 100% attitude, linear-speed, and angular-speed occupancy. Mean
+goal-streak fraction was 40.0%, compared with effectively zero before the
+tolerance curriculum. Strict held-out success appropriately remained zero
+after one update. This is sufficient evidence to qualify all phase transitions
+with a complete procedural smoke before committing to another full campaign.
+
+### 52. Contract the loose phase as soon as it saturates
+
+Date: 2026-08-12.
+
+Plain-language view: The loose first lesson is now easy, but practicing it
+longer does not improve the actual five-second hover. Move to the tighter lesson
+after 20 updates and spend the saved updates on the final strict task.
+
+Technical view: The complete three-seed procedural smoke
+`20260812T220133Z-push-ready-tolerance-smoke` passed every phase and checkpoint
+restore without using reserved test seeds. Full campaign
+`20260812T221555Z-push-ready-curriculum` was stopped during seed 42 after the
+iteration-20 validation. By iteration 15 the 10x/10-sample phase had 90.7%
+cumulative training completion, and it remained near 90% through iteration 23.
+Strict validation nevertheless had zero success and exactly zero maximum dwell
+progress at iterations 0, 10, and 20. Held-out cost only moved from 6.375080 to
+6.286316; trajectory alignment cost stayed near 0.999 and velocity-tracking
+cost stayed near 1.000. The improvement was dominated by other flight failure
+falling from 59.0% to 49.3%, not by acquiring the strict goal.
+
+End the 10x/10-sample phase at 20 rather than 60 updates. Keep the 3x/40-sample
+phase at 80 updates and increase the final 1x/100-sample phase from 240 to 280,
+preserving the total 380-update budget, learning rates, evaluation cadence, PPO
+settings, reset mixtures, and all strict validation and acceptance gates. The
+replacement campaign must show nonzero strict dwell during the intermediate
+phase; otherwise stop and revise the curriculum again.
+
+### 53. Remove the early-termination and timeout incentives
+
+Date: 2026-08-12.
+
+Plain-language view: The tighter lesson revealed that the drone earns a better
+return by ending early, while model selection prefers waiting safely until
+timeout. Reward becoming ready strongly enough to justify staying airborne and
+make waiting to timeout no cheaper than another flight failure.
+
+Technical view: Replacement campaign
+`20260812T222721Z-push-ready-shortphase` was stopped after the iteration-40
+validation in seed 42. Its first phase reproduced the earlier checkpoints and
+restored iteration 20 into the 3x/40-sample phase. Fresh strict validations at
+iterations 25, 30, 35, and 40 all had zero success and exactly zero maximum
+dwell. Held-out cost fell from 6.229248 to 6.100258 only as other flight failure
+fell from 43.0% to 30.0% and timeout rose from 57.0% to 70.0%. Strict alignment
+and velocity costs remained approximately 0.999 and 1.000.
+
+Training diagnostics show why. At iteration 40, the mean per-sample reward was
+-13.717, including -7.999 alignment, -4.433 velocity tracking, and only +0.621
+readiness. The cumulative mean episode lasted 48.18 samples and returned
+-764.4, so an early terminal penalty of 300 could be cheaper than remaining
+alive through the 300-sample horizon. The phase-2 alignment occupancy peaked at
+5.6% before falling near 1-2%; complete-goal occupancy stayed near 1%, and no
+environment held it longer than three of the required 40 samples. Validation
+therefore selected the 25-point timeout instead of the 300-point flight
+failure.
+
+Keep every goal predicate, hold length, reset distribution, PPO setting, and
+acceptance gate unchanged. Raise the training experiment's bounded readiness
+weight from 5 to 100 so progress toward all five normalized predicates can
+outweigh ordinary approach costs and supplies strong hold credit without an
+unbounded error term. Raise its timeout weight from 25 to 300, equal to the
+configured flight-failure weight, so model selection and PPO no longer benefit
+from replacing attempts with timeouts. Equalize held-out timeout and flight-
+failure costs at 3.0 as well. Evaluator revision 6, metric-registry revision 5,
+comparison revision 5, and validation-cache v6 prevent the changed ranking
+metric from reusing old evaluations. Qualify the reward and ranking change with
+host gates and the three-seed procedural smoke before another scratch campaign.
+
+### 54. Remove the unselectable 10x warm-up
+
+Date: 2026-08-13.
+
+Plain-language view: The easy lesson was learned, but the strict evaluator
+correctly refused to carry it into the next phase. Start close enough to the
+real task that short-hold learning can improve the strict checkpoint, then
+lengthen the hold without tightening the pose at the same boundary.
+
+Technical view: The revised incentive procedural smoke
+`20260812T224803Z-push-ready-incentive-smoke` passed all three isolated seeds
+and phase restores in 987.6 seconds without using reserved test seeds. Campaign
+`20260813T002633Z-push-ready-incentive` was stopped after the seed-42 phase-2
+iteration-20 validation. Phase 1 learned the 10x/10-sample task with about 91%
+cumulative training completion and positive mean per-sample reward, but strict
+held-out cost regressed from 6.785080 to 6.790523. Strict selection therefore
+restored model zero at the phase boundary.
+
+The 3x/40-sample phase consequently trained from scratch. At its updates 5, 10,
+15, and 20, strict success and maximum dwell stayed exactly zero. The longest
+training hold remained three samples, alignment occupancy stayed approximately
+1-5%, and held-out cost worsened to 6.796284 while flight failure converted to
+timeout. Stronger readiness fixed the negative loose-task return but could not
+make an actor state cross a boundary where that actor was not selected.
+
+Set phase 1 to 3x tolerance with its existing 10-sample hold; phase 2 remains
+3x with a 40-sample hold. Keep the reset mixtures, learning rates, phase lengths,
+final strict 1x/100-sample phase, PPO settings, validation workload, and every
+acceptance gate unchanged. First run a one-seed, one-update diagnostic. Continue
+to the required procedural smoke only if the 3x short-hold task produces useful
+training occupancy without corrupting the strict held-out comparison.
+
+### 55. Make readiness a cost that success can end
+
+Date: 2026-08-13.
+
+Plain-language view: A positive readiness payment accidentally made lingering
+near the target profitable, even when the episode eventually failed. Make
+readiness a cost that reaches zero at the ideal pose; successful completion now
+ends future costs instead of ending future income.
+
+Technical view: The one-update 3x diagnostic
+`20260813T004211Z-push-ready-3x-diagnostic` improved strict held-out cost from
+6.785080 to 6.783064 and produced 13.1% complete-goal occupancy, but no training
+completion. A ten-update confirmation,
+`20260813T004530Z-push-ready-3x-checkpoint-diagnostic`, rejected the curriculum:
+training success stayed zero, 98.0% of completed episodes ended in ordinary
+flight failure, complete-goal occupancy fell to 2.6%, and strict cost regressed
+to 6.795912. Despite those failures, reported mean episode return remained
+positive through update 10 because each near-ready sample earned positive
+readiness before the terminal penalty.
+
+Keep readiness normalized over all five predicates and bounded at the configured
+weight, but change its signed value from `weight / (1 + error)` to
+`-weight * error / (1 + error)`. It is exactly zero at ideal readiness and
+approaches `-weight` for large error. Existing strict dwell and terminal success
+rewards remain unchanged. Evaluator revision 7 and validation-cache v7 prevent
+reuse of held-out reward diagnostics computed with the positive form; the
+comparison and metric-registry revisions remain 5 because ranking metrics and
+their ordering do not change. Re-run host gates and a bounded 3x diagnostic
+before the procedural smoke.
+
+### 56. Let training recover from the strict range boundary
+
+Date: 2026-08-13.
+
+Plain-language view: Correcting readiness removed the positive-reward exploit,
+but the drone still lost most lessons at the first small overshoot. Let early
+training retreat from that overshoot while keeping both the target pose and all
+held-out acceptance checks unchanged.
+
+Technical view: Ten updates of
+`20260813T005031Z-push-ready-readiness-cost-diagnostic` kept training success at
+zero and ended 97.9% of completed episodes in flight failure. The one-update
+cause-isolation run
+`20260813T005622Z-push-ready-failure-cause-diagnostic` then showed that every
+early flight failure was range undershoot: cumulative flight-failure and
+range-undershoot rates were both 60.7978%, while crash, altitude, and relative-
+envelope failures were zero. Timeout covered the remaining 39.2022%.
+Alignment occupied 37.497% of samples, linear speed 19.21%, and the complete
+3x goal 13.14%, so immediate termination below 0.400 m prevented the retreat
+command and predictive barrier from teaching recovery.
+
+Add a training-only `range_undershoot_min_m` phase field and configure 0.38,
+0.39, and 0.40 m across the three phases. The training success range retains
+its 0.40 m lower bound in every phase; the existing tolerance curriculum still
+widens only its upper margin. Production termination, validation, final test,
+and the final training phase retain the 0.400 m boundary. Configuration
+requires the limits to be positive, no greater than the strict goal minimum,
+nondecreasing, and exactly strict in the final phase. TensorBoard reports the
+active boundary as `train/07_range_undershoot_min_m` and splits cumulative crash, altitude,
+range-undershoot, and relative-envelope failure causes. Before another
+procedural smoke or campaign, run one bounded diagnostic and require a material
+drop from the 60.7978% undershoot baseline without replacement by excessive
+collision or another immediate failure mode.
+
+### 57. Restart from a minimal pose-and-hold objective
+
+Date: 2026-08-13.
+
+The preceding reward and curriculum series accumulated overlapping incentives
+without establishing strict held-out dwell. Replace it with one normalized pose
+error over range-center, combined lateral/vertical, and quaternion-geodesic
+attitude errors. PPO receives only ten times pose-error progress, one point per
+complete strict-goal sample, and a +150/-300 terminal outcome. Speed and contact
+remain strict predicates rather than shaping terms.
+
+Remove settling resets, difficult-reset mixing, shortened holds, and tolerance
+scaling. Every phase uses the full measured handoff envelope and the strict
+100-sample goal. Restore the 200/100/100 fixed schedule at `1e-4`, `3e-5`, and
+`1e-5`, with 0.38/0.39/0.40 m recovery boundaries and normalized exploration
+noise 0.03. Rename TensorBoard metrics by semantic group and restart all
+comparison, evaluator, report, registry, and cache revisions before collecting
+new evidence.
+
+### 58. Add only the evidenced predictive undershoot barrier
+
+Date: 2026-08-13.
+
+Campaign `20260813T043749Z.32951` was the first scratch run using the minimal
+pose-and-hold objective. Strict held-out success and dwell remained zero. Mean
+held-out normalized pose error improved from 11.324 at model zero to 6.013 at
+update 40, so the update-40 no-progress stop did not apply. At that checkpoint,
+38.67% of validation episodes failed and every one was a range undershoot; the
+remaining 61.33% timed out. By update 50, all validation episodes ended in a
+flight failure, attitude pass rate fell from 91.1% at model zero to 21.1%, and
+mean normalized pose error regressed to 7.355. The campaign was stopped for
+material flight-instability growth.
+
+Add no speed, action-history, readiness, reset-mixture, or tolerance factor.
+Add only a predictive range barrier: project positive wall-normal closing speed
+over the existing 0.4-second velocity-reference horizon, measure projected
+undershoot below the strict 0.40 m minimum, normalize it by the 0.02 m strict
+range width, square it, and apply weight -10. Report it as
+`train/reward/predictive_barrier`. Start a new scratch campaign with the same
+200/100/100 schedule, learning rates, full handoff resets, and recovery
+boundaries. Report schema 6, evaluator revision 9, metric-registry revision 7,
+comparison revision 7, and validation-cache schema 8 isolate the new reward
+diagnostics and metric contract.
+
+### 59. Strengthen the same barrier after undershoot remains dominant
+
+Date: 2026-08-13.
+
+Scratch campaign `20260813T050015Z.53940` kept the initial schedule and added
+only the weight-10 predictive barrier. Mean held-out normalized pose error
+improved from 11.324 at model zero to a best 6.245 at update 50, but strict
+success and dwell remained zero. At update 50, 33.0% of episodes failed and
+every failure was range undershoot. At update 80, normalized pose error had
+regressed for three validations to 6.990 and flight failure rose to 42.67%,
+including 28.33% range undershoot and 14.33% other flight-envelope failures.
+The campaign stopped immediately for that material new instability mode.
+
+Range undershoot therefore remains the dominant evidenced failure and the
+weight-10 barrier is insufficient. Change only its weight from 10 to 50, making
+a 0.01 m projected deficit cost 12.5 points instead of 2.5 points. Keep the
+barrier definition, all other reward terms, full handoff reset, 200/100/100
+schedule, learning rates, and recovery boundaries unchanged. Start from a new
+network and optimizer. Report schema 7, evaluator revision 10, comparison
+revision 8, and validation-cache schema 9 prevent the changed barrier reward
+diagnostics from reusing weight-10 evaluations.
+
+### 60. End the unstable high-rate phase at its evidenced frontier
+
+Date: 2026-08-13.
+
+The fresh weight-50 isolation campaign `20260813T052618Z.75257` was stopped at
+update 10. It reduced range undershoot from the weight-10 run's 26.67% to
+24.67%, but full-attitude pass rate collapsed from 93.53% to 53.48%, mean
+normalized pose error improved only from 11.324 to 11.013, and 4.33% of
+episodes acquired a non-undershoot flight failure. Reject weight 50 and restore
+the weight-10 barrier.
+
+The two weight-10 campaigns independently located the useful `1e-4` frontier
+at approximately update 50: the minimal run became completely unstable there,
+while the barrier run reached its best normalized pose error of 6.245 there and
+then regressed for three validations before acquiring a new 14.33% non-range
+flight-failure mode at update 80. This is consistent within-phase saturation.
+Change only phase 1 from 200 to 50 updates. Retain its `1e-4` learning rate and
+the unchanged 100-update `3e-5` and `1e-5` refinement phases, strict goal, full
+handoff resets, and 0.38/0.39/0.40 m recovery boundaries. The next campaign is
+again scratch; no checkpoint from either stopped run is resumed. Returning the
+barrier to weight 10 also advances report schema 8, evaluator revision 11,
+comparison revision 9, and validation-cache schema 10 so the weight-50 model-zero
+reward record cannot be reused.
+
+### 61. Select demonstrated pose progress instead of timeout tradeoffs
+
+Date: 2026-08-13.
+
+Scratch campaign `20260813T053650Z.93412` reproduced phase-1 pose learning and
+reached mean normalized pose error 6.245 at update 50, versus 11.324 at model
+zero. Strict success and dwell were still zero, while aggregate task cost never
+beat model zero because changing flight failures into timeouts dominated its
+ranking. The phase boundary therefore restored model zero. Five consecutive
+phase-2 validations through phase update 25 did not beat the run-wide pose best;
+the campaign stopped under the explicit monitoring rule.
+
+Change only the configured plateau and selection scalar from
+`held_out_task_cost` to `mean_normalized_pose_error`, keeping direction
+`minimize`, minimum delta 0.003, and patience 10. Aggregate cost and every cost
+component remain reported diagnostics, and acceptance still reads only the
+fresh reserved-seed gates. This makes phase restore preserve demonstrated pose
+learning instead of preferring a different mixture of unsuccessful outcomes.
+Comparison revision 10 separates the new selection contract. Start the next
+campaign from scratch.
+
+### 62. Increase the barrier only within the stable interval
+
+Date: 2026-08-13.
+
+Campaign `20260813T060231Z.109766` used pose-error selection and correctly
+restored phase-1 model 50 into phase 2. Phase-2 update 30 reached a new best
+mean normalized pose error of 5.903 and the first strict held-out dwell, with
+maximum dwell fraction 0.14, but success remained zero. All 52.67% flight
+failures at that checkpoint were range undershoots. Five following scheduled
+validations produced no new best success, dwell, or pose error, so the campaign
+stopped at phase update 55.
+
+The evidenced factor remains the predictive range barrier. Weight 10 permits
+useful pose and dwell learning but does not prevent dominant undershoot; weight
+50 caused immediate attitude instability. Change only its weight to 20 and
+retain the pose-selection contract, 50/100/100 schedule, learning rates, strict
+goal, full handoff resets, and recovery boundaries. Report schema 9, evaluator
+revision 12, comparison revision 11, and cache schema 11 prevent stale reward
+diagnostics. Start a new scratch campaign.
+
+### 63. Advance phase 2 at its repeated update-30 frontier
+
+Date: 2026-08-13.
+
+Weight-20 campaign `20260813T063800Z.127791` reached its best phase-2 pose
+error, 5.910, at phase update 30 and its first 0.14 maximum dwell at update 45.
+Five validations after that dwell did not improve success, dwell, or pose. It
+therefore matched rather than improved the weight-10 campaign, which reached
+pose error 5.903 and 0.14 dwell at phase update 30. Restore weight 10.
+
+At the best weight-10 checkpoint, strict alignment pass rate was only 0.96%,
+while linear-speed pass was 25.36%, angular-speed pass was 96.98%, and contact
+clear was 100%. Pose does not yet pass, so speed or action-history shaping is
+not evidenced. Both barrier runs consistently saturated phase 2 at update 30.
+Change only phase 2 from 100 to 30 updates, preserving its `3e-5` rate and the
+three-phase structure, so phase 3 restores the demonstrated pose/dwell best and
+tests `1e-5` refinement. Report schema 10, evaluator revision 13, comparison
+revision 12, and cache schema 12 isolate the restored weight-10 diagnostics.
+Start a new scratch campaign.
+
+### 64. Stop after the strict phase also saturates without success
+
+Date: 2026-08-13.
+
+Campaign `20260813T071443Z.143071` used the final evidence-backed configuration:
+weight-10 predictive barrier, pose-error selection, and 50/30/100 updates at
+`1e-4`, `3e-5`, and `1e-5`. Phase 3 correctly restored phase-2 model 80. Its
+update-10 validation improved mean normalized pose error from 5.903 to 5.826 and
+retained 0.04 maximum dwell, but success remained zero. The best dwell remained
+phase-2 model 80 at 0.14. Five subsequent strict-phase validations through
+phase update 35 produced no new best success, dwell, or pose error, so the
+campaign stopped under the monitoring rule.
+
+At the pose-best checkpoint, all traces were finite and collision remained
+zero, but success was 0%, range undershoot was 59%, minimum closest range was
+0.3970 m, strict alignment pass was 0.92%, linear-speed pass was 26.80%, and
+angular-speed pass was 96.87%. The task remains pose-blocked, not speed-only or
+action-oscillation-blocked. No further reward factor or difficult-reset mixture
+is supported by this campaign. Preserve this configuration and evidence; do
+not run artifact preflight, reserved-seed acceptance, policy transfer, or
+routine integration because no candidate passed validation.
+
+### 65. Increase initial exploration before changing the objective
+
+Date: 2026-08-13.
+
+Campaign `20260813T071443Z.143071` reduced held-out normalized pose error but
+converged to a pose-blocked policy with zero success. The learned normalized
+action standard deviation also fell from 0.03 toward 0.025 during that run, so
+the existing stochastic policy did not explore substantially beyond its narrow
+initial neighborhood.
+
+Change only the training experiment's initial normalized action standard
+deviation from 0.03 to 0.05. At the retained 0.5 m/s translation scale this is
+0.025 m/s per component, still far below the previously rejected 0.12 setting.
+Keep entropy zero so PPO may reduce the learned variance when deterministic
+task return favors a quiet hold. Preserve the RMS pose objective, reward,
+50/30/100 schedule, learning rates, full handoff reset, recovery boundaries,
+selection rule, held-out workloads, and acceptance gates. Start a fresh
+campaign and revert to 0.03 if the higher initial variance produces no pose or
+dwell improvement, prevents variance contraction, or materially increases
+collision or flight instability.
+
+### 66. Optimize the worst strict pose component
+
+Date: 2026-08-13.
+
+Exploration campaign `20260813T163312Z-explore005` isolated initial normalized
+noise 0.05. It improved held-out pose error much faster than noise 0.03,
+reaching 6.299 at update 30 instead of 7.004, but produced no strict dwell. At
+update 40, pose regressed to 6.661, full-attitude pass collapsed to 46.06%, and
+22.67% of episodes acquired non-range flight failures. The campaign stopped
+immediately for material new instability. Reject noise 0.05 and restore 0.03.
+
+The best exploratory checkpoint still passed alignment on only 0.74% of
+samples while attitude passed 92.12% and angular speed passed 97.24%. Replace
+only the RMS aggregation of the three normalized pose components with their
+maximum. Pose progress then follows the currently worst range, alignment, or
+attitude component and cannot improve by trading one strict predicate against
+another. Preserve every tolerance, reward weight, barrier, reset, PPO value,
+phase, workload, and acceptance gate. Advance report schema 11, evaluator
+revision 14, metric-registry revision 8, comparison revision 13, and cache
+schema 13 because the selection metric and reward diagnostics changed. Start a
+fresh campaign from noise 0.03.
+
+### 67. Split approach and stabilization reward stages
+
+Date: 2026-08-13.
+
+Worst-component campaign `20260813T164901Z-maxpose` improved its held-out pose
+error from 18.862 at model zero to 9.719 at total update 60 and produced 0.14
+maximum strict dwell. It then remained at zero success through update 70. The
+matching training metrics showed the same oscillation: complete-goal occupancy
+was at most 0.0032%, maximum dwell was 0.055, and pose progress alternated sign
+as alignment and attitude traded places. This rules out validation mismatch and
+shows that one simultaneous pose objective asks the policy to approach and
+settle before it has reliably acquired the position.
+
+Represent the current task as two episode-level stages derived from the current
+sample. Outside the strict range and lateral/vertical envelope, reward only the
+decrease in worst normalized position error. Inside that envelope, reward
+bounded stabilization quality over position, full attitude, linear speed, and
+angular speed. Leaving the envelope returns to approach, so no hidden latch is
+added to the observation or policy schema. Preserve the evidenced predictive
+barrier, strict hold, terminal outcomes, noise 0.03, schedule, reset, PPO,
+workloads, and acceptance gates.
+
+Campaign `20260813T171302Z-proximity1` was abandoned after stale interrupted
+Isaac containers exhausted GPU memory before its first PPO update; it supplies
+no reward evidence. The stale containers were stopped, and its speculative
+all-episode proximity reward is replaced rather than carried forward. Advance
+report schema 13, evaluator revision 16, metric-registry revision 10,
+comparison revision 15, and cache schema 15. Start a fresh campaign.
+
+### 68. Smooth every staged reward component
+
+Date: 2026-08-13.
+
+Campaign `20260813T172426Z-staged` was stopped after update 10. Its validation
+pose error improved from 18.862 to 16.691, but remained slightly worse than the
+16.267 reached by the preceding worst-component campaign at the same update.
+More importantly, its stabilization reward reused a maximum over pose and
+motion errors even though campaign 67 had already shown oscillation when the
+identity of the maximum component changed. Continuing would not isolate the
+intended two-stage design from this known gradient-switching problem.
+
+Keep the two directly derived stages, but use smooth aggregation. Approach
+progress follows the RMS of normalized range and alignment error.
+Stabilization is the bounded inverse RMS of normalized range, alignment, full
+attitude, linear speed, and angular speed. Every component therefore supplies a
+gradient simultaneously; strict hold, terminal success, and the strict stage
+predicate remain binding so RMS aggregation cannot qualify a policy that fails
+one component. Preserve every other reward factor, weight, schedule, reset,
+PPO setting, workload, and acceptance gate. Advance report schema 14,
+evaluator revision 17, metric-registry revision 11, comparison revision 16,
+and cache schema 16. Start a fresh campaign.
+
+### 69. Make stabilization reachable before the final strict goal
+
+Date: 2026-08-13.
+
+Smooth staged campaign `20260813T173430Z-staged-rms` reduced validation pose
+error from 18.862 to 10.000 by update 30, outperforming the comparable
+worst-component campaign's 12.322. Alignment pass reached 0.90%, range pass
+reached 14.17%, failures remained exclusively range undershoots, and collisions
+remained zero. Despite that useful approach learning, stabilization reward was
+exactly zero at updates 10, 20, and 30 across all scheduled validation traces.
+Requiring the final strict range and 0.01 m alignment conjunction to enter stage
+2 makes the next learning signal unreachable.
+
+Change only the stage-transition threshold. Enter stabilization within one
+fixed 0.03 m Euclidean capture radius around the target position; leaving that
+radius returns to approach. The radius matches the existing wall-normal
+alignment capture scale and is fixed across all training phases. It does not
+relax the strict 0.40-0.42 m range, 0.01 m alignment, pose, motion, 100-sample
+success, or acceptance predicates. Preserve both reward formulas, every reward
+weight, schedule, reset, PPO setting, workload, and acceptance gate. Advance
+report schema 15, evaluator revision 18, metric-registry revision 12,
+comparison revision 17, and cache schema 17. Start a fresh campaign.

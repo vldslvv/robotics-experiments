@@ -79,9 +79,9 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 3
-_CACHE_SCHEMA_VERSION = 4
-_EVALUATOR_REVISION = 3
+_REPORT_SCHEMA_VERSION = 15
+_CACHE_SCHEMA_VERSION = 17
+_EVALUATOR_REVISION = 18
 
 
 def _report(message: str) -> None:
@@ -157,7 +157,6 @@ def _build_env(
     experiment_config: ExperimentConfig,
     controller_settings,
     policy_contract=None,
-    use_training_reset_distribution: bool = False,
 ):
     # AppLauncher must start before the Isaac Lab workflow import.
     from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
@@ -169,7 +168,6 @@ def _build_env(
         seed=seed,
         num_envs=num_envs,
         policy_contract=policy_contract,
-        use_training_reset_distribution=use_training_reset_distribution,
     )
 
 
@@ -987,6 +985,14 @@ def _select_attempt_candidate(
     return next(candidate for candidate in candidates if candidate.evaluation is selected)
 
 
+def _configure_training_environment(*, env, phase: RlTrainingPhaseConfig) -> None:
+    if phase.range_undershoot_min_m is None:
+        return
+    if not hasattr(env, "configure_training_phase"):
+        raise ValueError("task-specific training phases are unsupported by the selected task")
+    env.configure_training_phase(phase)
+
+
 def _restore_phase_branch(
     *,
     runner,
@@ -1005,13 +1011,10 @@ def _restore_phase_branch(
     )
     _report(f"refinement restore COMPLETE iteration={restored_iteration}")
     training.configure_phase(runner=runner, phase=phase, phase_number=phase_number)
-    if hasattr(env, "set_training_hard_case_fraction"):
-        env.set_training_hard_case_fraction(float(phase.hard_case_fraction))
-    elif phase.hard_case_fraction != 0.0:
-        raise ValueError("hard-case reset mixture is unsupported by the selected task")
+    _configure_training_environment(env=env, phase=phase)
     _report(
         f"refinement configuration COMPLETE learning_rate={phase.learning_rate} "
-        f"hard_case_fraction={phase.hard_case_fraction}; resetting environments"
+        f"range_undershoot_min_m={phase.range_undershoot_min_m}; resetting environments"
     )
     with torch.inference_mode():
         env.reset()
@@ -1230,7 +1233,6 @@ def _run_new_training(
                 num_envs=args.num_envs,
                 experiment_config=config,
                 controller_settings=controller_artifact.selected_settings,
-                use_training_reset_distribution=True,
             )
             runner: Any = None
             evaluate_candidate: Any = None
@@ -1294,7 +1296,7 @@ def _run_new_training(
                     checkpoint_path=initial_checkpoint,
                     iteration=0,
                 )
-                cache_dir = policy_root / ".validation-cache-v4"
+                cache_dir = policy_root / ".validation-cache-v7"
                 telemetry = TelemetrySampler(
                     sample_interval_s=training_config.telemetry_sample_interval_s
                 )
@@ -1550,12 +1552,16 @@ def _run_new_training(
                             phase=phase,
                             phase_number=phase_index + 1,
                         )
-                        if hasattr(env, "set_training_hard_case_fraction"):
-                            env.set_training_hard_case_fraction(float(phase.hard_case_fraction))
-                        elif phase.hard_case_fraction != 0.0:
-                            raise ValueError(
-                                "hard-case reset mixture is unsupported by the selected task"
-                            )
+                        _configure_training_environment(env=env, phase=phase)
+                        _report(
+                            "initial phase configuration COMPLETE "
+                            f"learning_rate={phase.learning_rate} "
+                            f"range_undershoot_min_m={phase.range_undershoot_min_m}; "
+                            "resetting environments"
+                        )
+                        with torch.inference_mode():
+                            env.reset()
+                        _report("initial phase environment reset COMPLETE")
                     plateau_state = PlateauState(
                         reference_value=parent.evaluation.metric(
                             training_config.plateau.metric_name

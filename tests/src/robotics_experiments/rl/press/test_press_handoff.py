@@ -23,6 +23,7 @@ _GATE = HandoffGate(
     wall_normal_speed_max_mps=0.02,
     lateral_speed_max_mps=0.02,
     angular_speed_max_radps=0.05,
+    relative_attitude_error_max_rad=np.deg2rad(5.0),
     body_z_alignment_min=0.965926,
     estimator_health_min=0.80,
 )
@@ -80,6 +81,14 @@ def test_calm_close_confident_fresh_is_ready() -> None:
         (
             {"body_ang_vel_radps": np.array([0.0, 0.0, 0.06])},
             HandoffReason.ANGULAR_SPEED,
+        ),
+        (
+            {
+                "relative_switch_quat_xyzw": np.array(
+                    [np.sin(np.deg2rad(5.01) / 2.0), 0.0, 0.0, np.cos(np.deg2rad(5.01) / 2.0)]
+                )
+            },
+            HandoffReason.ATTITUDE,
         ),
         (
             {
@@ -150,6 +159,7 @@ def test_gate_from_config_duck_types() -> None:
         wall_normal_speed_max_mps = 0.08
         lateral_speed_max_mps = 0.10
         angular_speed_max_radps = 0.20
+        relative_attitude_error_max_rad = 0.10
         body_z_alignment_min = 0.95
         estimator_health_min = 0.90
 

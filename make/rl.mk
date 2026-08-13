@@ -13,6 +13,11 @@ RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 RL_TENSORBOARD_LOGDIR ?= .build/training
 RL_TENSORBOARD_SCALAR_SAMPLES ?= 1000000
+PRESS_NAVIGATION_MEASUREMENT_RUNS ?= 10
+PRESS_NAVIGATION_POSITION_MARGIN_M ?= 0.005
+PRESS_NAVIGATION_ROTATION_MARGIN_RAD ?= 0.004363323129985824
+PRESS_NAVIGATION_MEASUREMENT_ROOT ?= .build/benchmarks/press-navigation-handoff-campaigns
+PRESS_NAVIGATION_MEASUREMENT_RUNNER = make/scripts/run_press_navigation_handoff_measurement.sh
 
 # One campaign validates up to three scratch attempts, freshly tests the first
 # eligible immutable actor, and publishes only after final acceptance.
@@ -111,6 +116,31 @@ test-integration-press-approach-routine: generate-drone-usd
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
+
+.PHONY: test-integration-press-navigation-handoff-sample
+test-integration-press-navigation-handoff-sample: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-navigation-handoff-sample: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
+test-integration-press-navigation-handoff-sample: SCENE = @config
+test-integration-press-navigation-handoff-sample:
+	@TEST_TARGET='test-integration-press-navigation-handoff-sample' \
+	    HOST_ISAAC_LOG_BASENAME='test_px4_press_navigation_handoff_sample.log' \
+	    HOST_PX4_LOG_BASENAME='test_px4_press_navigation_handoff_sample_px4.log' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST)' \
+	    PRESS_NAVIGATION_MEASUREMENT_OUTPUT='$(PRESS_NAVIGATION_MEASUREMENT_OUTPUT_CONTAINER)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-navigation-handoff-sample' \
+	    STRICT='1' \
+	    $(PX4_INTEGRATION_COMMON_ENV) \
+	    bash "$(PX4_INTEGRATION_RUNNER)"
+
+.PHONY: measure-press-navigation-handoff
+measure-press-navigation-handoff:
+	@MAKE_COMMAND='$(MAKE)' \
+	    PRESS_NAVIGATION_MEASUREMENT_ROOT='$(PRESS_NAVIGATION_MEASUREMENT_ROOT)' \
+	    PRESS_NAVIGATION_MEASUREMENT_RUNS='$(PRESS_NAVIGATION_MEASUREMENT_RUNS)' \
+	    PRESS_NAVIGATION_POSITION_MARGIN_M='$(PRESS_NAVIGATION_POSITION_MARGIN_M)' \
+	    PRESS_NAVIGATION_ROTATION_MARGIN_RAD='$(PRESS_NAVIGATION_ROTATION_MARGIN_RAD)' \
+	    bash "$(PRESS_NAVIGATION_MEASUREMENT_RUNNER)"
 
 # Physical warehouse trained-policy acceptance remains downstream of alignment
 # and never fits or publishes controller settings.

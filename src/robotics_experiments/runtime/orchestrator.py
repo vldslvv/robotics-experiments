@@ -134,6 +134,13 @@ class FleetState:
     switch_events: tuple[SwitchToggleEvent, ...]
 
 
+@dataclass(frozen=True)
+class _FleetDriverEnvStatus:
+    """Latest immutable input already consumed by one routine driver."""
+
+    observation: Optional[RoutineObservation]
+
+
 class FleetDriverEnv:
     """Mutable simulator/resource seam used by a pure driver transition."""
 
@@ -159,6 +166,7 @@ class FleetDriverEnv:
         self._log_fn = log
         self._on_failure_fn = on_failure
         self._on_step_advanced_fn = on_step_advanced
+        self._status = _FleetDriverEnvStatus(observation=None)
 
     def is_bridge_connected(self) -> bool:
         status = read_bridge_host_status(host=self._host).bridge_status
@@ -182,7 +190,7 @@ class FleetDriverEnv:
                 sim_time_s=sim_time_us * 1e-6,
             )
         )
-        return RoutineObservation(
+        observation = RoutineObservation(
             vehicle_state=vehicle_state,
             bridge_status=host_status,
             last_ack=last_ack,
@@ -190,6 +198,12 @@ class FleetDriverEnv:
             sim_time_us=sim_time_us,
             task_observation=task_observation,
         )
+        self._status = _FleetDriverEnvStatus(observation=observation)
+        return observation
+
+    def read_status(self) -> _FleetDriverEnvStatus:
+        """Return telemetry from the existing driver read without sampling again."""
+        return self._status
 
     def log(self, message: str) -> None:
         self._log_fn(message)

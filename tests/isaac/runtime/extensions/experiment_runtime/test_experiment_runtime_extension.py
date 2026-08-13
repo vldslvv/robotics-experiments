@@ -95,6 +95,7 @@ class _FakeOrchestrator:
 
     def __init__(self, env):
         self.env = env
+        self.config = env
         self.stage = None
         self.flying = []
         self.switch_events = ()
@@ -170,9 +171,17 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
         {"DRIVE": 1, "RECOVERING": 2, "SUCCEEDED": 3, "FAILED": 4},
     )
     fake_commanding.FailureKind = IntEnum("FailureKind", {"COMMAND": 1})
+    fake_commanding.StreamSetpoint = object
 
     fake_bridge = types.ModuleType("robotics_experiments.px4_bridge")
     fake_bridge.BridgeStatus = object
+    fake_bridge.body_velocity_flu_from_state = lambda _state: (0.0, 0.0, 0.0)
+
+    fake_press = types.ModuleType("robotics_experiments.rl.press")
+    fake_press.HandoffGate = object
+    fake_press.PressApproachExecutionState = object
+    fake_press.PressObservation = object
+    fake_press.handoff_ready = lambda *_args: SimpleNamespace(ready=False, reason=None)
 
     fake_runtime = types.ModuleType("robotics_experiments.runtime")
     fake_runtime.FleetDriverEnv = lambda *a, **k: object()
@@ -200,6 +209,7 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
         "robotics_experiments.commanding": fake_commanding,
         "robotics_experiments.config": fake_config,
         "robotics_experiments.px4_bridge": fake_bridge,
+        "robotics_experiments.rl.press": fake_press,
         "robotics_experiments.runtime": fake_runtime,
     }
     for name, module in modules.items():
@@ -304,6 +314,17 @@ def test_public_runtime_snapshot_is_immutable_and_read_only(monkeypatch):
     host = SimpleNamespace(
         status=SimpleNamespace(sim_time_us=1_250_000, bridge_status=bridge_status)
     )
+    environment_reads = []
+    environment = SimpleNamespace(
+        read_status=lambda: environment_reads.append("status") or SimpleNamespace(observation=None),
+    )
+    driver = SimpleNamespace(
+        phase=sys.modules["robotics_experiments.commanding"].DriverPhase.DRIVE,
+        previous_cursor=2,
+        failure=None,
+        routine=None,
+        routine_state=SimpleNamespace(cursor=2),
+    )
     orch.flying = [
         SimpleNamespace(
             spawned=SimpleNamespace(
@@ -311,15 +332,13 @@ def test_public_runtime_snapshot_is_immutable_and_read_only(monkeypatch):
                 host=host,
                 vehicle=SimpleNamespace(routine=SimpleNamespace(steps=({}, {}, {}))),
             ),
-            driver=SimpleNamespace(
-                phase=sys.modules["robotics_experiments.commanding"].DriverPhase.DRIVE,
-                previous_cursor=2,
-                failure=None,
-            ),
+            driver=driver,
+            context=SimpleNamespace(env=environment),
         )
     ]
 
     status = extension.read_status()
+    repeated = extension.read_status()
 
     assert module.get_instance() is extension
     assert status.scene_ready
@@ -333,8 +352,16 @@ def test_public_runtime_snapshot_is_immutable_and_read_only(monkeypatch):
             driver_phase="DRIVE",
             failure=None,
             recovery_outcome=None,
+            motion=None,
+            routine_step=None,
+            navigation=None,
+            press=None,
+            policy=None,
         ),
     )
+    assert repeated == status
+    assert orch.flying[0].driver is driver
+    assert environment_reads == ["status", "status"]
     assert status.switch_events == ()
     with pytest.raises(AttributeError):
         status.scene_ready = False

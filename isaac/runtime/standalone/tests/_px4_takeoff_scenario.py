@@ -280,6 +280,7 @@ def _drive_to_done(
     context: SceneTestContext,
     fleet: FleetState,
     routine_tick_hook: Callable[[FleetState], None] | None,
+    routine_stop_predicate: Callable[[FleetState], bool] | None,
     /,
 ) -> FleetState:
     """Tick physics and every per-drone driver until all routines are done.
@@ -330,6 +331,9 @@ def _drive_to_done(
                 raise callback_error
             if routine_tick_hook is not None:
                 routine_tick_hook(fleet)
+            if routine_stop_predicate is not None and routine_stop_predicate(fleet):
+                context.report("integration stop predicate satisfied")
+                break
     finally:
         del physics_subscription
     if context.strict:
@@ -462,7 +466,12 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
             )
 
         with timing.timed_stage("drive_routine", sim_time_us=sim_time_us):
-            fleet = _drive_to_done(context, fleet, options.routine_tick_hook)
+            fleet = _drive_to_done(
+                context,
+                fleet,
+                options.routine_tick_hook,
+                options.routine_stop_predicate,
+            )
         if options.post_routine_hook is not None:
             options.post_routine_hook(context, fleet)
 
@@ -493,6 +502,8 @@ class Px4TakeoffScenarioOptions:
     tick its takeoff step completes (single-vehicle fault-injection only).
     ``routine_tick_hook`` receives each successor fleet tick for
     integration-test-only flight diagnostics.
+    ``routine_stop_predicate`` may end an isolated measurement or invocation
+    gate before the configured production routine completes.
     ``success_label`` is used only in the final diagnostic log line.
     """
 
@@ -500,6 +511,7 @@ class Px4TakeoffScenarioOptions:
     px4_container_log_name: str
     post_takeoff_hook: Callable[[SceneTestContext, BridgeHost], None] | None = None
     routine_tick_hook: Callable[[FleetState], None] | None = None
+    routine_stop_predicate: Callable[[FleetState], bool] | None = None
     post_routine_hook: Callable[[SceneTestContext, Any], None] | None = None
     policy_factory: Callable[..., PolicyAdapter] | None = None
     success_label: str = "configured routine"

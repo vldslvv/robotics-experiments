@@ -16,6 +16,7 @@ from robotics_experiments.rl.press import (
     PressApproachResult,
     PressApproachRewardTerms,
     press_approach_target_velocity,
+    quaternion_geodesic_error_rad,
 )
 from robotics_experiments.rl.training.progress import (
     AcceptanceResult,
@@ -45,12 +46,24 @@ class PressApproachEpisodeMetrics:
     body_collision: bool
     pusher_collision: bool
     other_flight_failure: bool
+    range_undershoot: bool
     timeout: bool
+    range_pass_rate: float
+    alignment_pass_rate: float
+    attitude_pass_rate: float
+    linear_speed_pass_rate: float
+    angular_speed_pass_rate: float
+    contact_clear_pass_rate: float
+    complete_goal_pass_rate: float
+    mean_normalized_pose_error: float
+    max_stable_goal_fraction: float
     closest_range_m: float
     completion_time_s: float | None
     terminal_range_cost: float
     trajectory_alignment_cost: float
+    relative_attitude_error_cost: float
     velocity_tracking_cost: float
+    angular_velocity_cost: float
     upright_error_cost: float
     action_delta_cost: float
     completion_time_fraction: float
@@ -66,13 +79,26 @@ class PressApproachEvaluationSummary:
     body_collision_rate: float
     pusher_collision_rate: float
     other_flight_failure_rate: float
+    range_undershoot_rate: float
     timeout_rate: float
+    range_pass_rate: float
+    alignment_pass_rate: float
+    attitude_pass_rate: float
+    linear_speed_pass_rate: float
+    angular_speed_pass_rate: float
+    contact_clear_pass_rate: float
+    complete_goal_pass_rate: float
+    mean_normalized_pose_error: float
+    mean_max_stable_goal_fraction: float
+    maximum_stable_goal_fraction: float
     mean_closest_range_m: float
     min_closest_range_m: float
     median_completion_time_s: float | None
     mean_terminal_range_cost: float
     mean_trajectory_alignment_cost: float
+    mean_relative_attitude_error_cost: float
     mean_velocity_tracking_cost: float
+    mean_angular_velocity_cost: float
     mean_upright_error_cost: float
     mean_action_delta_cost: float
     mean_completion_time_fraction: float
@@ -140,7 +166,30 @@ def summarize_press_approach_episodes(
         other_flight_failure_rate=(
             sum(episode.other_flight_failure for episode in episodes) / total
         ),
+        range_undershoot_rate=sum(episode.range_undershoot for episode in episodes) / total,
         timeout_rate=sum(episode.timeout for episode in episodes) / total,
+        range_pass_rate=float(np.mean([episode.range_pass_rate for episode in episodes])),
+        alignment_pass_rate=float(np.mean([episode.alignment_pass_rate for episode in episodes])),
+        attitude_pass_rate=float(np.mean([episode.attitude_pass_rate for episode in episodes])),
+        linear_speed_pass_rate=float(
+            np.mean([episode.linear_speed_pass_rate for episode in episodes])
+        ),
+        angular_speed_pass_rate=float(
+            np.mean([episode.angular_speed_pass_rate for episode in episodes])
+        ),
+        contact_clear_pass_rate=float(
+            np.mean([episode.contact_clear_pass_rate for episode in episodes])
+        ),
+        complete_goal_pass_rate=float(
+            np.mean([episode.complete_goal_pass_rate for episode in episodes])
+        ),
+        mean_normalized_pose_error=float(
+            np.mean([episode.mean_normalized_pose_error for episode in episodes])
+        ),
+        mean_max_stable_goal_fraction=float(
+            np.mean([episode.max_stable_goal_fraction for episode in episodes])
+        ),
+        maximum_stable_goal_fraction=max(episode.max_stable_goal_fraction for episode in episodes),
         mean_closest_range_m=float(np.mean([episode.closest_range_m for episode in episodes])),
         min_closest_range_m=min(episode.closest_range_m for episode in episodes),
         median_completion_time_s=(float(np.median(completion_times)) if completion_times else None),
@@ -150,8 +199,14 @@ def summarize_press_approach_episodes(
         mean_trajectory_alignment_cost=float(
             np.mean([episode.trajectory_alignment_cost for episode in episodes])
         ),
+        mean_relative_attitude_error_cost=float(
+            np.mean([episode.relative_attitude_error_cost for episode in episodes])
+        ),
         mean_velocity_tracking_cost=float(
             np.mean([episode.velocity_tracking_cost for episode in episodes])
+        ),
+        mean_angular_velocity_cost=float(
+            np.mean([episode.angular_velocity_cost for episode in episodes])
         ),
         mean_upright_error_cost=float(
             np.mean([episode.upright_error_cost for episode in episodes])
@@ -168,12 +223,23 @@ def _trajectory_costs(
     observation: torch.Tensor,
     action: torch.Tensor,
     goal_config: PressApproachGoalConfig,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+]:
     relative_position = observation[:, :3]
     alignment = torch.linalg.vector_norm(relative_position[:, 1:3], dim=-1)
     alignment_cost = (alignment / float(goal_config.alignment_error_max_m)).clamp(0.0, 1.0)
 
     relative_quat_xyzw = observation[:, 3:7]
+    relative_attitude_error_cost = (
+        quaternion_geodesic_error_rad(quaternion_xyzw=relative_quat_xyzw)
+        / float(goal_config.relative_attitude_error_max_rad)
+    ).clamp(0.0, 1.0)
     body_velocity = observation[:, 10:13]
     quat_vector = relative_quat_xyzw[:, :3]
     twice_cross = 2.0 * torch.linalg.cross(quat_vector, body_velocity)
@@ -192,6 +258,11 @@ def _trajectory_costs(
         / float(goal_config.linear_speed_max_mps)
     ).clamp(0.0, 1.0)
 
+    angular_velocity_cost = (
+        torch.linalg.vector_norm(observation[:, 13:16], dim=-1)
+        / float(goal_config.angular_speed_max_radps)
+    ).clamp(0.0, 1.0)
+
     attitude_xyzw = observation[:, 16:20]
     body_z_world_z = 1.0 - 2.0 * (attitude_xyzw[:, 0].square() + attitude_xyzw[:, 1].square())
     upright_cost = ((1.0 - body_z_world_z) / (1.0 - float(goal_config.body_z_alignment_min))).clamp(
@@ -202,7 +273,14 @@ def _trajectory_costs(
     action_delta_cost = (
         torch.sqrt(torch.mean((action - previous_action).square(), dim=-1)) / 2.0
     ).clamp(0.0, 1.0)
-    return alignment_cost, velocity_tracking_cost, upright_cost, action_delta_cost
+    return (
+        alignment_cost,
+        relative_attitude_error_cost,
+        velocity_tracking_cost,
+        angular_velocity_cost,
+        upright_cost,
+        action_delta_cost,
+    )
 
 
 def _report_worst_episode_trace(
@@ -265,7 +343,9 @@ def _evaluate_seed(
     body_collision = torch.zeros_like(active)
     pusher_collision = torch.zeros_like(active)
     other_flight_failure = torch.zeros_like(active)
+    range_undershoot = torch.zeros_like(active)
     timeout = torch.zeros_like(active)
+    maximum_stable_goal_steps = torch.zeros(episode_count, dtype=torch.long, device=env.device)
     closest_range = torch.full(
         (episode_count,),
         float("inf"),
@@ -275,13 +355,23 @@ def _evaluate_seed(
     completion_time = torch.full_like(closest_range, float("nan"))
     terminal_range_cost = torch.ones_like(closest_range)
     trajectory_cost_sums = torch.zeros(
-        (4, episode_count),
+        (6, episode_count),
         dtype=torch.float32,
         device=env.device,
     )
     trajectory_sample_count = torch.zeros(
         episode_count,
         dtype=torch.long,
+        device=env.device,
+    )
+    strict_pass_sums = torch.zeros(
+        (7, episode_count),
+        dtype=torch.float32,
+        device=env.device,
+    )
+    normalized_pose_error_sum = torch.zeros(
+        episode_count,
+        dtype=torch.float32,
         device=env.device,
     )
     active_trace: list[torch.Tensor] = []
@@ -322,7 +412,30 @@ def _evaluate_seed(
         if result is None:
             raise RuntimeError("press approach environment did not publish a transition result")
         termination = result.termination
-        current_range = result.state.previous_range_m
+        current_range = result.range_m
+        strict_passes = torch.stack(
+            (
+                result.range_error_m
+                <= 0.5 * (float(goal_config.range_max_m) - float(goal_config.range_min_m)),
+                result.alignment_error_m <= float(goal_config.alignment_error_max_m),
+                result.attitude_error_rad <= float(goal_config.relative_attitude_error_max_rad),
+                result.linear_speed_mps <= float(goal_config.linear_speed_max_mps),
+                result.angular_speed_radps <= float(goal_config.angular_speed_max_radps),
+                result.contact_clear,
+                result.strict_goal,
+            ),
+            dim=0,
+        )
+        strict_pass_sums += torch.where(active[None, :], strict_passes.float(), 0.0)
+        normalized_pose_error_sum += torch.where(
+            active,
+            result.state.normalized_pose_error,
+            0.0,
+        )
+        maximum_stable_goal_steps = torch.maximum(
+            maximum_stable_goal_steps,
+            torch.where(active, result.state.stable_goal_steps, maximum_stable_goal_steps),
+        )
         if trace_worst_episode:
             range_trace.append(current_range.detach().cpu())
             body_collision_trace.append(termination.body_collision.detach().cpu())
@@ -355,6 +468,7 @@ def _evaluate_seed(
         body_collision |= active & termination.body_collision
         pusher_collision |= active & termination.pusher_collision
         other_flight_failure |= active & termination.flight_failure & ~termination.collision
+        range_undershoot |= active & termination.range_undershoot
         timeout |= active & termination.time_out
         reward_values = torch.stack(
             [getattr(result.rewards, name) for name in reward_names],
@@ -402,16 +516,46 @@ def _evaluate_seed(
             body_collision=bool(body_collision[index].item()),
             pusher_collision=bool(pusher_collision[index].item()),
             other_flight_failure=bool(other_flight_failure[index].item()),
+            range_undershoot=bool(range_undershoot[index].item()),
             timeout=bool(timeout[index].item()),
+            range_pass_rate=float(
+                strict_pass_sums[0, index].item() / trajectory_sample_count[index].item()
+            ),
+            alignment_pass_rate=float(
+                strict_pass_sums[1, index].item() / trajectory_sample_count[index].item()
+            ),
+            attitude_pass_rate=float(
+                strict_pass_sums[2, index].item() / trajectory_sample_count[index].item()
+            ),
+            linear_speed_pass_rate=float(
+                strict_pass_sums[3, index].item() / trajectory_sample_count[index].item()
+            ),
+            angular_speed_pass_rate=float(
+                strict_pass_sums[4, index].item() / trajectory_sample_count[index].item()
+            ),
+            contact_clear_pass_rate=float(
+                strict_pass_sums[5, index].item() / trajectory_sample_count[index].item()
+            ),
+            complete_goal_pass_rate=float(
+                strict_pass_sums[6, index].item() / trajectory_sample_count[index].item()
+            ),
+            mean_normalized_pose_error=float(
+                normalized_pose_error_sum[index].item() / trajectory_sample_count[index].item()
+            ),
+            max_stable_goal_fraction=(
+                float(maximum_stable_goal_steps[index].item()) / float(goal_config.stable_steps)
+            ),
             closest_range_m=float(closest_range[index].item()),
             completion_time_s=(
                 float(completion_time[index].item()) if bool(success[index].item()) else None
             ),
             terminal_range_cost=float(terminal_range_cost[index].item()),
             trajectory_alignment_cost=float(trajectory_means[0, index].item()),
-            velocity_tracking_cost=float(trajectory_means[1, index].item()),
-            upright_error_cost=float(trajectory_means[2, index].item()),
-            action_delta_cost=float(trajectory_means[3, index].item()),
+            relative_attitude_error_cost=float(trajectory_means[1, index].item()),
+            velocity_tracking_cost=float(trajectory_means[2, index].item()),
+            angular_velocity_cost=float(trajectory_means[3, index].item()),
+            upright_error_cost=float(trajectory_means[4, index].item()),
+            action_delta_cost=float(trajectory_means[5, index].item()),
             completion_time_fraction=(
                 float(completion_time[index].item()) / episode_length_s
                 if bool(success[index].item())
@@ -440,6 +584,7 @@ def _evaluate_seed(
         f"press approach evaluation seed={seed} COMPLETE "
         f"elapsed_s={time.monotonic() - started_at:.1f} "
         f"success={summary.approach_success_rate:.3f} "
+        f"mean_max_dwell={summary.mean_max_stable_goal_fraction:.3f} "
         f"collision={summary.collision_rate:.3f} "
         f"body_collision={summary.body_collision_rate:.3f} "
         f"pusher_collision={summary.pusher_collision_rate:.3f} "
@@ -503,10 +648,15 @@ def press_policy_evaluation(
         + float(evaluation_config.flight_failure_penalty) * summary.other_flight_failure_rate
         + float(evaluation_config.timeout_penalty) * summary.timeout_rate
         + float(evaluation_config.non_success_penalty) * (1.0 - summary.approach_success_rate)
+        + float(evaluation_config.dwell_progress_weight)
+        * (1.0 - summary.mean_max_stable_goal_fraction)
         + float(evaluation_config.terminal_range_weight) * summary.mean_terminal_range_cost
         + float(evaluation_config.trajectory_alignment_weight)
         * summary.mean_trajectory_alignment_cost
+        + float(evaluation_config.relative_attitude_error_weight)
+        * summary.mean_relative_attitude_error_cost
         + float(evaluation_config.velocity_tracking_weight) * summary.mean_velocity_tracking_cost
+        + float(evaluation_config.angular_velocity_weight) * summary.mean_angular_velocity_cost
         + float(evaluation_config.upright_error_weight) * summary.mean_upright_error_cost
         + float(evaluation_config.action_delta_weight) * summary.mean_action_delta_cost
         + float(evaluation_config.completion_time_weight) * summary.mean_completion_time_fraction
@@ -519,12 +669,25 @@ def press_policy_evaluation(
         summary.body_collision_rate,
         summary.pusher_collision_rate,
         summary.other_flight_failure_rate,
+        summary.range_undershoot_rate,
         summary.timeout_rate,
+        summary.range_pass_rate,
+        summary.alignment_pass_rate,
+        summary.attitude_pass_rate,
+        summary.linear_speed_pass_rate,
+        summary.angular_speed_pass_rate,
+        summary.contact_clear_pass_rate,
+        summary.complete_goal_pass_rate,
+        summary.mean_normalized_pose_error,
+        summary.mean_max_stable_goal_fraction,
+        summary.maximum_stable_goal_fraction,
         summary.mean_closest_range_m,
         summary.min_closest_range_m,
         summary.mean_terminal_range_cost,
         summary.mean_trajectory_alignment_cost,
+        summary.mean_relative_attitude_error_cost,
         summary.mean_velocity_tracking_cost,
+        summary.mean_angular_velocity_cost,
         summary.mean_upright_error_cost,
         summary.mean_action_delta_cost,
         summary.mean_completion_time_fraction,
@@ -538,15 +701,29 @@ def press_policy_evaluation(
         policy_digest=policy_digest,
         metrics=(
             EvaluationMetric("approach_success_rate", summary.approach_success_rate),
-            EvaluationMetric("other_flight_failure_rate", summary.other_flight_failure_rate),
             EvaluationMetric("collision_rate", summary.collision_rate),
+            EvaluationMetric("other_flight_failure_rate", summary.other_flight_failure_rate),
+            EvaluationMetric("range_undershoot_rate", summary.range_undershoot_rate),
+            EvaluationMetric("timeout_rate", summary.timeout_rate),
+            EvaluationMetric("completed_episodes", float(summary.episodes)),
+            EvaluationMetric("range_pass_rate", summary.range_pass_rate),
+            EvaluationMetric("alignment_pass_rate", summary.alignment_pass_rate),
+            EvaluationMetric("attitude_pass_rate", summary.attitude_pass_rate),
+            EvaluationMetric("linear_speed_pass_rate", summary.linear_speed_pass_rate),
+            EvaluationMetric("angular_speed_pass_rate", summary.angular_speed_pass_rate),
+            EvaluationMetric("contact_clear_pass_rate", summary.contact_clear_pass_rate),
+            EvaluationMetric("complete_goal_pass_rate", summary.complete_goal_pass_rate),
+            EvaluationMetric(
+                "mean_max_stable_goal_fraction", summary.mean_max_stable_goal_fraction
+            ),
+            EvaluationMetric("maximum_stable_goal_fraction", summary.maximum_stable_goal_fraction),
+            EvaluationMetric("mean_normalized_pose_error", summary.mean_normalized_pose_error),
             EvaluationMetric("minimum_closest_range_m", summary.min_closest_range_m),
+            EvaluationMetric("mean_closest_range_m", summary.mean_closest_range_m),
             EvaluationMetric("all_traces_finite", float(traces_finite)),
             EvaluationMetric("held_out_task_cost", float(task_cost)),
-            EvaluationMetric("timeout_rate", summary.timeout_rate),
             EvaluationMetric("body_collision_rate", summary.body_collision_rate),
             EvaluationMetric("pusher_collision_rate", summary.pusher_collision_rate),
-            EvaluationMetric("mean_closest_range_m", summary.mean_closest_range_m),
             EvaluationMetric(
                 "median_successful_completion_time_s", summary.median_completion_time_s
             ),
@@ -554,7 +731,12 @@ def press_policy_evaluation(
             EvaluationMetric(
                 "mean_trajectory_alignment_cost", summary.mean_trajectory_alignment_cost
             ),
+            EvaluationMetric(
+                "mean_relative_attitude_error_cost",
+                summary.mean_relative_attitude_error_cost,
+            ),
             EvaluationMetric("mean_velocity_tracking_cost", summary.mean_velocity_tracking_cost),
+            EvaluationMetric("mean_angular_velocity_cost", summary.mean_angular_velocity_cost),
             EvaluationMetric("mean_upright_error_cost", summary.mean_upright_error_cost),
             EvaluationMetric("mean_action_delta_cost", summary.mean_action_delta_cost),
             EvaluationMetric(

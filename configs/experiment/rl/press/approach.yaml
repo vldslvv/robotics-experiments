@@ -19,25 +19,40 @@ policy:
 handoff:
   pose_confidence_min: 0.85
   pose_age_max_s: 0.1
-  switch_range_min_m: 0.45
-  switch_range_max_m: 0.50
+  switch_range_min_m: 0.44
+  switch_range_max_m: 0.52
   lateral_align_max_m: 0.08
   wall_normal_speed_max_mps: 0.02
   lateral_speed_max_mps: 0.02
   angular_speed_max_radps: 0.05
+  relative_attitude_error_max_rad: 0.020702318561895833
   body_z_alignment_min: 0.965926
   estimator_health_min: 0.80
 
-# Stage 1 stable, contact-free approach goal and dense contact-frame velocity
-# reference.
+# Accepted measurement of the exact production waypoint -> settle -> policy
+# route. The shared handoff envelope is also the Lab reset distribution, and
+# config validation requires it to cover these observed position bounds plus
+# the explicit margin. Refresh this profile when navigation sensors change.
+navigation_noise:
+  source: benchmarks/press_navigation_handoff/waypoint_settle_20260812.json
+  sample_count: 10
+  position_margin_m: 0.005
+  rotation_margin_rad: 0.004363323129985824
+  switch_range_min_m: 0.46459411621093605
+  switch_range_max_m: 0.4989912414550766
+  lateral_align_max_m: 0.03374635443902746
+  relative_attitude_error_max_rad: 0.01633899543191001
+
+# Stage 1 stable, contact-free approach goal and evaluation velocity reference.
 goal:
   range_min_m: 0.40
   range_max_m: 0.42
-  alignment_error_max_m: 0.03
-  linear_speed_max_mps: 0.10
-  angular_speed_max_radps: 0.40
+  alignment_error_max_m: 0.01
+  relative_attitude_error_max_rad: 0.017453292519943295
+  linear_speed_max_mps: 0.03
+  angular_speed_max_radps: 0.05
   body_z_alignment_min: 0.965926
-  stable_steps: 5
+  stable_steps: 100
   velocity_reference:
     range_center_m: 0.41
     wall_normal_prediction_horizon_s: 0.4
@@ -48,24 +63,17 @@ goal:
     tangential_gain_per_s: 2.0
     tangential_speed_max_mps: 0.10
 
-# Every field is a non-negative magnitude. The pure transition applies the
-# documented sign to each contribution.
+# The reward follows the task sequence: position progress outside the fixed
+# capture radius, then bounded stabilization credit inside it. Final hold and
+# success remain strict 1x-goal predicates.
 reward:
-  range_progress_weight: 50.0
-  # Penalize the normalized squared distance below the upper goal boundary.
-  # This supplies a direct pre-boundary braking signal while leaving the goal
-  # and acceptance range unchanged.
-  range_barrier_margin_m: 0.02
-  range_barrier_weight: 10.0
-  alignment_error_weight: 50.0
-  velocity_tracking_weight: 100.0
-  wall_normal_braking_command_weight: 0.0
-  upright_error_weight: 5.0
-  action_delta_weight: 0.004
-  success_weight: 150.0
-  collision_weight: 300.0
-  flight_failure_weight: 100.0
-  timeout_weight: 25.0
+  stabilization_capture_radius_m: 0.03
+  position_progress_weight: 10.0
+  stabilization_weight: 1.0
+  predictive_barrier_weight: 10.0
+  strict_hold_weight: 1.0
+  terminal_success_weight: 150.0
+  terminal_failure_weight: 300.0
 
 reset:
   # The policy-transfer experiment overrides this to false so the production
@@ -79,19 +87,10 @@ reset:
   switch_height_m: 1.0
   wall_half_extents_m: [0.05, 1.0, 1.0]
 
-# Training can mix the full handoff envelope with an area-uniform annulus near
-# an evidenced difficult boundary. Selection and evaluation always retain the
-# full handoff distribution.
-training_reset:
-  hard_case_fraction: 0.0
-  range_min_m: 0.45
-  range_max_m: 0.47
-  tangential_error_min_m: 0.06
-  tangential_error_max_m: 0.08
-
 termination:
   crash_tilt_cos: 0.819152
   min_altitude_m: 0.25
+  range_undershoot_min_m: 0.40
   max_wall_normal_distance_m: 1.0
   max_lateral_error_m: 0.30
   max_vertical_error_m: 0.30
@@ -105,11 +104,14 @@ evaluation:
   collision_rate_max: 0.01
   collision_penalty: 4.0
   flight_failure_penalty: 3.0
-  timeout_penalty: 2.0
+  timeout_penalty: 3.0
   non_success_penalty: 1.0
+  dwell_progress_weight: 2.0
   terminal_range_weight: 0.25
   trajectory_alignment_weight: 0.20
+  relative_attitude_error_weight: 0.10
   velocity_tracking_weight: 0.20
+  angular_velocity_weight: 0.10
   upright_error_weight: 0.10
   action_delta_weight: 0.10
   completion_time_weight: 0.15

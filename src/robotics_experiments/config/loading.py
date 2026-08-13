@@ -262,10 +262,31 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
             raise ValueError(f"{path}.schedule must be 'fixed' or 'adaptive'")
         if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
             raise ValueError(f"{path}.entropy_coef must be finite and non-negative")
-        if not math.isfinite(phase.hard_case_fraction) or not (
-            0.0 <= phase.hard_case_fraction <= 1.0
+        if phase.range_undershoot_min_m is not None and (
+            not math.isfinite(phase.range_undershoot_min_m)
+            or not 0.0 < phase.range_undershoot_min_m <= experiment.rl.press.goal.range_min_m
         ):
-            raise ValueError(f"{path}.hard_case_fraction must be between 0 and 1")
+            raise ValueError(
+                f"{path}.range_undershoot_min_m must be positive and no greater than "
+                "rl.press.goal.range_min_m when configured"
+            )
+    configured_undershoot_limits = tuple(
+        phase.range_undershoot_min_m
+        for phase in training.phases
+        if phase.range_undershoot_min_m is not None
+    )
+    if configured_undershoot_limits:
+        if len(configured_undershoot_limits) != len(training.phases):
+            raise ValueError(
+                "rl.training.phases must configure range_undershoot_min_m consistently"
+            )
+        if configured_undershoot_limits != tuple(sorted(configured_undershoot_limits)):
+            raise ValueError("rl.training.phases range_undershoot_min_m must be nondecreasing")
+        if configured_undershoot_limits[-1] != experiment.rl.press.goal.range_min_m:
+            raise ValueError(
+                "rl.training.phases final range_undershoot_min_m must equal "
+                "rl.press.goal.range_min_m"
+            )
     plateau = training.plateau
     if not plateau.metric_name.strip():
         raise ValueError("rl.training.plateau.metric_name must be non-empty")
@@ -335,6 +356,7 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "wall_normal_speed_max_mps": handoff.wall_normal_speed_max_mps,
         "lateral_speed_max_mps": handoff.lateral_speed_max_mps,
         "angular_speed_max_radps": handoff.angular_speed_max_radps,
+        "relative_attitude_error_max_rad": handoff.relative_attitude_error_max_rad,
     }
     for name, value in positive_handoff_values.items():
         if not math.isfinite(value) or value <= 0.0:
@@ -350,33 +372,83 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.handoff.{name} must be between 0 and 1")
 
-    training_reset = press.training_reset
-    if not math.isfinite(training_reset.hard_case_fraction) or not (
-        0.0 <= training_reset.hard_case_fraction <= 1.0
+    navigation_noise = press.navigation_noise
+    if not navigation_noise.source.strip():
+        raise ValueError("rl.press.navigation_noise.source must be non-empty")
+    navigation_source = Path(navigation_noise.source)
+    if navigation_source.is_absolute() or ".." in navigation_source.parts:
+        raise ValueError("rl.press.navigation_noise.source must be a repo-relative path")
+    if navigation_noise.sample_count < 10:
+        raise ValueError("rl.press.navigation_noise.sample_count must be at least 10")
+    if (
+        not math.isfinite(navigation_noise.position_margin_m)
+        or navigation_noise.position_margin_m <= 0.0
     ):
-        raise ValueError("rl.press.training_reset.hard_case_fraction must be between 0 and 1")
-    if not (
-        handoff.switch_range_min_m
-        <= training_reset.range_min_m
-        < training_reset.range_max_m
-        <= handoff.switch_range_max_m
+        raise ValueError("rl.press.navigation_noise.position_margin_m must be finite and positive")
+    if (
+        not math.isfinite(navigation_noise.rotation_margin_rad)
+        or navigation_noise.rotation_margin_rad <= 0.0
     ):
         raise ValueError(
-            "rl.press.training_reset range bounds must be ordered inside the handoff range"
+            "rl.press.navigation_noise.rotation_margin_rad must be finite and positive"
         )
     if not (
-        0.0
-        <= training_reset.tangential_error_min_m
-        < training_reset.tangential_error_max_m
-        <= handoff.lateral_align_max_m
+        math.isfinite(navigation_noise.switch_range_min_m)
+        and math.isfinite(navigation_noise.switch_range_max_m)
+        and 0.0 < navigation_noise.switch_range_min_m <= navigation_noise.switch_range_max_m
     ):
         raise ValueError(
-            "rl.press.training_reset tangential bounds must be ordered inside the handoff disk"
+            "rl.press.navigation_noise switch range bounds must be positive and ordered"
+        )
+    if (
+        not math.isfinite(navigation_noise.lateral_align_max_m)
+        or navigation_noise.lateral_align_max_m < 0.0
+    ):
+        raise ValueError(
+            "rl.press.navigation_noise.lateral_align_max_m must be finite and non-negative"
+        )
+    if (
+        not math.isfinite(navigation_noise.relative_attitude_error_max_rad)
+        or navigation_noise.relative_attitude_error_max_rad < 0.0
+    ):
+        raise ValueError(
+            "rl.press.navigation_noise.relative_attitude_error_max_rad must be finite "
+            "and non-negative"
+        )
+    margin_m = navigation_noise.position_margin_m
+    if handoff.switch_range_min_m > navigation_noise.switch_range_min_m - margin_m:
+        raise ValueError(
+            "rl.press.handoff.switch_range_min_m must cover the measured navigation "
+            "minimum plus navigation_noise.position_margin_m"
+        )
+    if handoff.switch_range_max_m < navigation_noise.switch_range_max_m + margin_m:
+        raise ValueError(
+            "rl.press.handoff.switch_range_max_m must cover the measured navigation "
+            "maximum plus navigation_noise.position_margin_m"
+        )
+    if handoff.lateral_align_max_m < navigation_noise.lateral_align_max_m + margin_m:
+        raise ValueError(
+            "rl.press.handoff.lateral_align_max_m must cover measured navigation "
+            "alignment plus navigation_noise.position_margin_m"
+        )
+    if handoff.relative_attitude_error_max_rad < (
+        navigation_noise.relative_attitude_error_max_rad + navigation_noise.rotation_margin_rad
+    ):
+        raise ValueError(
+            "rl.press.handoff.relative_attitude_error_max_rad must cover measured navigation "
+            "attitude error plus navigation_noise.rotation_margin_rad"
         )
 
     goal = press.goal
     if not 0.0 < goal.range_min_m <= goal.range_max_m:
         raise ValueError("rl.press.goal range bounds must be positive and ordered")
+    if (
+        not math.isfinite(press.termination.range_undershoot_min_m)
+        or press.termination.range_undershoot_min_m != goal.range_min_m
+    ):
+        raise ValueError(
+            "rl.press.termination.range_undershoot_min_m must equal rl.press.goal.range_min_m"
+        )
     reference = goal.velocity_reference
     if not goal.range_min_m <= reference.range_center_m <= goal.range_max_m:
         raise ValueError(
@@ -395,6 +467,7 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.press.goal.body_z_alignment_min must be between 0 and 1")
     positive_goal_values = {
         "alignment_error_max_m": goal.alignment_error_max_m,
+        "relative_attitude_error_max_rad": goal.relative_attitude_error_max_rad,
         "linear_speed_max_mps": goal.linear_speed_max_mps,
         "angular_speed_max_radps": goal.angular_speed_max_radps,
         "velocity_reference.wall_normal_prediction_horizon_s": (
@@ -416,11 +489,6 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
             "rl.press.handoff.switch_range_min_m must exceed rl.press.goal.range_max_m"
         )
 
-    if (
-        not math.isfinite(press.reward.range_barrier_margin_m)
-        or press.reward.range_barrier_margin_m <= 0.0
-    ):
-        raise ValueError("rl.press.reward.range_barrier_margin_m must be finite and positive")
     for field in fields(press.reward):
         name = field.name
         value = getattr(press.reward, name)
@@ -428,6 +496,8 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
             raise ValueError(
                 f"rl.press.reward.{name} must be finite and non-negative, got {value!r}"
             )
+    if press.reward.stabilization_capture_radius_m <= 0.0:
+        raise ValueError("rl.press.reward.stabilization_capture_radius_m must be positive")
     evaluation = press.evaluation
     validation_seeds = tuple(evaluation.validation_seeds)
     test_seeds = tuple(evaluation.test_seeds)
@@ -460,9 +530,12 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "flight_failure_penalty",
         "timeout_penalty",
         "non_success_penalty",
+        "dwell_progress_weight",
         "terminal_range_weight",
         "trajectory_alignment_weight",
+        "relative_attitude_error_weight",
         "velocity_tracking_weight",
+        "angular_velocity_weight",
         "upright_error_weight",
         "action_delta_weight",
         "completion_time_weight",

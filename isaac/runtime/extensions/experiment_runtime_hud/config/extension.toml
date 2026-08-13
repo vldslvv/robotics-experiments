@@ -1,0 +1,22 @@
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "ExperimentRuntimeHUD"
+description = "Pure-observer routine and policy telemetry window for experiment_runtime"
+authors = ["Vladislav Vyatkin"]
+repository = ""
+keywords = []
+changelog = "docs/CHANGELOG.md"
+readme = "docs/README.md"
+writeTarget.kit = true
+
+[dependencies]
+"experiment_runtime" = {}
+"isaacsim.gui.components" = {}
+"omni.kit.uiapp" = {}
+
+[[python.module]]
+name = "ExperimentRuntimeHud_python"
+
+[settings]
+exts."experiment_runtime_hud".transition_history_capacity = 2

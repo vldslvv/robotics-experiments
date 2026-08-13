@@ -17,6 +17,7 @@ import numpy as np
 
 from robotics_experiments.px4_bridge import rotate_vector_wxyz
 from robotics_experiments.rl.press.observation import PressObservation
+from robotics_experiments.rl.press.task import quaternion_geodesic_error_rad
 
 __all__ = ["HandoffGate", "HandoffReason", "HandoffResult", "handoff_ready"]
 
@@ -33,6 +34,7 @@ class HandoffReason(enum.Enum):
     WALL_NORMAL_SPEED = "wall_normal_speed"
     LATERAL_SPEED = "lateral_speed"
     ANGULAR_SPEED = "angular_speed"
+    ATTITUDE = "attitude"
     NOT_UPRIGHT = "not_upright"
     CONTACT_UNAVAILABLE = "contact_unavailable"
     CONTACT = "contact"
@@ -53,6 +55,7 @@ class HandoffGate:
     wall_normal_speed_max_mps: float
     lateral_speed_max_mps: float
     angular_speed_max_radps: float
+    relative_attitude_error_max_rad: float
     body_z_alignment_min: float
     estimator_health_min: float
 
@@ -68,6 +71,7 @@ class HandoffGate:
             wall_normal_speed_max_mps=float(cfg.wall_normal_speed_max_mps),
             lateral_speed_max_mps=float(cfg.lateral_speed_max_mps),
             angular_speed_max_radps=float(cfg.angular_speed_max_radps),
+            relative_attitude_error_max_rad=float(cfg.relative_attitude_error_max_rad),
             body_z_alignment_min=float(cfg.body_z_alignment_min),
             estimator_health_min=float(cfg.estimator_health_min),
         )
@@ -124,6 +128,13 @@ def handoff_ready(obs: PressObservation, gate: HandoffGate) -> HandoffResult:
     angular_speed = float(np.linalg.norm(np.asarray(obs.body_ang_vel_radps, dtype=np.float64)))
     if angular_speed > gate.angular_speed_max_radps:
         return HandoffResult(False, HandoffReason.ANGULAR_SPEED)
+    relative_attitude_error = float(
+        quaternion_geodesic_error_rad(
+            quaternion_xyzw=np.asarray(obs.relative_switch_quat_xyzw, dtype=np.float64)[None, :]
+        )[0]
+    )
+    if relative_attitude_error > gate.relative_attitude_error_max_rad:
+        return HandoffResult(False, HandoffReason.ATTITUDE)
     if _body_z_world_z(obs) < gate.body_z_alignment_min:
         return HandoffResult(False, HandoffReason.NOT_UPRIGHT)
     if not obs.contact_valid:

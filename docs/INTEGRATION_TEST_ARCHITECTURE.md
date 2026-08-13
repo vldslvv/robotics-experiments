@@ -79,19 +79,33 @@ fit/publication, and the alignment target-envelope gate.
 - `make test-integration-press-approach-routine` runs the Stage 1 deployment
   flight from `configs/policy_press_approach_quad.yaml`: takeoff, settle at a
   safe staging point about 0.59 m from the switch at a requested 0.5 m/s, make
-  the short move to a 0.47 m handoff target at 0.08 m/s with its complete
-  waypoint-tolerance band inside the training entry envelope, settle for two
-  seconds, execute the artifact-selected approach policy, return at 0.5 m/s to
-  the landing point,
-  land, and disarm. It requires stable contact-free approach completion and no
-  lamp transition. Like the hover artifact gate, it is excluded from
+  the short move to the unchanged 0.47 m handoff waypoint at 0.08 m/s, settle
+  for two seconds, and enter the artifact-selected approach policy. It passes
+  only after the unchanged handoff predicate latches, real artifact inference
+  returns a valid action, and the resulting first policy setpoint is actually
+  transmitted. It then ends the isolated invocation smoke test without judging
+  later actor behavior, return navigation, landing, contact rate, or task
+  success. Like the hover artifact gate, it is excluded from
   `test-integration-all` because it needs an independently accepted artifact
   declaring `policy_interface: press-approach` and `curriculum_stage: approach`.
   Accepted training advances `latest` after the immutable selected actor passes
   the disjoint final test. An operator-selected diagnostic `latest` may be flown
   by this target, but that execution is diagnostic and does not become policy
   qualification evidence; this integration target remains an independent
-  workflow gate.
+  workflow gate. Policy quality remains owned by held-out evaluation and
+  `test-integration-press-policy-transfer`.
+- `make measure-press-navigation-handoff` runs at least ten independent copies
+  of that exact production config through the final waypoint and settle, ending
+  each before handoff gating can bias the pose sample. It writes schema-2 raw
+  samples and a summary beneath
+  `.build/benchmarks/press-navigation-handoff-campaigns/`. The summary records
+  the identical final route, switch-relative position extrema, normalized
+  relative quaternions, maximum quaternion-geodesic attitude error, and the
+  configured 0.005 m / 0.25 degree margins required of the shared
+  Lab-reset/live-handoff envelope.
+  Re-run it whenever the sensor models, PX4 estimator/navigation behavior,
+  controller, routine, or warehouse geometry changes. Its internal one-sample
+  target is harness plumbing, not a public acceptance gate.
 - `make test-integration-alignment-target` runs the analytic hover/goto
   stability envelope with the selected alignment `best` artifact. It is owned
   by `make/alignment.mk` and excluded from `test-integration-all` because it

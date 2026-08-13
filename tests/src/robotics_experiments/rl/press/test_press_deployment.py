@@ -24,11 +24,12 @@ from robotics_experiments.rl.press import (
 _GOAL = PressApproachGoalConfig(
     range_min_m=0.40,
     range_max_m=0.42,
-    alignment_error_max_m=0.03,
-    linear_speed_max_mps=0.10,
-    angular_speed_max_radps=0.40,
+    alignment_error_max_m=0.01,
+    relative_attitude_error_max_rad=np.deg2rad(1.0),
+    linear_speed_max_mps=0.03,
+    angular_speed_max_radps=0.05,
     body_z_alignment_min=0.965926,
-    stable_steps=5,
+    stable_steps=100,
     velocity_reference=PressApproachVelocityReferenceConfig(
         range_center_m=0.41,
         wall_normal_prediction_horizon_s=0.4,
@@ -49,6 +50,7 @@ _GATE = HandoffGate(
     wall_normal_speed_max_mps=0.02,
     lateral_speed_max_mps=0.02,
     angular_speed_max_radps=0.05,
+    relative_attitude_error_max_rad=np.deg2rad(5.0),
     body_z_alignment_min=0.965926,
     estimator_health_min=0.80,
 )
@@ -60,13 +62,16 @@ def _observation(
     lateral_m: float = 0.0,
     linear_velocity: tuple[float, float, float] = (0.0, 0.0, 0.0),
     angular_velocity: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    attitude_error_rad: float = 0.0,
     contact: bool = False,
     lamp_state: int = 0,
     valid: bool = True,
 ) -> PressObservation:
     return PressObservation(
         relative_switch_pos_m=np.array([range_m, lateral_m, 0.0]),
-        relative_switch_quat_xyzw=np.array([0.0, 0.0, 0.0, 1.0]),
+        relative_switch_quat_xyzw=np.array(
+            [np.sin(attitude_error_rad / 2.0), 0.0, 0.0, np.cos(attitude_error_rad / 2.0)]
+        ),
         pose_confidence=1.0,
         pose_age_s=0.0,
         detection_valid=valid,
@@ -125,6 +130,8 @@ def test_public_records_are_approach_specific() -> None:
     assert [field.name for field in fields(PressApproachExecutionState)] == [
         "previous_action",
         "handoff_latched",
+        "entry_observation",
+        "actor_evaluations",
         "stable_goal_steps",
         "initial_switch_range_m",
         "closest_switch_range_m",
@@ -137,6 +144,8 @@ def test_holds_zero_until_handoff_gate_passes() -> None:
     result = _advance(observation=_observation(range_m=0.48, linear_velocity=(0.10, 0.0, 0.0)))
     np.testing.assert_array_equal(result.action, np.zeros(4))
     assert not result.state.handoff_latched
+    assert len(result.state.entry_observation) == 34
+    assert result.state.actor_evaluations == 0
     assert result.handoff_reason == "wall_normal_speed"
 
 
@@ -162,6 +171,7 @@ def test_runs_inference_after_handoff_and_tracks_ranges() -> None:
     np.testing.assert_allclose(result.action, [0.2, -0.1, 0.0, 0.0])
     assert len(calls) == 1
     assert result.state.handoff_latched
+    assert result.state.actor_evaluations == 1
     assert result.state.initial_switch_range_m == 0.48
     assert result.state.closest_switch_range_m == 0.48
     assert len(result.actor_observation) == 34
@@ -177,18 +187,30 @@ def test_runs_inference_after_handoff_and_tracks_ranges() -> None:
     assert closer.state.closest_switch_range_m == 0.44
 
 
-def test_five_stable_steps_complete_with_zero_terminal_action() -> None:
+def test_first_actor_observation_keeps_zero_previous_action_after_handoff_wait() -> None:
+    waiting = _advance(observation=_observation(range_m=0.48, linear_velocity=(0.10, 0.0, 0.0)))
+    result = _advance(
+        state=waiting.state,
+        observation=_observation(range_m=0.48),
+    )
+
+    assert result.state.entry_observation == waiting.state.entry_observation
+    assert result.state.actor_evaluations == 1
+    assert result.actor_observation[27:31] == (0.0, 0.0, 0.0, 0.0)
+
+
+def test_one_hundred_stable_steps_complete_with_zero_terminal_action() -> None:
     state = replace(
         initial_press_approach_execution_state(action_dim=4),
         handoff_latched=True,
     )
-    for expected in range(1, 6):
+    for expected in range(1, 101):
         result = _advance(
             state=state,
             observation=_observation(range_m=0.41),
         )
         assert result.state.stable_goal_steps == expected
-        assert result.complete is (expected == 5)
+        assert result.complete is (expected == 100)
         state = result.state
     np.testing.assert_array_equal(result.action, np.zeros(4))
     assert result.state.complete
@@ -199,14 +221,33 @@ def test_unstable_sample_resets_stable_counter() -> None:
     state = replace(
         initial_press_approach_execution_state(action_dim=4),
         handoff_latched=True,
-        stable_goal_steps=4,
+        stable_goal_steps=99,
     )
     result = _advance(
         state=state,
-        observation=_observation(range_m=0.41, lateral_m=0.04),
+        observation=_observation(range_m=0.41, lateral_m=0.011),
     )
     assert result.state.stable_goal_steps == 0
     assert not result.complete
+
+
+def test_deployment_uses_the_same_full_attitude_goal_boundary() -> None:
+    state = replace(
+        initial_press_approach_execution_state(action_dim=4),
+        handoff_latched=True,
+        stable_goal_steps=99,
+    )
+    accepted = _advance(
+        state=state,
+        observation=_observation(range_m=0.41, attitude_error_rad=np.deg2rad(0.999)),
+    )
+    assert accepted.complete
+    rejected = _advance(
+        state=state,
+        observation=_observation(range_m=0.41, attitude_error_rad=np.deg2rad(1.001)),
+    )
+    assert rejected.state.stable_goal_steps == 0
+    assert not rejected.complete
 
 
 def test_contact_returns_policy_failure_and_zero_action() -> None:

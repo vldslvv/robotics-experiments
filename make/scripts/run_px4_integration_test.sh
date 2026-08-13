@@ -101,6 +101,7 @@ done
 : "${INTEGRATION_VERBOSE:=0}"
 : "${ISAAC_TEST_EXTRA_ARGS:=}"
 : "${ALIGNMENT_CAPTURE_RUN_DIR:=}"
+: "${PRESS_NAVIGATION_MEASUREMENT_OUTPUT:=}"
 
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=px4_airframe_manifest_check.sh
@@ -398,6 +399,7 @@ if docker run --rm \
     -e "PX4_BENCHMARK_IMAGE=${PX4_IMAGE}" \
     -e "PX4_TEST_CONTAINER_NAME=${PRIMARY_PX4_CONTAINER}" \
     -e "PX4_TEST_LOGS_DIR=${PX4_TEST_LOGS_DIR}" \
+    -e "PRESS_NAVIGATION_MEASUREMENT_OUTPUT=${PRESS_NAVIGATION_MEASUREMENT_OUTPUT}" \
     -e "SCENE=${SCENE}" \
     -e "STRICT=${STRICT:-}" \
     -e "TEST_TARGET=${TEST_TARGET}" \

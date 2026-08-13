@@ -27,14 +27,19 @@ def _load_train_rl_module():
     return module
 
 
-def _phase(*, maximum: int = 20, interval: int = 10) -> RlTrainingPhaseConfig:
+def _phase(
+    *,
+    maximum: int = 20,
+    interval: int = 10,
+    range_undershoot_min_m: float | None = None,
+) -> RlTrainingPhaseConfig:
     return RlTrainingPhaseConfig(
         max_iterations=maximum,
         evaluation_interval=interval,
         learning_rate=1.0e-4,
         schedule="fixed",
         entropy_coef=0.0,
-        hard_case_fraction=0.0,
+        range_undershoot_min_m=range_undershoot_min_m,
     )
 
 
@@ -156,7 +161,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance=None,
         status="training",
     )
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 15
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -242,7 +247,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
             iteration=1,
             checkpoint_path=checkpoint,
             policy_digest=digest,
-            metrics=(EvaluationMetric("held_out_task_cost", 2.0 - attempt_index),),
+            metrics=(EvaluationMetric("mean_normalized_pose_error", 2.0 - attempt_index),),
             reward_means=(),
             source="fresh-validation",
         )
@@ -258,7 +263,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
                     "policy": str((candidate_dir / "policy.pt").relative_to(run_dir)),
                     "policy_digest": digest,
                     "source": "fresh-validation",
-                    "metrics": {"held_out_task_cost": 2.0 - attempt_index},
+                    "metrics": {"mean_normalized_pose_error": 2.0 - attempt_index},
                     "reward_means": {},
                 }
             ],
@@ -342,7 +347,7 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         attempt_dir.mkdir()
         (attempt_dir / "attempt_report.json").write_text(
-            '{"schema_version": 3, "report_kind": "attempt", "status": "training"}\n'
+            '{"schema_version": 15, "report_kind": "attempt", "status": "training"}\n'
         )
         raise KeyboardInterrupt
 
@@ -406,8 +411,12 @@ def test_training_tensorboard_rates_are_fraction_valued_and_namespaced() -> None
     source = (
         REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py"
     ).read_text()
-    assert '"train/12_cumulative_collision_rate"' in source
-    assert '"train/11_cumulative_other_flight_failure_rate"' in source
+    assert '"train/outcome/collision_rate"' in source
+    assert '"train/outcome/flight_failure_rate"' in source
+    assert '"train/outcome/crash_rate"' in source
+    assert '"train/outcome/altitude_failure_rate"' in source
+    assert '"train/outcome/range_undershoot_rate"' in source
+    assert '"train/outcome/relative_envelope_failure_rate"' in source
     assert "_percent" not in source
     assert "100.0 * self._" not in source
 
@@ -535,7 +544,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
         iteration=10,
         checkpoint_path=run_dir / "attempt_01_seed_42" / "checkpoints" / "model.pt",
         policy_digest=digest,
-        metrics=(EvaluationMetric("held_out_task_cost", 0.25),),
+        metrics=(EvaluationMetric("mean_normalized_pose_error", 0.25),),
         reward_means=(),
         source="fresh-validation",
     )
@@ -543,7 +552,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
         iteration=10,
         checkpoint_path=selected.checkpoint_path,
         policy_digest=digest,
-        metrics=(EvaluationMetric("held_out_task_cost", 0.3),),
+        metrics=(EvaluationMetric("mean_normalized_pose_error", 0.3),),
         reward_means=(),
         source="fresh-test",
     )
@@ -553,7 +562,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
         "selected_policy_digest": digest,
         "test_evaluation": {"policy_digest": digest},
         "selected_metric": {
-            "name": "held_out_task_cost",
+            "name": "mean_normalized_pose_error",
             "direction": "minimize",
             "value": 0.25,
         },
@@ -665,8 +674,8 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
     runner = object()
 
     class FakeEnv:
-        def set_training_hard_case_fraction(self, value):
-            calls.append(("mixture", value))
+        def configure_training_phase(self, phase):
+            calls.append(("task_phase", phase))
 
         def reset(self):
             calls.append(("reset", torch.is_inference_mode_enabled()))
@@ -687,7 +696,7 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
         "configure_phase",
         lambda **kwargs: calls.append(("configure", kwargs)),
     )
-    phase = _phase()
+    phase = _phase(range_undershoot_min_m=0.39)
     restored = train_rl._restore_phase_branch(  # noqa: SLF001
         runner=runner,
         env=FakeEnv(),
@@ -697,10 +706,16 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
         device="cuda:0",
     )
     assert restored == 17
-    assert [call[0] for call in calls] == ["restore", "configure", "mixture", "reset"]
+    assert [call[0] for call in calls] == [
+        "restore",
+        "configure",
+        "task_phase",
+        "reset",
+    ]
     assert calls[0][1]["checkpoint_path"] == checkpoint
     assert calls[1][1]["phase"] is phase
     assert calls[1][1]["phase_number"] == 2
+    assert calls[-2] == ("task_phase", phase)
     assert calls[-1] == ("reset", True)
 
 
