@@ -34,7 +34,12 @@ from typing import TYPE_CHECKING, Any, Callable
 import numpy as np
 from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vectors
 
-from robotics_experiments.commanding import FailureKind, MavlinkCommandPort, PolicyAdapter
+from robotics_experiments.commanding import (
+    DriverPhase,
+    FailureKind,
+    MavlinkCommandPort,
+    PolicyAdapter,
+)
 from robotics_experiments.px4_bridge import IsaacArticulationIO, tilt_angle_deg
 
 if TYPE_CHECKING:
@@ -276,6 +281,19 @@ def _build_make_env(
     return make_env
 
 
+def _active_driver_backstop_deadlines(*, fleet: FleetState) -> tuple[float, ...]:
+    return tuple(
+        flying.driver.deadline_s
+        + (
+            0.0
+            if flying.driver.phase is DriverPhase.RECOVERING
+            else flying.context.params.failure_recovery_timeout_s
+        )
+        for flying in fleet.flying
+        if flying.driver.deadline_s > 0.0
+    )
+
+
 def _drive_to_done(
     context: SceneTestContext,
     fleet: FleetState,
@@ -298,16 +316,7 @@ def _drive_to_done(
 
     active = fleet.flying
     context.report(f"driving the routine for {len(active)} drone(s)")
-    deadline_s = time.monotonic() + sum(
-        (
-            flying.spawned.vehicle.routine.takeoff_timeout_s
-            + flying.spawned.vehicle.routine.command_ack_timeout_s
-            + flying.spawned.vehicle.routine.handshake_timeout_s
-            + flying.spawned.vehicle.routine.prearm_settle_s
-        )
-        * 6.0
-        for flying in active
-    )
+    backstop_deadline_s = 0.0
     callback_error: BaseException | None = None
 
     def on_physics_step(dt: float, *_args) -> None:
@@ -324,7 +333,10 @@ def _drive_to_done(
     )
     try:
         while not fleet_is_done(state=fleet):
-            if time.monotonic() > deadline_s:
+            active_deadlines = _active_driver_backstop_deadlines(fleet=fleet)
+            if active_deadlines:
+                backstop_deadline_s = max(active_deadlines)
+            if backstop_deadline_s and time.monotonic() > backstop_deadline_s:
                 raise AssertionError("Timed out driving the routine to completion")
             _advance_once(context, fleet)
             if callback_error is not None:

@@ -287,4 +287,7 @@ first attempts `MAV_CMD_NAV_LAND`, escalates a rejected or unacknowledged comman
 by stopping OFFBOARD streaming so PX4's configured offboard-loss action can run,
 and monitors until disarm or recovery timeout. The standalone strict shell then
 raises the preserved original failure, so the integration result remains
-failure-typed without preventing landing.
+failure-typed without preventing landing. Its final dead-callback backstop follows
+the live per-driver phase deadline, so the DRIVE allowance comes from the fully
+built routine's summed step budgets and Hydra-owned `drive_budget_multiplier`;
+the shell does not maintain a second estimate of routine duration.
