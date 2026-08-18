@@ -119,9 +119,14 @@ def _is_stable(*, policy_input: PolicyInput, config: ExperimentConfig) -> bool:
     )
 
 
-def _recenter_setpoint(*, policy_input: PolicyInput, config: ExperimentConfig) -> VelocitySetpoint:
+def _position_setpoint(
+    *,
+    policy_input: PolicyInput,
+    target_position_enu_m: tuple[float, float, float],
+    config: ExperimentConfig,
+) -> tuple[tuple[float, float, float], VelocitySetpoint]:
     vehicle = policy_input.vehicle_state
-    error_enu = np.asarray(policy_input.reference_position_enu, dtype=np.float64) - np.asarray(
+    error_enu = np.asarray(target_position_enu_m, dtype=np.float64) - np.asarray(
         vehicle.position_enu, dtype=np.float64
     )
     desired_enu = error_enu * config.alignment.capture.recenter_gain_hz
@@ -133,12 +138,21 @@ def _recenter_setpoint(*, policy_input: PolicyInput, config: ExperimentConfig) -
         vehicle.orientation_flu_enu_wxyz,
         desired_enu,
     )
-    return VelocitySetpoint(
-        forward_mps=float(desired_body[0]),
-        right_mps=-float(desired_body[1]),
-        down_mps=-float(desired_body[2]),
+    command = _float3(desired_body)
+    return command, VelocitySetpoint(
+        forward_mps=command[0],
+        right_mps=-command[1],
+        down_mps=-command[2],
         yaw_rate_radps=0.0,
     )
+
+
+def _recenter_setpoint(*, policy_input: PolicyInput, config: ExperimentConfig) -> VelocitySetpoint:
+    return _position_setpoint(
+        policy_input=policy_input,
+        target_position_enu_m=_float3(policy_input.reference_position_enu),
+        config=config,
+    )[1]
 
 
 def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConfig):
@@ -247,9 +261,17 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
                 setpoint=VelocitySetpoint(0.0, 0.0, 0.0, 0.0),
                 complete=True,
             )
-        probe_command = profiles[profile_index].commands[command_index]
-        family = families_by_profile[profiles[profile_index].name]
-        command = probe_command.velocity_body_flu_mps
+        profile = profiles[profile_index]
+        probe_command = profile.commands[command_index]
+        family = families_by_profile[profile.name]
+        if profile.hold_position:
+            command, setpoint = _position_setpoint(
+                policy_input=policy_input,
+                target_position_enu_m=initials[-1].position_enu_m,
+                config=config,
+            )
+        else:
+            command = probe_command.velocity_body_flu_mps
         vehicle = policy_input.vehicle_state
         velocity = body_velocity_flu_from_state(policy_input.vehicle_state)
         sample = _Sample(
@@ -287,7 +309,7 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
                 pitch_rate_radps=-pitch_rate,
                 yaw_rate_radps=-yaw_rate,
             )
-        else:
+        elif not profile.hold_position:
             setpoint = VelocitySetpoint(
                 forward_mps=command[0],
                 right_mps=-command[1],

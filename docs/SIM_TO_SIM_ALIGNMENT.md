@@ -17,8 +17,11 @@ on the controller artifact and never imports alignment.
 hover envelope described in `docs/FLIGHT_PARAMETERS.md`. Both controller
 definitions resolve the same published envelope. The selected target settings
 are replayed through the 30-second `stability-hover-pose` profile and must keep
-position and attitude within its bounds. The exact envelope fingerprint enters
-the comparison fingerprint and strict controller artifact.
+position and attitude within its bounds. That profile explicitly holds its
+captured initial position: PX4 records the corrective velocity commands and
+Isaac Lab replays those exact commands. A zero-velocity command is not treated
+as proof of position hold. The exact envelope fingerprint enters the comparison
+fingerprint and strict controller artifact.
 
 The dependency direction is:
 

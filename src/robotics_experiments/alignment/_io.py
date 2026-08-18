@@ -335,6 +335,17 @@ def _profiles(*, value: Any, family_name: str, control_mode: str) -> tuple[Probe
             raise ValueError(
                 f"{name}.axis must be x, y, z, roll, pitch, yaw, collective, or combined"
             )
+        expected_profile_fields = {"name", "split", "axis", "commands"}
+        if set(profile) not in (
+            expected_profile_fields,
+            expected_profile_fields | {"hold_position"},
+        ):
+            raise ValueError(f"{name} fields mismatch")
+        hold_position = profile.get("hold_position", False)
+        if type(hold_position) is not bool:
+            raise ValueError(f"{name}.hold_position must be a boolean")
+        if hold_position and (control_mode != "velocity" or split != "stability"):
+            raise ValueError(f"{name}.hold_position requires a stability velocity profile")
         raw_commands = profile.get("commands")
         if not isinstance(raw_commands, list) or not raw_commands:
             raise ValueError(f"{name}.commands must be a non-empty list")
@@ -401,6 +412,7 @@ def _profiles(*, value: Any, family_name: str, control_mode: str) -> tuple[Probe
                 split=split,
                 axis=axis,
                 commands=tuple(commands),
+                hold_position=hold_position,
             )
         )
     return tuple(profiles)

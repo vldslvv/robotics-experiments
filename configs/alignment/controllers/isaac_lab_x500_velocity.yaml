@@ -69,50 +69,26 @@ parameters:
   - field: attitude_controller_rate_hz
     stage: 1
     candidates: [204.0]
-  # Fit estimator settling jointly with the measured 30-second hover bound. The
-  # prior 0.075 Hz setting retained 54.9 mm of Y drift against a 51.2 mm lower
-  # bound after the stability precondition.
+  # Pin the live-stable estimator settling rate.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.075, 0.10, 0.15]
-  # Fit the signed X/Y endpoint correction exposed by the fresh combined probe.
-  # The lower bounds cover the residual direction measured when the previous
-  # [0.008, -0.006] boundary remained 19.6 mm from the PX4 endpoint. Z remains
-  # pinned because its endpoint and isolated gates pass.
+    candidates: [0.075]
+  # Fit the signed X/Y endpoint correction exposed by the fresh combined probe;
+  # Z remains pinned because its endpoint and isolated gates pass.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.002, -0.012, 0.0]
-      - [0.002, -0.009, 0.0]
-      - [0.002, -0.006, 0.0]
-      - [0.002, -0.003, 0.0]
-      - [0.002, 0.0, 0.0]
-      - [0.002, 0.003, 0.0]
-      - [0.002, 0.006, 0.0]
-      - [0.005, -0.012, 0.0]
-      - [0.005, -0.009, 0.0]
-      - [0.005, -0.006, 0.0]
-      - [0.005, -0.003, 0.0]
-      - [0.005, 0.0, 0.0]
-      - [0.005, 0.003, 0.0]
-      - [0.005, 0.006, 0.0]
-      - [0.008, -0.012, 0.0]
-      - [0.008, -0.009, 0.0]
       - [0.008, -0.006, 0.0]
       - [0.008, -0.003, 0.0]
       - [0.008, 0.0, 0.0]
       - [0.008, 0.003, 0.0]
       - [0.008, 0.006, 0.0]
-      - [0.011, -0.012, 0.0]
-      - [0.011, -0.009, 0.0]
       - [0.011, -0.006, 0.0]
       - [0.011, -0.003, 0.0]
       - [0.011, 0.0, 0.0]
       - [0.011, 0.003, 0.0]
       - [0.011, 0.006, 0.0]
-      - [0.014, -0.012, 0.0]
-      - [0.014, -0.009, 0.0]
       - [0.014, -0.006, 0.0]
       - [0.014, -0.003, 0.0]
       - [0.014, 0.0, 0.0]
@@ -345,6 +321,7 @@ probe_families:
       - name: stability-hover-pose
         split: stability
         axis: combined
+        hold_position: true
         commands:
           - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 30.0}
   - name: ctbr

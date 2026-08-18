@@ -39,6 +39,7 @@ class ProbeProfile:
     split: str
     axis: str
     commands: tuple[ProbeCommand, ...]
+    hold_position: bool = False
 
 
 @dataclass(frozen=True)

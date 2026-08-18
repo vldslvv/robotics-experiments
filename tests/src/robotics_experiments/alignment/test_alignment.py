@@ -443,11 +443,16 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_observation_bias_command_full_mps",
     )
     assert target.parameters[0].candidates == pytest.approx((204.0,))
-    assert target.parameters[1].candidates == pytest.approx((0.075, 0.10, 0.15))
-    assert target.parameters[2].candidates[0] == pytest.approx((0.002, -0.012, 0.0))
+    assert target.parameters[1].candidates == pytest.approx((0.075,))
+    assert target.parameters[2].candidates[0] == pytest.approx((0.008, -0.006, 0.0))
     assert target.parameters[2].candidates[-1] == pytest.approx((0.014, 0.006, 0.0))
-    assert len(target.parameters[2].candidates) == 35
+    assert len(target.parameters[2].candidates) == 15
     assert target.parameters[2].selection_regularization_scale == pytest.approx(1.0)
+    assert next(
+        profile
+        for profile in target.probe_families[0].profiles
+        if profile.name == "stability-hover-pose"
+    ).hold_position
     assert target.parameters[3].candidates[0] == pytest.approx((0.0, 1.5, 0.0))
     assert target.parameters[3].candidates[-1] == pytest.approx((0.0, 1.5, 0.0))
     assert target.parameters[4].candidates[0] == pytest.approx((0.94, 1.0, 1.0))

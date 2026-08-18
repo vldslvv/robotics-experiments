@@ -223,6 +223,7 @@ probe_families:
       - name: stability-hover-pose
         split: stability
         axis: combined
+        hold_position: true
         commands:
           - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 30.0}
   - name: ctbr
