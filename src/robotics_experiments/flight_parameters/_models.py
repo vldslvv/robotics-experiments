@@ -12,7 +12,7 @@ Quaternion = tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
-class HoverFlightConfig:
+class HoverConfig:
     """One repeated task-neutral hover measurement."""
 
     kind: str
@@ -34,16 +34,28 @@ class FlightExecutionConfig:
 
 
 @dataclass(frozen=True)
-class FlightConfig:
+class ResponseConfig:
+    """Repeated general controller-response collection."""
+
+    kind: str
+    repetitions: int
+    experiment_config: str
+    definition: str
+
+
+@dataclass(frozen=True)
+class FlightParametersConfig:
     """Strict v1 input contract for one flight-parameter campaign."""
 
     schema_version: int
-    flight_id: str
+    flight_parameters_id: str
     source_backend: str
     state_source: str
     experiment_config: str
     vehicle: str
-    scenario: HoverFlightConfig
+    hover: HoverConfig
+    response: ResponseConfig
+    policy_warmup_s: float
     position_margin_m: float
     attitude_margin_rad: float
     execution: FlightExecutionConfig
@@ -56,7 +68,7 @@ class FlightTrace:
 
     artifact_kind: str
     schema_version: int
-    flight_id: str
+    flight_parameters_id: str
     campaign_run_id: str
     trial_index: int
     source_backend: str
@@ -83,7 +95,7 @@ class RawFlightTrace:
 
     artifact_kind: str
     schema_version: int
-    flight_id: str
+    flight_parameters_id: str
     campaign_run_id: str
     trial_index: int
     source_backend: str
@@ -139,7 +151,7 @@ class HoverVerification:
 
     artifact_kind: str
     schema_version: int
-    flight_id: str
+    flight_parameters_id: str
     campaign_run_id: str
     trial_index: int
     config_fingerprint: str
@@ -181,7 +193,7 @@ class UpperBound:
 
 
 @dataclass(frozen=True)
-class HoverEnvelope:
+class HoverParameters:
     """Task-neutral pose-hold bounds around a commanded pose."""
 
     position_error_enu_m: VectorBounds
@@ -190,17 +202,69 @@ class HoverEnvelope:
     attitude_error_rpy_rad: VectorBounds
     tilt_error_rad: UpperBound
     orientation_error_rad: UpperBound
+    trace_statistics: tuple["HoverTraceStatistics", ...]
+    acceptance_limits: tuple["SignalStatistics", ...]
 
 
 @dataclass(frozen=True)
-class FlightEnvelope:
-    """Strict v1 flight-envelope artifact consumed by alignment and RL."""
+class SignalStatistics:
+    """Raw distribution statistics for one named scalar trace signal."""
+
+    name: str
+    unit: str
+    minimum: float
+    maximum: float
+    maximum_absolute: float
+    rmse: float
+    p95_absolute: float
+    p99_absolute: float
+
+
+@dataclass(frozen=True)
+class HoverTraceStatistics:
+    """Full-window and policy-window statistics for one hover repetition."""
+
+    trial_index: int
+    full_window_sample_count: int
+    policy_window_start_s: float
+    policy_window_sample_count: int
+    full_window: tuple[SignalStatistics, ...]
+    policy_window: tuple[SignalStatistics, ...]
+
+
+@dataclass(frozen=True)
+class ResponseTraceEvidence:
+    """Lossless files for one general controller-response repetition."""
+
+    repetition: int
+    profile_count: int
+    reference_path: str
+    reference_sha256: str
+    ulog_path: str
+    ulog_sha256: str
+    bridge_log_path: str
+    bridge_log_sha256: str
+
+
+@dataclass(frozen=True)
+class ResponseParameters:
+    """Ordered controller-response evidence retained without reduction."""
+
+    kind: str
+    repetitions: int
+    traces: tuple[ResponseTraceEvidence, ...]
+
+
+@dataclass(frozen=True)
+class FlightParameters:
+    """Strict v1 flight-parameters artifact consumed by alignment and RL."""
 
     artifact_kind: str
     schema_version: int
-    flight_id: str
+    flight_parameters_id: str
     run_id: str
-    scenario_kind: str
+    created_at_utc: str
+    behavior_kinds: tuple[str, ...]
     source_backend: str
     state_source: str
     experiment_config: str
@@ -212,29 +276,31 @@ class FlightEnvelope:
     source_commit: str
     source_dirty: bool
     evidence_fingerprint: str
-    trial_count: int
-    sample_count: int
+    hover_trial_count: int
+    hover_sample_count: int
     settle_s: float
     measure_s: float
     sample_rate_hz: float
+    policy_warmup_s: float
     position_margin_m: float
     attitude_margin_rad: float
-    hover: HoverEnvelope
+    hover: HoverParameters
+    response: ResponseParameters
     artifact_fingerprint: str
 
 
 @dataclass(frozen=True)
-class FlightEnvelopeBundle:
+class FlightParametersBundle:
     """One validated immutable measurement resolved from a publication selector."""
 
     run_dir: Path
-    envelope: FlightEnvelope
-    envelope_digest: str
+    flight_parameters: FlightParameters
+    flight_parameters_digest: str
     manifest_digest: str
 
 
 @dataclass(frozen=True)
-class HoverEnvelopeEvaluation:
+class HoverEvaluation:
     """Pose error and normalized envelope utilization for one sample."""
 
     position_error_enu_m: Vector3

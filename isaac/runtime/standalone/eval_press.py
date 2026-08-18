@@ -55,7 +55,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         seed=seeds[0],
         num_envs=evaluation.episodes_per_seed,
         policy_contract=contract,
-        flight_envelope=metadata.flight_envelope,
+        flight_parameters=metadata.flight_parameters,
     )
     try:
         if (
@@ -77,6 +77,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
             episodes_per_seed=evaluation.episodes_per_seed,
             goal_config=config.rl.press.goal,
             hold_steps=round(stage.hold_s * config.rl.policy_rate_hz),
+            flight_parameters=metadata.flight_parameters,
             report=_report,
             trace_worst_episode=True,
         )
@@ -134,6 +135,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         evaluation=evaluated,
         evaluation_config=evaluation,
         minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+        flight_parameters=metadata.flight_parameters,
     )
     if not acceptance.passed:
         raise AssertionError("press acceptance failed: " + ", ".join(acceptance.reasons))

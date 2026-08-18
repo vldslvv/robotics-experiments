@@ -145,8 +145,8 @@ reward weights, invalid rates, and unknown stages fail during `load_config`.
 
 `rl.training` owns the ordered phases in each PPO attempt, rollout settings,
 task selection, artifact namespace, ordered `attempt_seeds`, and
-`controller_artifact`. Its `flight_envelope_artifact` resolves the matching
-task-neutral position/pose bundle required before training. Each phase owns its iteration count, checkpoint cadence,
+`controller_artifact`. Its `flight_parameters_artifact` resolves the matching
+task-neutral schema-1 evidence bundle required before training. Each phase owns its iteration count, checkpoint cadence,
 learning rate, schedule, entropy, and optional training-only range-undershoot
 recovery limit. Press recovery limits are positive, no greater than the strict
 range minimum, nondecreasing across phases, and equal to the strict range

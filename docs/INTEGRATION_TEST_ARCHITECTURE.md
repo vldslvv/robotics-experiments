@@ -36,7 +36,7 @@ fit/publication, and the alignment target-envelope gate.
 
 ## Targets
 
-`make measure-flight-envelope` is an owning campaign rather than part of the
+`make measure-flight-parameters` is an owning campaign rather than part of the
 aggregate integration suite. It invokes the internal
 `test-integration-flight-parameters-sample` target once per configured trial.
 Each invocation uses the ordinary strict PX4/Isaac harness with isolated
@@ -75,10 +75,15 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   full initial pusher deployment. It then drives a slow press, requires real
   forward-pad contact and pusher/button displacement, advances the production
   N-step latch, verifies exactly one lamp transition, and retreats within the
-  stability envelope. A test-local no-dones environment keeps these physical
-  measurements independent of Stage 1's contact-failure termination. The gate
+  stability envelope for the complete deployment hold. Its time budget combines
+  the selected curriculum stage's interaction duration with that configured
+  hold; a test-local no-dones environment keeps these physical measurements
+  independent of Stage 1's contact-failure termination. The gate
   selects the production press experiment config so its scripted post-contact
   ramp retains the authority required to cross the real latch threshold; it
+  resolves the config's accepted controller and complete flight-parameters
+  bundle to immutable run paths, validates their shared qualification lineage,
+  and reports those canonical inputs before constructing the environment. It
   does not load or execute the policy named by that config. It is part of
   `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
@@ -156,7 +161,7 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   along-track progress after that sample. The
   second leg remains speedless and protects OFFBOARD setpoint continuity across
   `goto` -> `hover`. The target passes only when **both** drones complete
-  without breaching their position, cross-track, or flight-envelope gates. It
+  without breaching their position, cross-track, or flight-parameters gates. It
   reuses the generic multi-PX4 launch path
   (`run_px4_integration_test.sh` over the enabled vehicles returned by
   `load_config(path)`, like
@@ -287,4 +292,7 @@ first attempts `MAV_CMD_NAV_LAND`, escalates a rejected or unacknowledged comman
 by stopping OFFBOARD streaming so PX4's configured offboard-loss action can run,
 and monitors until disarm or recovery timeout. The standalone strict shell then
 raises the preserved original failure, so the integration result remains
-failure-typed without preventing landing.
+failure-typed without preventing landing. Its final dead-callback backstop follows
+the live per-driver phase deadline, so the DRIVE allowance comes from the fully
+built routine's summed step budgets and Hydra-owned `drive_budget_multiplier`;
+the shell does not maintain a second estimate of routine duration.

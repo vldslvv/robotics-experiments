@@ -15,7 +15,7 @@ from robotics_experiments.config import (
     PressApproachTerminationConfig,
     PressApproachVelocityReferenceConfig,
 )
-from robotics_experiments.flight_parameters import load_flight_envelope
+from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.press import (
     PressApproachInput,
     PressApproachRewardTerms,
@@ -67,8 +67,8 @@ _TERMINATION = PressApproachTerminationConfig(
     max_vertical_error_m=0.30,
     contact_force_threshold_n=0.25,
 )
-_ENVELOPE = load_flight_envelope(
-    Path(__file__).parents[4] / "fixtures/flight_envelope/flight_envelope.json"
+_ENVELOPE = load_flight_parameters(
+    Path(__file__).parents[4] / "fixtures/flight_parameters/flight_parameters.json"
 )
 
 
@@ -114,7 +114,7 @@ def _state(*, range_m: float = 0.50) -> PressApproachState[np.ndarray]:
         relative_switch_pos_m=sample.relative_switch_pos_m,
         relative_switch_quat_xyzw=sample.relative_switch_quat_xyzw,
         goal_cfg=_GOAL,
-        flight_envelope=_ENVELOPE,
+        flight_parameters=_ENVELOPE,
         position_error_enu_m=sample.position_error_enu_m,
         attitude_error_flu_enu_wxyz=sample.attitude_error_flu_enu_wxyz,
     )
@@ -131,7 +131,7 @@ def _step(
         goal_cfg=_GOAL,
         reward_cfg=_REWARD,
         termination_cfg=_TERMINATION,
-        flight_envelope=_ENVELOPE,
+        flight_parameters=_ENVELOPE,
         hold_steps=100,
         approach_enabled=True,
     )
@@ -286,7 +286,7 @@ def test_reset_replaces_only_selected_environment() -> None:
         relative_switch_pos_m=np.array([[0.48, 0.0, 0.0]]),
         relative_switch_quat_xyzw=_quat(angle_rad=0.0),
         goal_cfg=_GOAL,
-        flight_envelope=_ENVELOPE,
+        flight_parameters=_ENVELOPE,
         position_error_enu_m=np.array([[-0.07, 0.0, 0.0]]),
         attitude_error_flu_enu_wxyz=np.array([[1.0, 0.0, 0.0, 0.0]]),
     )
@@ -324,7 +324,7 @@ def test_numpy_and_torch_transitions_match() -> None:
         goal_cfg=_GOAL,
         reward_cfg=_REWARD,
         termination_cfg=_TERMINATION,
-        flight_envelope=_ENVELOPE,
+        flight_parameters=_ENVELOPE,
         hold_steps=100,
         approach_enabled=True,
     )

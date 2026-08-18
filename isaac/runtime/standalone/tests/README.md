@@ -23,30 +23,31 @@ Run it with `make test-integration-press-hover-goto`; it needs no PX4 container.
 It prints the same `[isaac-standalone-test] ERROR:` failure sentinel the harness
 greps for.
 
-`alignment_capture_reference.py` is the PX4-backed alignment capture shell. It
+`flight_parameters_capture_response.py` is the PX4-backed flight-parameters
+response capture shell. It
 uses the shared fleet scenario and ordinary `{kind: policy}` OFFBOARD
 lifecycle, with a test-only injected adapter that emits the controller
 definition's linear-velocity, yaw-rate, and combined probes. It writes exact
 command timing, initial state, position, attitude, body/world velocity, and
-angular velocity to the selected alignment run directory. Before each profile,
+angular velocity to the selected flight-parameters response directory. Before each profile,
 the adapter holds a neutral setpoint through the configured minimum and
 continuous speed/rate/tilt stability window. This excludes OFFBOARD priming
 from the recorded policy-execution response and gives each reset Lab replay a
 near-equilibrium initial state. Trace yaw remains body-FLU +CCW while the
-outbound PX4 setpoint is converted to NED +clockwise. Its alignment-only routine
+outbound PX4 setpoint is converted to NED +clockwise. Its response routine
 ends with the probe policy and lets teardown stop the ephemeral simulator;
 landing and auto-disarm are outside this controller target. It is not a
 press-policy scenario and adds no commanding routine kind.
 
 `flight_parameters_capture.py` is the isolated hover-evidence leaf owned by
-`make measure-flight-envelope`. Each fresh PX4/Isaac invocation uses the
+`make measure-flight-parameters`. Each fresh PX4/Isaac invocation uses the
 ordinary arm, takeoff, and hover routine and records a long raw simulator
 ground-truth pose candidate at the configured cadence. It does not infer hover
 from the routine cursor or kinematics. The host coordinator decodes the
 corresponding completed PX4 ULog inside `flight_parameters`, proves the PX4
 mode/control/goal contract, and only then selects the settled measurement
 window. The raw trace, ULog, verification record, selected trace, and bridge
-log remain together as trial evidence. Envelope derivation and publication
+log remain together as trial evidence. Statistics derivation and publication
 remain in the host-safe `robotics_experiments.flight_parameters` module.
 
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
@@ -57,11 +58,15 @@ visible plunger, forward-facing collidable pad, fully deployed joint, enabled
 arm and swept-propeller colliders, and the static wall collider. It then
 commands a slow press, verifies pad contact plus pusher and button displacement,
 advances the production N-step latch, requires exactly one lamp transition, and
-retreats within the stability envelope. A test-local `SwitchPressEnv` subclass
-returns no dones and no approach reward, so Stage 1's privileged collision
-termination cannot reset this physical measurement path. Its test-local
-press/retreat speed derives from the stable-flight speed limit rather than the
-approach reward's dense velocity reference.
+retreats within the stability envelope for the complete configured deployment
+hold. Before constructing the environment it resolves the production config's
+controller and flight-parameters selectors to immutable run paths, validates
+their shared qualification lineage, and reports those canonical inputs. A
+test-local `SwitchPressEnv` subclass returns no dones and no approach reward, so
+Stage 1's privileged collision termination cannot reset this physical
+measurement path. Its test-local press/retreat speed derives from the
+stable-flight speed limit rather than the approach reward's dense velocity
+reference.
 
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current

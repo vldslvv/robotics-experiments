@@ -18,7 +18,7 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.flight_parameters import load_flight_config
+from robotics_experiments.flight_parameters import load_flight_parameters_config
 from robotics_experiments.px4_bridge import VehicleState
 
 _TEST_NAME = "flight_parameters_capture"
@@ -57,7 +57,7 @@ def _yaw_quaternion(yaw_rad: float, /) -> tuple[float, float, float, float]:
 
 
 def _run(*, context: SceneTestContext) -> None:
-    config = load_flight_config(os.environ.get(_CONFIG_ENV, _DEFAULT_CONFIG))
+    config = load_flight_parameters_config(os.environ.get(_CONFIG_ENV, _DEFAULT_CONFIG))
     run_id = os.environ[_RUN_ID_ENV]
     trial_index = int(os.environ[_TRIAL_INDEX_ENV])
     trial_dir = Path(os.environ[_TRIAL_DIR_ENV])
@@ -71,16 +71,14 @@ def _run(*, context: SceneTestContext) -> None:
         raise ValueError(f"flight parameter routine must be {expected_kinds}")
     hover_hold_s = float(routine_steps[2]["hold_s"])
     expected_hold_s = (
-        config.scenario.mode_transition_timeout_s
-        + config.scenario.settle_s
-        + config.scenario.measure_s
+        config.hover.mode_transition_timeout_s + config.hover.settle_s + config.hover.measure_s
     )
     if not math.isclose(hover_hold_s, expected_hold_s, rel_tol=0.0, abs_tol=1.0e-9):
         raise ValueError(
             f"flight parameter hover hold {hover_hold_s} does not equal {expected_hold_s}"
         )
 
-    expected_samples = round(expected_hold_s * config.scenario.sample_rate_hz)
+    expected_samples = round(expected_hold_s * config.hover.sample_rate_hz)
     positions: list[tuple[float, float, float]] = []
     attitudes: list[tuple[float, float, float, float]] = []
     times_us: list[int] = []
@@ -104,7 +102,7 @@ def _run(*, context: SceneTestContext) -> None:
         if len(times_us) >= expected_samples:
             return
         sample_target_us = capture_start_us + round(
-            len(times_us) * 1_000_000 / config.scenario.sample_rate_hz
+            len(times_us) * 1_000_000 / config.hover.sample_rate_hz
         )
         if sim_time_us < sample_target_us:
             return
@@ -135,9 +133,9 @@ def _run(*, context: SceneTestContext) -> None:
         vehicle_config = context.config.vehicles[config.vehicle]
         vehicle = _plain(vehicle_config)
         payload = {
-            "artifact_kind": "robotics-experiments-raw-flight-trace",
+            "artifact_kind": "robotics-experiments-flight-parameters-raw-trace",
             "schema_version": 1,
-            "flight_id": config.flight_id,
+            "flight_parameters_id": config.flight_parameters_id,
             "campaign_run_id": run_id,
             "trial_index": trial_index,
             "source_backend": config.source_backend,
@@ -149,9 +147,9 @@ def _run(*, context: SceneTestContext) -> None:
                 f"isaac={os.environ.get('ISAAC_BENCHMARK_IMAGE', 'unknown-isaac-image')};"
                 f"px4={os.environ.get('PX4_BENCHMARK_IMAGE', 'unknown-px4-image')}"
             ),
-            "requested_target_position_enu_m": list(config.scenario.target_position_enu_m),
+            "requested_target_position_enu_m": list(config.hover.target_position_enu_m),
             "requested_target_attitude_flu_enu_wxyz": list(
-                _yaw_quaternion(config.scenario.target_yaw_rad)
+                _yaw_quaternion(config.hover.target_yaw_rad)
             ),
             "px4_home_lat_lon_alt": [
                 vehicle_config.bridge.home_lat_deg,

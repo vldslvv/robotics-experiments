@@ -11,7 +11,12 @@ from types import SimpleNamespace
 import pytest
 
 from robotics_experiments.controller import ControllerSettings
+from robotics_experiments.flight_parameters import SignalStatistics, load_flight_parameters
 from tests.support.paths import REPO_ROOT
+
+_FLIGHT_PARAMETERS = load_flight_parameters(
+    REPO_ROOT / "tests/fixtures/flight_parameters/flight_parameters.json"
+)
 
 
 def _contract():
@@ -49,10 +54,12 @@ def _controller_settings() -> ControllerSettings:
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_observation_hold_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
         velocity_observation_bias_command_start_mps=0.0,
         velocity_observation_bias_command_full_mps=0.01,
         velocity_estimator_bias_decay_hz=0.0,
+        velocity_estimator_bias_hold_decay_hz=(0.0, 0.0, 0.0),
         velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
@@ -256,6 +263,14 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
                 angular_speed_radps=torch.zeros(2),
                 contact_clear=torch.ones(2, dtype=torch.bool),
                 strict_goal=torch.tensor([first, False]),
+                hover_evaluation=SimpleNamespace(
+                    position_error_enu_m=torch.zeros((2, 3)),
+                    horizontal_position_error_m=torch.zeros(2),
+                    position_error_m=torch.zeros(2),
+                    attitude_error_rpy_rad=torch.zeros((2, 3)),
+                    tilt_error_rad=torch.zeros(2),
+                    orientation_error_rad=torch.zeros(2),
+                ),
                 termination=SimpleNamespace(
                     success=success,
                     collision=torch.zeros(2, dtype=torch.bool),
@@ -289,6 +304,7 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         episodes_per_seed=2,
         goal_config=_goal(),
         hold_steps=100,
+        flight_parameters=_FLIGHT_PARAMETERS,
         report=reports.append,
         trace_worst_episode=True,
     )
@@ -296,6 +312,8 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
     assert result.summary.approach_success_rate == 0.5
     assert result.summary.timeout_rate == 0.5
     assert result.summary.median_completion_time_s == pytest.approx(0.05)
+    assert len(result.hover_statistics) == 10
+    assert all(statistics.maximum_absolute == 0.0 for statistics in result.hover_statistics)
     assert {reward.name for reward in result.reward_means} == set(reward_names)
     assert {reward.mean for reward in result.reward_means} == {1.0}
     assert any(
@@ -410,6 +428,19 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
             mean_completion_time_fraction=0.1,
         ),
         reward_means=(RewardMean(name="terminal_outcome", mean=1.0),),
+        hover_statistics=tuple(
+            SignalStatistics(
+                name=limit.name,
+                unit=limit.unit,
+                minimum=0.0,
+                maximum=0.0,
+                maximum_absolute=0.0,
+                rmse=0.0,
+                p95_absolute=0.0,
+                p99_absolute=0.0,
+            )
+            for limit in _FLIGHT_PARAMETERS.hover.acceptance_limits
+        ),
     )
 
     def fake_evaluate(**kwargs):
@@ -427,7 +458,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
-            flight_envelope=object(),
+            flight_parameters=_FLIGHT_PARAMETERS,
             values={
                 "selected_checkpoint_iteration": 10,
                 "selected_policy_digest": digest,
@@ -484,7 +515,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
-            flight_envelope=object(),
+            flight_parameters=object(),
             values={"selected_checkpoint_iteration": 10},
         ),
     )

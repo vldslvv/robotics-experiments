@@ -6,8 +6,8 @@ import math
 
 import torch
 
-from robotics_experiments.flight_parameters import FlightEnvelope
-from robotics_experiments.rl.flight_envelope import evaluate_flight_envelope
+from robotics_experiments.flight_parameters import FlightParameters
+from robotics_experiments.rl.flight_parameters import evaluate_flight_parameters
 from robotics_experiments.rl.press import HandoffGate
 
 __all__: list[str] = []
@@ -67,13 +67,13 @@ def _quaternion_from_rpy(*, rpy_rad: torch.Tensor) -> torch.Tensor:
 
 
 def _hover_pose_from_unit_samples(
-    *, unit_samples: torch.Tensor, envelope: FlightEnvelope
+    *, unit_samples: torch.Tensor, flight_parameters: FlightParameters
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sample target-local poses from the measured hover envelope."""
+    """Sample target-local poses from the measured hover parameters."""
     if unit_samples.ndim != 2 or unit_samples.shape[1] != 6:
         raise ValueError("hover reset requires unit_samples with shape (count, 6)")
 
-    hover = envelope.hover
+    hover = flight_parameters.hover
     position_lower = unit_samples.new_tensor(hover.position_error_enu_m.lower)
     position_upper = unit_samples.new_tensor(hover.position_error_enu_m.upper)
     position_error = position_lower + unit_samples[:, :3] * (position_upper - position_lower)
@@ -91,8 +91,8 @@ def _hover_pose_from_unit_samples(
     rpy = attitude_lower + unit_samples[:, 3:] * (attitude_upper - attitude_lower)
     attitude = _quaternion_from_rpy(rpy_rad=rpy)
     for _ in range(2):
-        utilization = evaluate_flight_envelope(
-            envelope=envelope,
+        utilization = evaluate_flight_parameters(
+            flight_parameters=flight_parameters,
             position_error_enu_m=torch.zeros_like(position_error),
             attitude_error_flu_enu_wxyz=attitude,
         ).attitude_utilization

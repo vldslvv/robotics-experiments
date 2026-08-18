@@ -283,8 +283,8 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     training = experiment.rl.training
     if not training.controller_artifact.strip():
         raise ValueError("rl.training.controller_artifact must be non-empty")
-    if not training.flight_envelope_artifact.strip():
-        raise ValueError("rl.training.flight_envelope_artifact must be non-empty")
+    if not training.flight_parameters_artifact.strip():
+        raise ValueError("rl.training.flight_parameters_artifact must be non-empty")
     attempt_seeds = tuple(training.attempt_seeds)
     if not attempt_seeds or len(set(attempt_seeds)) != len(attempt_seeds):
         raise ValueError("rl.training.attempt_seeds must be nonempty and unique")

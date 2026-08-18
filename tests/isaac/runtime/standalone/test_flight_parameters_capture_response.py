@@ -1,4 +1,4 @@
-"""Host tests for PX4 alignment probe preconditioning and frame conversion."""
+"""Host tests for flight-parameters response preconditioning and frame conversion."""
 
 import importlib.util
 import sys
@@ -29,8 +29,8 @@ def _load_script(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     )
     monkeypatch.setitem(sys.modules, "_px4_takeoff_scenario", scenario)
     monkeypatch.setitem(sys.modules, "_runtime", runtime)
-    path = REPO_ROOT / "isaac/runtime/standalone/tests/alignment_capture_reference.py"
-    spec = importlib.util.spec_from_file_location("alignment_capture_reference", path)
+    path = REPO_ROOT / "isaac/runtime/standalone/tests/flight_parameters_capture_response.py"
+    spec = importlib.util.spec_from_file_location("flight_parameters_capture_response", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)

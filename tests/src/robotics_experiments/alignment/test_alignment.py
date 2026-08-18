@@ -8,11 +8,13 @@ import math
 import shutil
 from dataclasses import asdict, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 import robotics_experiments.alignment._artifact as artifact_module
+import robotics_experiments.alignment._flight_parameters as flight_parameters_module
 from robotics_experiments.alignment import (
     ControllerDefinition,
     align,
@@ -32,6 +34,7 @@ from robotics_experiments.alignment._artifact import (
     validate_alignment_bundle,
     write_alignment_result,
 )
+from robotics_experiments.alignment._flight_parameters import _validated_payload
 from robotics_experiments.alignment._io import (
     _index_candidate_diagnostics,
     _trace,
@@ -80,10 +83,12 @@ def _settings(
         ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
         velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_observation_hold_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
         velocity_observation_bias_command_start_mps=0.0,
         velocity_observation_bias_command_full_mps=0.01,
         velocity_estimator_bias_decay_hz=0.0,
+        velocity_estimator_bias_hold_decay_hz=(0.0, 0.0, 0.0),
         velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
@@ -351,7 +356,7 @@ def _definition(
         controller_schema_version=1,
         backend=backend,
         experiment_config=str(experiment),
-        flight_envelope_artifact=str(REPO_ROOT / "tests/fixtures/flight_envelope"),
+        flight_parameters_artifact=str(REPO_ROOT / "tests/fixtures/flight_parameters"),
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
@@ -394,8 +399,8 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.base_settings.horizontal_velocity_braking_gain_scale == pytest.approx(0.50)
     assert target.base_settings.horizontal_velocity_braking_gain_full_mps == pytest.approx(0.070)
     assert target.base_settings.horizontal_velocity_braking_gain_end_mps == pytest.approx(0.085)
-    assert target.base_settings.velocity_observation_bias_command_start_mps == pytest.approx(0.002)
-    assert target.base_settings.velocity_observation_bias_command_full_mps == pytest.approx(0.030)
+    assert target.base_settings.velocity_observation_bias_command_start_mps == pytest.approx(0.040)
+    assert target.base_settings.velocity_observation_bias_command_full_mps == pytest.approx(0.060)
     assert target.base_settings.ki_vel == pytest.approx((0.4, 0.20, 2.0))
     assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
     assert target.base_settings.velocity_integral_limit_mps2 == pytest.approx((0.35, 0.35, 4.0))
@@ -424,9 +429,11 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert tuple(parameter.field for parameter in target.parameters) == (
         "attitude_controller_rate_hz",
         "velocity_estimator_bias_decay_hz",
+        "velocity_estimator_bias_hold_decay_hz",
         "velocity_observation_bias_mps",
         "velocity_filter_hz",
         "velocity_observation_scale",
+        "velocity_observation_hold_scale",
         "ki_vel",
         "kd_vel",
         "horizontal_velocity_error_gain_scale",
@@ -444,30 +451,32 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     )
     assert target.parameters[0].candidates == pytest.approx((204.0,))
     assert target.parameters[1].candidates == pytest.approx((0.075,))
-    assert target.parameters[2].candidates[0] == pytest.approx((0.008, -0.006, 0.0))
-    assert target.parameters[2].candidates[-1] == pytest.approx((0.014, 0.006, 0.0))
-    assert target.parameters[2].selection_regularization_scale == pytest.approx(1.0)
-    assert target.parameters[3].candidates[0] == pytest.approx((0.0, 1.5, 0.0))
-    assert target.parameters[3].candidates[-1] == pytest.approx((0.0, 1.5, 0.0))
-    assert target.parameters[4].candidates[0] == pytest.approx((0.94, 1.0, 1.0))
-    assert target.parameters[4].candidates[-1] == pytest.approx((0.94, 1.0, 1.0))
-    assert target.parameters[5].candidates[0] == pytest.approx((0.4, 0.20, 2.0))
-    assert target.parameters[5].candidates[-1] == pytest.approx((0.4, 0.20, 2.0))
-    assert target.parameters[6].candidates[0] == pytest.approx((0.2, 0.20, 0.0))
-    assert target.parameters[6].candidates[-1] == pytest.approx((0.2, 0.20, 0.0))
-    assert target.parameters[7].candidates == pytest.approx((1.23,))
-    assert target.parameters[8].candidates == pytest.approx((0.09,))
-    assert target.parameters[9].candidates == pytest.approx((0.5,))
-    assert target.parameters[10].candidates == pytest.approx((0.050,))
-    assert target.parameters[11].candidates == pytest.approx((0.070,))
-    assert target.parameters[12].candidates == pytest.approx((0.085,))
-    assert target.parameters[13].candidates == pytest.approx((24.0,))
-    assert target.parameters[14].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
-    assert target.parameters[14].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
-    assert target.parameters[15].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
-    assert target.parameters[16].candidates == pytest.approx((1.0005,))
-    assert target.parameters[17].candidates == pytest.approx((0.0, 0.002, 0.005))
-    assert target.parameters[18].candidates == pytest.approx((0.020, 0.030, 0.040))
+    assert target.parameters[2].candidates == (pytest.approx((0.014, 0.075, 0.04)),)
+    assert target.parameters[3].candidates == (pytest.approx((-0.010, -0.0140, 0.0)),)
+    assert target.parameters[3].selection_regularization_scale == pytest.approx(1.0)
+    assert next(
+        profile
+        for profile in target.probe_families[0].profiles
+        if profile.name == "stability-hover-pose"
+    ).hold_position
+    assert target.parameters[4].candidates == (pytest.approx((0.0, 1.5, 0.0)),)
+    assert target.parameters[5].candidates[0] == pytest.approx((1.00, 1.04, 1.0))
+    assert target.parameters[5].candidates[-1] == pytest.approx((1.00, 1.08, 1.0))
+    assert target.parameters[6].candidates == (pytest.approx((1.10, 1.06, 1.0)),)
+    assert target.parameters[7].candidates == (pytest.approx((0.4, 0.20, 2.0)),)
+    assert target.parameters[8].candidates == (pytest.approx((0.2, 0.20, 0.0)),)
+    assert target.parameters[9].candidates == pytest.approx((1.23,))
+    assert target.parameters[10].candidates == pytest.approx((0.09,))
+    assert target.parameters[11].candidates == pytest.approx((0.5,))
+    assert target.parameters[12].candidates == pytest.approx((0.050,))
+    assert target.parameters[13].candidates == pytest.approx((0.070,))
+    assert target.parameters[14].candidates == pytest.approx((0.085,))
+    assert target.parameters[15].candidates == pytest.approx((40.0,))
+    assert target.parameters[16].candidates == (pytest.approx((1.8, 1.8, 4.0)),)
+    assert target.parameters[17].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
+    assert target.parameters[18].candidates == pytest.approx((1.0005,))
+    assert target.parameters[19].candidates == pytest.approx((0.040,))
+    assert target.parameters[20].candidates == pytest.approx((0.060,))
     extended = replace(
         target,
         parameters=(
@@ -512,6 +521,205 @@ def test_trace_rejects_out_of_range_initial_hover_thrust() -> None:
 
     with pytest.raises(ValueError, match="must not exceed 1"):
         _trace(value=raw, name="trace")  # noqa: SLF001 - trace validation contract
+
+
+def test_flight_parameters_response_preserves_complete_alignment_input(
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    traces = tuple(
+        replace(trace, initial_controller_state_valid=True)
+        for trace in _response_traces(
+            profiles=definition.profiles,
+            settings=definition.base_settings,
+        )
+    )
+    path = tmp_path / "flight_parameters_response.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "controller_id": definition.controller_id,
+                "definition_fingerprint": definition.definition_fingerprint,
+                "traces": [asdict(trace) for trace in traces],
+            }
+        )
+    )
+
+    payload = _validated_payload(
+        path=path,
+        definition=definition,
+        expected_profile_count=len(definition.profiles),
+    )
+
+    assert payload["traces"] == json.loads(json.dumps([asdict(trace) for trace in traces]))
+
+
+def test_flight_parameters_response_accepts_bridge_quantized_cadence(
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    traces = tuple(
+        replace(
+            trace,
+            initial_controller_state_valid=True,
+            time_s=(
+                *(
+                    time_s + (0.01 if index % 2 else 0.0)
+                    for index, time_s in enumerate(trace.time_s)
+                ),
+                sum(command.duration_s for command in profile.commands) - 0.01,
+            ),
+            command_velocity_body_flu_mps=(
+                *trace.command_velocity_body_flu_mps,
+                profile.commands[-1].velocity_body_flu_mps,
+            ),
+            command_yaw_rate_radps=(
+                *trace.command_yaw_rate_radps,
+                profile.commands[-1].yaw_rate_radps,
+            ),
+            command_collective_thrust_normalized=(
+                *trace.command_collective_thrust_normalized,
+                profile.commands[-1].collective_thrust_normalized,
+            ),
+            command_body_rate_flu_radps=(
+                *trace.command_body_rate_flu_radps,
+                profile.commands[-1].body_rate_flu_radps,
+            ),
+            position_enu_m=(*trace.position_enu_m, trace.position_enu_m[-1]),
+            attitude_flu_enu_wxyz=(
+                *trace.attitude_flu_enu_wxyz,
+                trace.attitude_flu_enu_wxyz[-1],
+            ),
+            velocity_body_flu_mps=(
+                *trace.velocity_body_flu_mps,
+                trace.velocity_body_flu_mps[-1],
+            ),
+            velocity_enu_mps=(*trace.velocity_enu_mps, trace.velocity_enu_mps[-1]),
+            angular_velocity_body_flu_radps=(
+                *trace.angular_velocity_body_flu_radps,
+                trace.angular_velocity_body_flu_radps[-1],
+            ),
+        )
+        for profile, trace in zip(
+            definition.profiles,
+            _response_traces(
+                profiles=definition.profiles,
+                settings=definition.base_settings,
+            ),
+            strict=True,
+        )
+    )
+    path = tmp_path / "flight_parameters_response.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "controller_id": definition.controller_id,
+                "definition_fingerprint": definition.definition_fingerprint,
+                "traces": [asdict(trace) for trace in traces],
+            }
+        )
+    )
+
+    _validated_payload(
+        path=path,
+        definition=definition,
+        expected_profile_count=len(definition.profiles),
+    )
+
+
+def test_flight_parameters_response_rejects_reduced_alignment_input(
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    traces = tuple(
+        replace(trace, initial_controller_state_valid=True)
+        for trace in _response_traces(
+            profiles=definition.profiles,
+            settings=definition.base_settings,
+        )
+    )
+    path = tmp_path / "flight_parameters_response.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "controller_id": definition.controller_id,
+                "definition_fingerprint": definition.definition_fingerprint,
+                "traces": [asdict(trace) for trace in traces[:-1]],
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="every alignment profile"):
+        _validated_payload(
+            path=path,
+            definition=definition,
+            expected_profile_count=len(definition.profiles),
+        )
+
+
+def test_alignment_references_immutable_flight_parameter_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    bundle_dir = tmp_path / "flight-parameters" / "20260821T180358Z"
+    response_dir = bundle_dir / "response" / "repetition-001"
+    response_dir.mkdir(parents=True)
+    evidence = SimpleNamespace(
+        repetition=1,
+        profile_count=len(definition.profiles),
+        reference_path="response/repetition-001/flight_parameters_response.json",
+        ulog_path="response/repetition-001/flight_parameters.ulg",
+        bridge_log_path="response/repetition-001/flight_parameters_bridge.log",
+    )
+    for relative, payload in (
+        (evidence.reference_path, "reference"),
+        (evidence.ulog_path, "ulog"),
+        (evidence.bridge_log_path, "bridge"),
+    ):
+        (bundle_dir / relative).write_text(payload)
+    monkeypatch.setattr(
+        flight_parameters_module,
+        "load_flight_parameters_bundle",
+        lambda **_kwargs: SimpleNamespace(
+            run_dir=bundle_dir,
+            flight_parameters=SimpleNamespace(
+                run_id="20260821T180358Z",
+                artifact_fingerprint="fingerprint",
+                response=SimpleNamespace(repetitions=1, traces=(evidence,)),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        flight_parameters_module,
+        "_validated_payload",
+        lambda **_kwargs: {},
+    )
+    run_dir = tmp_path / "alignment" / "timestamped-run"
+
+    flight_parameters_module.prepare_alignment_reference(
+        flight_parameters_artifact=bundle_dir,
+        definition=definition,
+        run_dir=run_dir,
+    )
+
+    assert (run_dir / "flight_parameters").is_symlink()
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["flight_parameters_run_id"] == "20260821T180358Z"
+    assert "20260821T180358Z" in manifest["flight_parameters_artifact"]
+    assert manifest["flight_parameters_artifact"] != "flight_parameters"
+    for name, source in (
+        ("reference.json", bundle_dir / evidence.reference_path),
+        ("reference.ulg", bundle_dir / evidence.ulog_path),
+        ("bridge.log", bundle_dir / evidence.bridge_log_path),
+    ):
+        reference = run_dir / name
+        assert reference.is_symlink()
+        assert not reference.readlink().is_absolute()
+        assert reference.resolve() == source
 
 
 def test_ctbr_family_has_independent_roll_pitch_yaw_and_collective_gates() -> None:
@@ -744,6 +952,96 @@ def test_staged_beam_search_batches_without_changing_deterministic_order() -> No
     ]
     assert batched.controller.selected_settings == serial.controller.selected_settings
     assert max(batch_evaluator.batch_sizes) > 1
+
+
+def test_alignment_reloads_only_selected_traces_after_scored_search() -> None:
+    class ScoredEvaluator(_Evaluator):
+        _retain_traces = False
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.trace_loads = 0
+
+        def evaluate(self, *, definition, settings, reference_traces):
+            del reference_traces
+            self.trace_loads += 1
+            return _response_traces(profiles=definition.profiles, settings=settings)
+
+        def evaluate_scored_batch(self, *, definition, settings, reference_traces):
+            assert reference_traces is not None
+            score = metric(name=definition.selection_metric)
+            return tuple(
+                score(
+                    reference_traces,
+                    _response_traces(profiles=definition.profiles, settings=value),
+                )
+                for value in settings
+            )
+
+    evaluator = ScoredEvaluator()
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=evaluator,
+        parameters=(ParameterSpec("command_delay_s", 1, (0.0, 0.05)),),
+    )
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=target.base_settings),
+    )
+
+    result = align(target, reference)
+
+    assert result.controller.selected_settings == target.base_settings
+    assert evaluator.trace_loads == 1
+
+
+def test_alignment_selects_response_candidate_inside_flight_parameters() -> None:
+    class EnvelopeChoiceEvaluator(_Evaluator):
+        _retain_traces = False
+
+        def evaluate(self, *, definition, settings, reference_traces):
+            del reference_traces
+            traces = _response_traces(profiles=definition.profiles, settings=settings)
+            if settings.command_delay_s != 0.0:
+                return traces
+            index = next(
+                index
+                for index, trace in enumerate(traces)
+                if trace.profile == "stability-hover-pose"
+            )
+            escaped = replace(
+                traces[index],
+                position_enu_m=tuple((1.0, 0.0, 0.0) for _value in traces[index].position_enu_m),
+            )
+            return (*traces[:index], escaped, *traces[index + 1 :])
+
+        def evaluate_scored_batch(self, *, definition, settings, reference_traces):
+            del definition, reference_traces
+            return tuple(
+                MetricResult(
+                    metrics={},
+                    ranking_values=(value.command_delay_s,),
+                    fit_metrics={},
+                    validation_metrics={},
+                    quality_passed=True,
+                )
+                for value in settings
+            )
+
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=EnvelopeChoiceEvaluator(),
+        parameters=(ParameterSpec("command_delay_s", 1, (0.0, 0.05)),),
+    )
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=target.base_settings),
+    )
+
+    result = align(target, reference)
+
+    assert result.controller.selected_settings.command_delay_s == pytest.approx(0.05)
+    assert result.controller.advisory_quality_passed
 
 
 def test_effective_key_aliases_float32_equivalent_settings_and_stops_fixed_point() -> None:
@@ -1277,6 +1575,7 @@ def test_controller_and_selection_artifacts_are_compact_and_exact(tmp_path: Path
     )
     controller = load_controller_artifact(run_dir)
     assert controller.certified_control_modes == ("velocity",)
+    assert controller.flight_parameters_run_id == "fixture"
     reconstructed = load_selection(run_dir=run_dir, controller=controller)
     assert reconstructed.candidates == result.candidates
     assert reconstructed.selected_candidate_index == result.selected_candidate_index
@@ -1388,10 +1687,16 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
     )
     run_dir = tmp_path / "run"
     write_alignment_result(result=result, run_dir=run_dir)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
     for name, payload in {
         "reference.json": "{}\n",
         "reference.ulg": "ulog",
         "bridge.log": "bridge",
+    }.items():
+        (inputs / name).write_text(payload)
+        (run_dir / name).symlink_to(Path("..") / "inputs" / name)
+    for name, payload in {
         "target_candidates.json": "{}\n",
         "actuator_audit.json": '{"schema_version":1,"passed":true}\n',
         "controller_boundary_replay.json": '{"schema_version":1,"passed":true}\n',
@@ -1428,6 +1733,10 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
     assert "selection.json.zst" in paths
     assert "evidence/target_traces.json.zst" in paths
     assert "diagnostics/stages/search_realization.json" in paths
+    for name in ("reference_traces.json", "reference.ulg", "bridge.log"):
+        reference = run_dir / "evidence" / name
+        assert reference.is_symlink()
+        assert not reference.readlink().is_absolute()
     assert not (run_dir / "target_candidates.json").exists()
     assert compression_arguments_seen == [("-8", "--long=27", "-T0")]
 

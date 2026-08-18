@@ -28,8 +28,8 @@ from robotics_experiments.controller import (
     controller_artifact_from_payload,
 )
 from robotics_experiments.flight_parameters import (
-    FlightEnvelope,
-    flight_envelope_from_payload,
+    FlightParameters,
+    flight_parameters_from_payload,
 )
 from robotics_experiments.rl._interfaces import INTERFACE_OBSERVATIONS, PolicyInterface
 
@@ -85,8 +85,8 @@ class PolicyMetadata:
     controller_run_id: str
     controller_digest: str
     controller_comparison_fingerprint: str
-    flight_envelope: FlightEnvelope
-    flight_envelope_digest: str
+    flight_parameters: FlightParameters
+    flight_parameters_digest: str
     values: Mapping[str, Any]
 
 
@@ -148,8 +148,8 @@ def policy_metadata(
     action_cfg: RlActionConfig,
     controller_artifact: ControllerArtifact,
     controller_digest: str,
-    flight_envelope: FlightEnvelope,
-    flight_envelope_digest: str,
+    flight_parameters: FlightParameters,
+    flight_parameters_digest: str,
     obs_schema_version: int,
     obs_dim: int,
     policy_rate_hz: float,
@@ -157,8 +157,12 @@ def policy_metadata(
     curriculum_stage: str | None = None,
 ) -> dict[str, Any]:
     """Compose metadata for a contract authored by a training config."""
-    if flight_envelope.artifact_fingerprint != controller_artifact.flight_envelope_fingerprint:
-        raise ValueError("flight envelope does not match the controller qualification")
+    if (
+        flight_parameters.run_id != controller_artifact.flight_parameters_run_id
+        or flight_parameters.artifact_fingerprint
+        != controller_artifact.flight_parameters_fingerprint
+    ):
+        raise ValueError("flight parameters do not match the controller qualification")
     interface = PolicyInterface(policy_interface)
     metadata = {
         "artifact_kind": "robotics-experiments-policy",
@@ -174,9 +178,9 @@ def policy_metadata(
             "artifact": asdict(controller_artifact),
             "digest": controller_digest,
         },
-        "flight_envelope": {
-            "artifact": asdict(flight_envelope),
-            "digest": flight_envelope_digest,
+        "flight_parameters": {
+            "artifact": asdict(flight_parameters),
+            "digest": flight_parameters_digest,
         },
     }
     if interface is PolicyInterface.PRESS:
@@ -233,26 +237,28 @@ def _controller_record(
     return artifact, digest
 
 
-def _flight_envelope_record(
+def _flight_parameters_record(
     *,
     metadata: Mapping[str, Any],
     artifact_dir: Path,
-) -> tuple[FlightEnvelope, str]:
+) -> tuple[FlightParameters, str]:
     record = _metadata_value(
         metadata=metadata,
-        name="flight_envelope",
+        name="flight_parameters",
         artifact_dir=artifact_dir,
     )
     if not isinstance(record, dict) or set(record) != {"artifact", "digest"}:
         raise ValueError(
-            f"policy artifact {artifact_dir} metadata flight_envelope must contain "
+            f"policy artifact {artifact_dir} metadata flight_parameters must contain "
             "exactly artifact and digest"
         )
-    envelope = flight_envelope_from_payload(record["artifact"])
+    flight_parameters = flight_parameters_from_payload(record["artifact"])
     digest = record["digest"]
     if not isinstance(digest, str) or not digest:
-        raise ValueError(f"policy artifact {artifact_dir} flight envelope digest must be non-empty")
-    return envelope, digest
+        raise ValueError(
+            f"policy artifact {artifact_dir} flight parameters digest must be non-empty"
+        )
+    return flight_parameters, digest
 
 
 def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMetadata:
@@ -265,13 +271,17 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
         metadata=metadata,
         artifact_dir=artifact_dir,
     )
-    envelope, envelope_digest = _flight_envelope_record(
+    flight_parameters, flight_parameters_digest = _flight_parameters_record(
         metadata=metadata,
         artifact_dir=artifact_dir,
     )
-    if envelope.artifact_fingerprint != controller.flight_envelope_fingerprint:
+    if (
+        flight_parameters.run_id != controller.flight_parameters_run_id
+        or flight_parameters.artifact_fingerprint != controller.flight_parameters_fingerprint
+    ):
         raise ValueError(
-            f"policy artifact {artifact_dir} flight envelope does not match its controller"
+            f"policy artifact {artifact_dir} flight-parameters artifact "
+            "does not match its controller"
         )
     interface_value = _metadata_value(
         metadata=metadata,
@@ -374,8 +384,8 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
         controller_run_id=controller.run_id,
         controller_digest=controller_digest,
         controller_comparison_fingerprint=controller.comparison_fingerprint,
-        flight_envelope=envelope,
-        flight_envelope_digest=envelope_digest,
+        flight_parameters=flight_parameters,
+        flight_parameters_digest=flight_parameters_digest,
         values=MappingProxyType(metadata),
     )
 

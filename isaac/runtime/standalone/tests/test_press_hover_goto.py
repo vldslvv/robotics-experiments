@@ -32,7 +32,16 @@ import torch
 
 from robotics_experiments.alignment import load_controller_definition
 from robotics_experiments.config import ExperimentConfig, RlActionConfig, load_config
-from robotics_experiments.controller import ControllerSettings, load_controller_artifact
+from robotics_experiments.controller import (
+    ControllerArtifact,
+    ControllerSettings,
+    load_controller_artifact,
+    resolve_controller_path,
+)
+from robotics_experiments.flight_parameters import (
+    FlightParameters,
+    load_flight_parameters_bundle,
+)
 
 if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab import (
@@ -420,6 +429,7 @@ def _run_contact_chain(
     args: argparse.Namespace,
     config: ExperimentConfig,
     controller_settings: ControllerSettings,
+    flight_parameters: FlightParameters,
 ) -> None:
     from pxr import UsdLux
 
@@ -445,15 +455,20 @@ def _run_contact_chain(
     if args.num_envs not in (None, 1):
         raise AssertionError("--contact-chain requires exactly one environment")
     _seed_everything(args.seed)
+    stage_config = config.rl.press.selected_stage()
+    contact_chain_duration_s = (
+        stage_config.episode_length_s + config.rl.press.goal.stable_steps / config.rl.policy_rate_hz
+    )
     cfg = make_switch_press_env_cfg(experiment_config=config)
     cfg.scene.num_envs = 1
-    cfg.episode_length_s = config.rl.episode_length_s + _EPISODE_MARGIN_S
+    cfg.episode_length_s = contact_chain_duration_s + _EPISODE_MARGIN_S
     if hasattr(cfg, "seed"):
         cfg.seed = args.seed
     env = _ContactChainEnv(
         cfg=cfg,
         experiment_config=config,
         controller_settings=controller_settings,
+        flight_parameters=flight_parameters,
     )
     try:
         _reset_env(env, args.seed)
@@ -480,8 +495,17 @@ def _run_contact_chain(
         retreat_started = False
         stable_retreat = False
         stable_retreat_steps = 0
+        max_stable_retreat_steps = 0
+        hold_command_steps = 0
+        retreat_violations = {
+            "contact": 0,
+            "range": 0,
+            "alignment": 0,
+            "linear_speed": 0,
+            "angular_speed": 0,
+        }
         max_tilt = 0.0
-        steps = round(config.rl.episode_length_s / env.step_dt)
+        steps = round(contact_chain_duration_s / env.step_dt)
         max_velocity = float(config.rl.action.max_body_velocity_mps)
         # This deterministic physical-actuation gate is independent of the
         # approach reward's dense velocity reference.
@@ -510,7 +534,8 @@ def _run_contact_chain(
             switch_offset = env.switch.data.root_pos_w - env.drone.data.root_pos_w
             action = torch.zeros((1, env.cfg.action_space), device=env.device)
             if retreat_started:
-                speed = -retreat_speed
+                speed = -retreat_speed if float(switch_offset[0, 0].item()) < initial_range else 0.0
+                hold_command_steps += int(speed == 0.0)
             elif contact_seen:
                 contact_steps += 1
                 speed = min(
@@ -550,16 +575,20 @@ def _run_contact_chain(
             relative = env.switch.data.root_pos_w - env.drone.data.root_pos_w
             linear_speed = float(torch.linalg.norm(env.drone.data.root_lin_vel_b[0]).item())
             angular_speed = float(torch.linalg.norm(env.drone.data.root_ang_vel_b[0]).item())
-            retreat_stable_now = (
-                retreat_started
-                and not contact_now
-                and float(relative[0, 0].item()) >= initial_range
-                and float(torch.linalg.norm(relative[0, 1:3]).item())
-                <= config.rl.press.goal.alignment_error_max_m
-                and linear_speed <= config.rl.press.goal.linear_speed_max_mps
-                and angular_speed <= config.rl.press.goal.angular_speed_max_radps
-            )
+            retreat_conditions = {
+                "contact": not contact_now,
+                "range": float(relative[0, 0].item()) >= initial_range,
+                "alignment": float(torch.linalg.norm(relative[0, 1:3]).item())
+                <= config.rl.press.goal.alignment_error_max_m,
+                "linear_speed": linear_speed <= config.rl.press.goal.linear_speed_max_mps,
+                "angular_speed": angular_speed <= config.rl.press.goal.angular_speed_max_radps,
+            }
+            retreat_stable_now = retreat_started and all(retreat_conditions.values())
+            if retreat_started and speed == 0.0:
+                for name, passed in retreat_conditions.items():
+                    retreat_violations[name] += int(not passed)
             stable_retreat_steps = stable_retreat_steps + 1 if retreat_stable_now else 0
+            max_stable_retreat_steps = max(max_stable_retreat_steps, stable_retreat_steps)
             if stable_retreat_steps >= config.rl.press.goal.stable_steps:
                 stable_retreat = True
                 break
@@ -574,14 +603,18 @@ def _run_contact_chain(
             f"max_button={max_button:.5f} m toggles={len(toggles)} "
             f"max_contact_force={max_contact_force:.3f} N "
             f"lamp_intensity={intensity:.1f} stable_retreat={stable_retreat} "
-            f"max_tilt={max_tilt:.3f} rad"
+            f"max_tilt={max_tilt:.3f} rad hold_command_steps={hold_command_steps} "
+            f"max_stable_retreat_steps={max_stable_retreat_steps} "
+            f"retreat_violations={retreat_violations}"
         )
         _report(
             "contact final: "
             f"drone_pos={env.drone.data.root_pos_w[0].cpu().tolist()} "
             f"drone_body_pos={env.drone.data.body_pos_w[0].cpu().tolist()} "
             f"switch_pos={env.switch.data.root_pos_w[0].cpu().tolist()} "
-            f"switch_body_pos={env.switch.data.body_pos_w[0].cpu().tolist()}"
+            f"switch_body_pos={env.switch.data.body_pos_w[0].cpu().tolist()} "
+            f"relative={relative[0].cpu().tolist()} "
+            f"linear_speed={linear_speed:.5f} m/s angular_speed={angular_speed:.5f} rad/s"
         )
         if not contact_seen or max_pusher <= 0.0:
             raise AssertionError("pusher contact/compression was not observed")
@@ -709,27 +742,102 @@ def _validate_press_side_channel(*, start_obs, end_obs, handoff_config) -> None:
         )
 
 
-def _controller_settings(*, config: ExperimentConfig) -> ControllerSettings:
+def _controller_artifact_path(*, config: ExperimentConfig) -> tuple[Path, bool]:
     repo_root = Path(__file__).resolve().parents[4]
     explicit = os.environ.get(_CONTROLLER_ARTIFACT_ENV)
     authored = explicit or config.rl.training.controller_artifact
     artifact_path = Path(authored)
     if not artifact_path.is_absolute():
         artifact_path = repo_root / artifact_path
+    return artifact_path, explicit is not None
+
+
+def _controller_artifact(*, config: ExperimentConfig) -> tuple[ControllerArtifact, Path]:
+    artifact_path, _explicit = _controller_artifact_path(config=config)
+    controller_path = resolve_controller_path(artifact_path).resolve(strict=True)
+    return load_controller_artifact(controller_path), controller_path
+
+
+def _controller_settings(*, config: ExperimentConfig) -> ControllerSettings:
+    repo_root = Path(__file__).resolve().parents[4]
+    artifact_path, explicit = _controller_artifact_path(config=config)
     if explicit or artifact_path.exists():
-        return load_controller_artifact(artifact_path).selected_settings
+        artifact, _controller_path = _controller_artifact(config=config)
+        return artifact.selected_settings
     return load_controller_definition(repo_root / _TARGET_DEFINITION).base_settings
 
 
+def _contact_chain_inputs(
+    *, config: ExperimentConfig
+) -> tuple[ControllerSettings, FlightParameters]:
+    repo_root = Path(__file__).resolve().parents[4]
+    controller, controller_path = _controller_artifact(config=config)
+    flight_parameters_path = Path(config.rl.training.flight_parameters_artifact)
+    if not flight_parameters_path.is_absolute():
+        flight_parameters_path = repo_root / flight_parameters_path
+    bundle = load_flight_parameters_bundle(path=flight_parameters_path)
+    flight_parameters = bundle.flight_parameters
+
+    vehicle_id = config.rl.training.vehicle_id
+    try:
+        vehicle_label, vehicle = next(
+            (label, item) for label, item in config.vehicles.items() if item.id == vehicle_id
+        )
+    except StopIteration as exc:
+        raise ValueError(f"rl.training.vehicle_id={vehicle_id} is not in the experiment") from exc
+    mismatches = []
+    if controller.vehicle != vehicle_label:
+        mismatches.append(f"controller vehicle {controller.vehicle!r} != {vehicle_label!r}")
+    if controller.airframe != Path(vehicle.spawn.usd_path).name:
+        mismatches.append(
+            f"controller airframe {controller.airframe!r} != {Path(vehicle.spawn.usd_path).name!r}"
+        )
+    if controller.command_rate_hz != config.rl.policy_rate_hz:
+        mismatches.append(
+            f"controller cadence {controller.command_rate_hz} != {config.rl.policy_rate_hz}"
+        )
+    if config.rl.action.kind not in controller.certified_control_modes:
+        mismatches.append(f"controller does not certify action kind {config.rl.action.kind!r}")
+    if flight_parameters.vehicle != vehicle_label:
+        mismatches.append(
+            f"flight-parameters vehicle {flight_parameters.vehicle!r} != {vehicle_label!r}"
+        )
+    if flight_parameters.source_backend != "px4-sitl":
+        mismatches.append(
+            f"flight-parameters backend {flight_parameters.source_backend!r} != 'px4-sitl'"
+        )
+    if flight_parameters.run_id != controller.flight_parameters_run_id:
+        mismatches.append("flight-parameters run ID does not match controller qualification")
+    if flight_parameters.artifact_fingerprint != controller.flight_parameters_fingerprint:
+        mismatches.append("flight-parameters fingerprint does not match controller qualification")
+    if mismatches:
+        raise ValueError("contact-chain input artifacts are incompatible: " + "; ".join(mismatches))
+    if not controller.advisory_quality_passed:
+        raise ValueError(
+            "contact-chain controller failed its quality gates: "
+            + "; ".join(controller.advisory_quality_reasons)
+        )
+    _report(
+        "contact-chain inputs: "
+        f"controller={controller_path} controller_run_id={controller.run_id} "
+        f"flight_parameters={bundle.run_dir} "
+        f"flight_parameters_run_id={flight_parameters.run_id} "
+        f"flight_parameters_digest={bundle.flight_parameters_digest}"
+    )
+    return controller.selected_settings, flight_parameters
+
+
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
-    controller_settings = _controller_settings(config=config)
     if args.contact_chain:
+        controller_settings, flight_parameters = _contact_chain_inputs(config=config)
         _run_contact_chain(
             args=args,
             config=config,
             controller_settings=controller_settings,
+            flight_parameters=flight_parameters,
         )
         return
+    controller_settings = _controller_settings(config=config)
     action_cfg = config.rl.action
     if args.ctbr_sanity:
         action_cfg = replace(action_cfg, kind="ctbr")

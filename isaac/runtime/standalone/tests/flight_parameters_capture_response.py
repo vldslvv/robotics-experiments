@@ -31,10 +31,10 @@ from robotics_experiments.px4_bridge import (
     world_enu_to_body_flu,
 )
 
-_REFERENCE_ENV = "ALIGNMENT_REFERENCE"
-_RUN_DIR_ENV = "ROBOTICS_ALIGNMENT_RUN_DIR"
+_REFERENCE_ENV = "FLIGHT_PARAMETERS_RESPONSE_DEFINITION"
+_RUN_DIR_ENV = "FLIGHT_PARAMETERS_RESPONSE_DIR_CONTAINER"
 _DEFAULT_REFERENCE = "configs/alignment/controllers/px4_sitl_x500_velocity.yaml"
-_TEST_NAME = "alignment_capture_reference"
+_TEST_NAME = "flight_parameters_capture_response"
 
 
 @dataclass(frozen=True)
@@ -119,9 +119,14 @@ def _is_stable(*, policy_input: PolicyInput, config: ExperimentConfig) -> bool:
     )
 
 
-def _recenter_setpoint(*, policy_input: PolicyInput, config: ExperimentConfig) -> VelocitySetpoint:
+def _position_setpoint(
+    *,
+    policy_input: PolicyInput,
+    target_position_enu_m: tuple[float, float, float],
+    config: ExperimentConfig,
+) -> tuple[tuple[float, float, float], VelocitySetpoint]:
     vehicle = policy_input.vehicle_state
-    error_enu = np.asarray(policy_input.reference_position_enu, dtype=np.float64) - np.asarray(
+    error_enu = np.asarray(target_position_enu_m, dtype=np.float64) - np.asarray(
         vehicle.position_enu, dtype=np.float64
     )
     desired_enu = error_enu * config.alignment.capture.recenter_gain_hz
@@ -133,12 +138,21 @@ def _recenter_setpoint(*, policy_input: PolicyInput, config: ExperimentConfig) -
         vehicle.orientation_flu_enu_wxyz,
         desired_enu,
     )
-    return VelocitySetpoint(
-        forward_mps=float(desired_body[0]),
-        right_mps=-float(desired_body[1]),
-        down_mps=-float(desired_body[2]),
+    command = _float3(desired_body)
+    return command, VelocitySetpoint(
+        forward_mps=command[0],
+        right_mps=-command[1],
+        down_mps=-command[2],
         yaw_rate_radps=0.0,
     )
+
+
+def _recenter_setpoint(*, policy_input: PolicyInput, config: ExperimentConfig) -> VelocitySetpoint:
+    return _position_setpoint(
+        policy_input=policy_input,
+        target_position_enu_m=_float3(policy_input.reference_position_enu),
+        config=config,
+    )[1]
 
 
 def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConfig):
@@ -247,9 +261,17 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
                 setpoint=VelocitySetpoint(0.0, 0.0, 0.0, 0.0),
                 complete=True,
             )
-        probe_command = profiles[profile_index].commands[command_index]
-        family = families_by_profile[profiles[profile_index].name]
-        command = probe_command.velocity_body_flu_mps
+        profile = profiles[profile_index]
+        probe_command = profile.commands[command_index]
+        family = families_by_profile[profile.name]
+        if profile.hold_position:
+            command, setpoint = _position_setpoint(
+                policy_input=policy_input,
+                target_position_enu_m=initials[-1].position_enu_m,
+                config=config,
+            )
+        else:
+            command = probe_command.velocity_body_flu_mps
         vehicle = policy_input.vehicle_state
         velocity = body_velocity_flu_from_state(policy_input.vehicle_state)
         sample = _Sample(
@@ -287,7 +309,7 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
                 pitch_rate_radps=-pitch_rate,
                 yaw_rate_radps=-yaw_rate,
             )
-        else:
+        elif not profile.hold_position:
             setpoint = VelocitySetpoint(
                 forward_mps=command[0],
                 right_mps=-command[1],
@@ -302,7 +324,9 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
 def _policy_factory(*, definition: ControllerDefinition, config: ExperimentConfig):
     def factory(*, artifact: str, hold_s: float | None) -> PolicyAdapter:
         if artifact != "alignment-probe" or hold_s is not None:
-            raise ValueError("alignment capture requires its injected alignment-probe step")
+            raise ValueError(
+                "flight-parameters response capture requires its injected alignment-probe step"
+            )
         return PolicyAdapter(
             policy_rate_hz=definition.command_rate_hz,
             initial_state=_ProbeState(
@@ -434,7 +458,7 @@ def _write_capture(
             }
         )
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "reference.json").write_text(
+    (run_dir / "flight_parameters_response.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
@@ -451,27 +475,7 @@ def _write_capture(
         )
         + "\n"
     )
-    shutil.copy2(bridge_log_path, run_dir / "bridge.log")
-    (run_dir / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "artifacts": {
-                    "reference_trace": "reference.json",
-                    "px4_ulog": "reference.ulg",
-                    "bridge_log": "bridge.log",
-                    "actuator_audit": "actuator_audit.json",
-                    "target_candidates": "target_candidates.json",
-                    "gpu_telemetry": "gpu_utilization.json",
-                    "controller_artifact": "controller.json",
-                    "controller_boundary_replay": "controller_boundary_replay.json",
-                },
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
+    shutil.copy2(bridge_log_path, run_dir / "flight_parameters_bridge.log")
 
 
 def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir: Path) -> None:
@@ -485,10 +489,10 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
 
         host = fleet.flying[0].spawned.host
         if host is None:
-            raise AssertionError("alignment capture retained no bridge host")
+            raise AssertionError("flight-parameters response capture retained no bridge host")
         debug_log_path = read_bridge_host_status(host=host).debug_log_path
         if debug_log_path is None:
-            raise AssertionError("alignment capture has no bridge debug log")
+            raise AssertionError("flight-parameters response capture has no bridge debug log")
         _write_capture(
             bridge_log_path=Path(debug_log_path),
             definition=definition,
@@ -500,11 +504,11 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
         context,
         Px4TakeoffScenarioOptions(
             test_name=_TEST_NAME,
-            px4_container_log_name="alignment_capture_reference_px4.log",
+            px4_container_log_name="flight_parameters_capture_response_px4.log",
             post_takeoff_hook=_deploy_pusher,
             post_routine_hook=post_routine,
             policy_factory=_policy_factory(definition=definition, config=context.config),
-            success_label="PX4 controller alignment probes",
+            success_label="PX4 flight-parameter response probes",
         ),
     )
 

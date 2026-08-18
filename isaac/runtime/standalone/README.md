@@ -47,9 +47,9 @@ failure. Rebind every lifecycle, bridge, and driver transition result. Helpers
 that report simulated elapsed time receive a sim-time callable; they must not
 depend on mutable resource properties.
 
-Controller alignment has two standalone backends. The PX4 capture entrypoint
-under `tests/alignment_capture_reference.py` starts through the normal
-`SimulationApp` fleet harness and injects only a deterministic `PolicyAdapter`.
+Controller alignment has two standalone backends. Flight-parameters response
+collection under `tests/flight_parameters_capture_response.py` starts through
+the normal `SimulationApp` fleet harness and injects only a deterministic `PolicyAdapter`.
 The adapter streams a neutral setpoint through a minimum handoff period and a
 continuous stability window before recording each profile; its body-FLU yaw
 command is sign-converted only at the PX4 NED wire boundary.

@@ -28,10 +28,12 @@ class ControllerSettings:
     ki_vel: Vector3
     kd_vel: Vector3
     velocity_observation_scale: Vector3
+    velocity_observation_hold_scale: Vector3
     velocity_observation_bias_mps: Vector3
     velocity_observation_bias_command_start_mps: float
     velocity_observation_bias_command_full_mps: float
     velocity_estimator_bias_decay_hz: float
+    velocity_estimator_bias_hold_decay_hz: Vector3
     velocity_filter_hz: Vector3
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: Vector3
@@ -78,7 +80,8 @@ class ControllerArtifact:
     command_rate_hz: float
     certified_control_modes: tuple[str, ...]
     probe_suite_fingerprint: str
-    flight_envelope_fingerprint: str
+    flight_parameters_run_id: str
+    flight_parameters_fingerprint: str
     selected_settings: ControllerSettings
     settings_fingerprint: str
     advisory_quality_passed: bool

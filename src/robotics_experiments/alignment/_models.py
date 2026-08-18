@@ -39,6 +39,7 @@ class ProbeProfile:
     split: str
     axis: str
     commands: tuple[ProbeCommand, ...]
+    hold_position: bool = False
 
 
 @dataclass(frozen=True)
@@ -161,7 +162,7 @@ class ControllerDefinition:
     controller_schema_version: int
     backend: str
     experiment_config: str
-    flight_envelope_artifact: str
+    flight_parameters_artifact: str
     vehicle: str
     airframe: str
     command_rate_hz: float

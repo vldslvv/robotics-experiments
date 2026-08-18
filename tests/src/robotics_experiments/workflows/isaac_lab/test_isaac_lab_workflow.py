@@ -164,7 +164,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     from robotics_experiments.rl import PolicyInterface
 
     contract = types.SimpleNamespace(policy_interface=PolicyInterface.PRESS)
-    flight_envelope = object()
+    flight_parameters = object()
     calls = {}
     env_cfg = types.SimpleNamespace(scene=types.SimpleNamespace(num_envs=1))
     factory_module = types.SimpleNamespace(
@@ -192,7 +192,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
         seed=123,
         num_envs=8,
         policy_contract=contract,
-        flight_envelope=flight_envelope,
+        flight_parameters=flight_parameters,
     )
 
     assert env == "environment"
@@ -201,7 +201,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     assert "use_training_reset_distribution" not in calls["factory"]
     assert calls["gym"][1]["policy_contract"] is contract
     assert calls["gym"][1]["controller_settings"] == "aligned-controller"
-    assert calls["gym"][1]["flight_envelope"] is flight_envelope
+    assert calls["gym"][1]["flight_parameters"] is flight_parameters
     assert env_cfg.scene.num_envs == 8
 
 

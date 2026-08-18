@@ -236,7 +236,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.action.max_body_velocity_mps == 0.5
     assert not config.rl.lab_vehicle.enable_gyroscopic_forces
     assert training.controller_artifact == ".build/alignment/x500-px4-v1/best"
-    assert training.flight_envelope_artifact.endswith("/latest")
+    assert training.flight_parameters_artifact.endswith("/latest")
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
     assert config.rl.episode_length_s == 45.0
@@ -249,7 +249,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert stage.name == "approach"
     assert tuple(source.source for source in stage.reset_mix) == (
         "measured_navigation_handoff",
-        "pinned_flight_envelope",
+        "pinned_flight_parameters",
     )
     assert tuple(source.weight for source in stage.reset_mix) == (0.8, 0.2)
     assert stage.hold_s == 30.0

@@ -12,6 +12,11 @@ import numpy as np
 import torch
 
 from robotics_experiments.config import PressApproachEvaluationConfig, PressApproachGoalConfig
+from robotics_experiments.flight_parameters import (
+    FlightParameters,
+    SignalStatistics,
+    summarize_signal,
+)
 from robotics_experiments.rl.press import (
     PressApproachResult,
     PressApproachRewardTerms,
@@ -110,6 +115,7 @@ class PressApproachEvaluationResult:
 
     summary: PressApproachEvaluationSummary
     reward_means: tuple[RewardMean, ...]
+    hover_statistics: tuple[SignalStatistics, ...]
 
 
 class _PressApproachPolicy(Protocol):
@@ -144,6 +150,42 @@ class _PressApproachEvaluationEnvironment(Protocol):
     ]:
         """Advance the vector environment by one policy step."""
         ...
+
+
+_HOVER_SIGNAL_UNITS = {
+    "position_error_enu_x": "m",
+    "position_error_enu_y": "m",
+    "position_error_enu_z": "m",
+    "horizontal_position_error": "m",
+    "position_error": "m",
+    "attitude_error_roll": "rad",
+    "attitude_error_pitch": "rad",
+    "attitude_error_yaw": "rad",
+    "tilt_error": "rad",
+    "orientation_error": "rad",
+}
+_BINDING_STATISTICS = (
+    ("max", "maximum_absolute"),
+    ("rmse", "rmse"),
+    ("p95", "p95_absolute"),
+    ("p99", "p99_absolute"),
+)
+
+
+def _hover_signal_values(*, result: PressApproachResult[torch.Tensor]) -> dict[str, torch.Tensor]:
+    hover = result.hover_evaluation
+    return {
+        "position_error_enu_x": hover.position_error_enu_m[:, 0],
+        "position_error_enu_y": hover.position_error_enu_m[:, 1],
+        "position_error_enu_z": hover.position_error_enu_m[:, 2],
+        "horizontal_position_error": hover.horizontal_position_error_m,
+        "position_error": hover.position_error_m,
+        "attitude_error_roll": hover.attitude_error_rpy_rad[:, 0],
+        "attitude_error_pitch": hover.attitude_error_rpy_rad[:, 1],
+        "attitude_error_yaw": hover.attitude_error_rpy_rad[:, 2],
+        "tilt_error": hover.tilt_error_rad,
+        "orientation_error": hover.orientation_error_rad,
+    }
 
 
 def summarize_press_approach_episodes(
@@ -332,9 +374,14 @@ def _evaluate_seed(
     episode_count: int,
     goal_config: PressApproachGoalConfig,
     hold_steps: int,
+    policy_warmup_steps: int,
     report: Callable[[str], None],
     trace_worst_episode: bool,
-) -> tuple[tuple[PressApproachEpisodeMetrics, ...], dict[str, tuple[float, int]]]:
+) -> tuple[
+    tuple[PressApproachEpisodeMetrics, ...],
+    dict[str, tuple[float, int]],
+    dict[str, tuple[np.ndarray, ...]],
+]:
     reward_names = tuple(field.name for field in fields(PressApproachRewardTerms)) + ("total",)
     reward_sums = torch.zeros(len(reward_names), dtype=torch.float32, device=env.device)
     reward_sample_count = torch.zeros((), dtype=torch.long, device=env.device)
@@ -381,6 +428,7 @@ def _evaluate_seed(
     range_trace: list[torch.Tensor] = []
     body_collision_trace: list[torch.Tensor] = []
     pusher_collision_trace: list[torch.Tensor] = []
+    hover_samples: dict[str, list[np.ndarray]] = {name: [] for name in _HOVER_SIGNAL_UNITS}
     reset_result = env.reset(seed=seed)
     observation = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     horizon = int(env.max_episode_length)
@@ -413,6 +461,11 @@ def _evaluate_seed(
         if result is None:
             raise RuntimeError("press approach environment did not publish a transition result")
         termination = result.termination
+        policy_window = active & (result.state.stable_goal_steps > policy_warmup_steps)
+        for name, values in _hover_signal_values(result=result).items():
+            selected = values[policy_window]
+            if selected.numel():
+                hover_samples[name].append(selected.detach().cpu().numpy())
         current_range = result.range_m
         strict_passes = torch.stack(
             (
@@ -592,10 +645,14 @@ def _evaluate_seed(
         f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
         f"timeout={summary.timeout_rate:.3f}"
     )
-    return episodes, {
-        name: (float(value), sample_count)
-        for name, value in zip(reward_names, reward_sum_values, strict=True)
-    }
+    return (
+        episodes,
+        {
+            name: (float(value), sample_count)
+            for name, value in zip(reward_names, reward_sum_values, strict=True)
+        },
+        {name: tuple(values) for name, values in hover_samples.items()},
+    )
 
 
 def evaluate_press_approach_policy(
@@ -606,20 +663,26 @@ def evaluate_press_approach_policy(
     episodes_per_seed: int,
     goal_config: PressApproachGoalConfig,
     hold_steps: int,
+    flight_parameters: FlightParameters,
     report: Callable[[str], None],
     trace_worst_episode: bool,
 ) -> PressApproachEvaluationResult:
     """Evaluate one deterministic approach actor on all configured seeds."""
     episodes: list[PressApproachEpisodeMetrics] = []
     rewards: dict[str, tuple[float, int]] = {}
+    hover_samples: dict[str, list[np.ndarray]] = {name: [] for name in _HOVER_SIGNAL_UNITS}
+    policy_warmup_steps = round(flight_parameters.policy_warmup_s / float(env.step_dt))
+    if policy_warmup_steps >= hold_steps:
+        raise ValueError("flight-parameters policy warmup must be shorter than the hold")
     for seed in seeds:
-        seed_episodes, seed_rewards = _evaluate_seed(
+        seed_episodes, seed_rewards, seed_hover_samples = _evaluate_seed(
             env=env,
             policy=policy,
             seed=seed,
             episode_count=episodes_per_seed,
             goal_config=goal_config,
             hold_steps=hold_steps,
+            policy_warmup_steps=policy_warmup_steps,
             report=report,
             trace_worst_episode=trace_worst_episode,
         )
@@ -627,10 +690,21 @@ def evaluate_press_approach_policy(
         for name, (value, count) in seed_rewards.items():
             previous_value, previous_count = rewards.get(name, (0.0, 0))
             rewards[name] = previous_value + value, previous_count + count
+        for name, samples in seed_hover_samples.items():
+            hover_samples[name].extend(samples)
     return PressApproachEvaluationResult(
         summary=summarize_press_approach_episodes(episodes=tuple(episodes)),
         reward_means=tuple(
             RewardMean(name=name, mean=value / count) for name, (value, count) in rewards.items()
+        ),
+        hover_statistics=tuple(
+            summarize_signal(
+                name=name,
+                unit=_HOVER_SIGNAL_UNITS[name],
+                values=np.concatenate(samples),
+            )
+            for name, samples in hover_samples.items()
+            if samples
         ),
     )
 
@@ -745,6 +819,14 @@ def press_policy_evaluation(
             EvaluationMetric(
                 "mean_completion_time_fraction", summary.mean_completion_time_fraction
             ),
+        )
+        + tuple(
+            EvaluationMetric(
+                f"flight_parameters.{statistics.name}.{metric_name}",
+                getattr(statistics, field_name),
+            )
+            for statistics in result.hover_statistics
+            for metric_name, field_name in _BINDING_STATISTICS
         ),
         reward_means=result.reward_means,
         source=source,
@@ -756,6 +838,7 @@ def evaluate_press_acceptance(
     evaluation: PolicyEvaluation,
     evaluation_config: PressApproachEvaluationConfig,
     minimum_range_m: float,
+    flight_parameters: FlightParameters,
 ) -> AcceptanceResult:
     """Apply every fixed press gate to one completed raw evaluation."""
     predicates = (
@@ -789,16 +872,37 @@ def evaluate_press_acceptance(
             "==",
             0.0,
         ),
+    ) + tuple(
+        (
+            f"flight parameters {limit.name} {metric_name}",
+            next(
+                (
+                    float(metric.value)
+                    for metric in evaluation.metrics
+                    if metric.name == f"flight_parameters.{limit.name}.{metric_name}"
+                    and metric.value is not None
+                    and np.isfinite(metric.value)
+                ),
+                None,
+            ),
+            "<=",
+            float(getattr(limit, field_name)),
+        )
+        for limit in flight_parameters.hover.acceptance_limits
+        for metric_name, field_name in _BINDING_STATISTICS
     )
     gates = tuple(
         GateResult(
             name=name,
             passed=(
-                actual == threshold
-                if comparison == "=="
-                else actual >= threshold
-                if comparison == ">="
-                else actual <= threshold
+                actual is not None
+                and (
+                    actual == threshold
+                    if comparison == "=="
+                    else actual >= threshold
+                    if comparison == ">="
+                    else actual <= threshold
+                )
             ),
             actual=actual,
             comparison=comparison,

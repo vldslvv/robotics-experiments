@@ -1,10 +1,10 @@
 schema_version: 1
-flight_id: holybro-x500-v2-hover-v1
+flight_parameters_id: holybro-x500-v2-hover-v1
 source_backend: px4-sitl
 state_source: simulator-ground-truth
 experiment_config: configs/flight_parameters_x500_hover.yaml
 vehicle: x500_01
-scenario:
+hover:
   kind: hover
   repetitions: 30
   mode_transition_timeout_s: 15.0
@@ -14,6 +14,14 @@ scenario:
   sample_rate_hz: 20.0
   target_position_enu_m: [0.0, 0.0, 2.5]
   target_yaw_rad: 0.0
+response:
+  kind: controller-response
+  repetitions: 1
+  experiment_config: configs/alignment_px4_x500_velocity.yaml
+  definition: configs/alignment/controllers/px4_sitl_x500_velocity.yaml
+# Policy qualification evaluates the final 24 seconds. Alignment continues to
+# use every sample in the full 30-second hold trace.
+policy_warmup_s: 6.0
 position_margin_m: 0.005
 attitude_margin_rad: 0.004363323129985824
 execution:

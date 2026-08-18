@@ -11,7 +11,7 @@ import numpy as np
 from pyulog import ULog
 
 from robotics_experiments.flight_parameters import (
-    FlightConfig,
+    FlightParametersConfig,
 )
 from robotics_experiments.flight_parameters._artifact import (
     hover_verification_from_payload,
@@ -59,7 +59,7 @@ def _load_px4_hover_log(path: Path, /) -> ParsedPx4HoverLog:
 
 
 def verify_px4_hover_trial(
-    *, config: FlightConfig, raw_trace_path: Path, ulog_path: Path, trial_dir: Path
+    *, config: FlightParametersConfig, raw_trace_path: Path, ulog_path: Path, trial_dir: Path
 ) -> tuple[Path, Path]:
     """Decode a completed ULog, verify hover, and write verification plus trace."""
 

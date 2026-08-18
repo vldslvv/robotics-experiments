@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from robotics_experiments.config import RlTrainingPhaseConfig
-from robotics_experiments.flight_parameters import load_flight_envelope
+from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.training.progress import EvaluationMetric, PolicyEvaluation
 from tests.support.paths import REPO_ROOT
 
@@ -133,7 +133,7 @@ def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
         lambda **_kwargs: SimpleNamespace(
             contract=train_rl.replace(contract, curriculum_stage="hover"),
             controller_digest="controller-digest",
-            flight_envelope_digest="envelope-digest",
+            flight_parameters_digest="flight-parameters-digest",
             values={"selected_policy_digest": "policy-digest"},
         ),
     )
@@ -143,7 +143,7 @@ def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
         repo_root=tmp_path,
         contract=contract,
         controller_digest="controller-digest",
-        flight_envelope_digest="envelope-digest",
+        flight_parameters_digest="flight-parameters-digest",
     )
 
     assert selected is not None
@@ -223,7 +223,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance=None,
         status="training",
     )
-    assert report["schema_version"] == 15
+    assert report["schema_version"] == 16
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -254,6 +254,10 @@ def test_attempt_worker_command_forwards_one_seed_and_campaign_overrides() -> No
             strict=True,
         ),
         attempt_index=2,
+        controller_artifact_digest="controller-digest",
+        controller_artifact_path=Path("resolved/controller.json"),
+        flight_parameters_artifact_digest="flight-parameters-digest",
+        flight_parameters_artifact_path=Path("resolved/flight-parameters"),
         seed=44,
     )
     assert command[:2] == [train_rl.sys.executable, str(Path(train_rl.__file__).resolve())]
@@ -263,15 +267,118 @@ def test_attempt_worker_command_forwards_one_seed_and_campaign_overrides() -> No
         "2",
         "--seed",
         "44",
+        "--controller-artifact",
+        "resolved/controller.json",
+        "--controller-artifact-digest",
+        "controller-digest",
+        "--flight-parameters-artifact",
+        "resolved/flight-parameters",
+        "--flight-parameters-artifact-digest",
+        "flight-parameters-digest",
         "--procedural-smoke",
         "--num-envs",
         "64",
-        "--controller-artifact",
-        "controller",
         "--scene",
         "@config",
         "--strict",
     ]
+
+
+def test_campaign_parent_preflights_and_pins_input_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+
+    config_path = REPO_ROOT / "configs" / "train_press_hover_quad.yaml"
+    config = load_config(config_path)
+    controller = SimpleNamespace()
+    flight_parameters = SimpleNamespace()
+    controller_path = tmp_path / "alignment" / "run" / "controller.json"
+    flight_parameters_path = tmp_path / "flight-parameters" / "run"
+    campaign: dict[str, object] = {}
+    monkeypatch.setattr(train_rl, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        train_rl,
+        "_load_training_controller",
+        lambda **_kwargs: (controller, "controller-digest", controller_path),
+    )
+    monkeypatch.setattr(
+        train_rl,
+        "_load_training_flight_parameters",
+        lambda **_kwargs: (
+            flight_parameters,
+            "flight-parameters-digest",
+            flight_parameters_path,
+        ),
+    )
+    monkeypatch.setattr(
+        train_rl,
+        "_run_isolated_campaign",
+        lambda **kwargs: campaign.update(kwargs),
+    )
+
+    train_rl._run(  # noqa: SLF001
+        args=SimpleNamespace(
+            attempt_worker=False,
+            controller_artifact=None,
+            controller_artifact_digest=None,
+            flight_parameters_artifact=None,
+            flight_parameters_artifact_digest=None,
+            seed=None,
+        ),
+        config=config,
+        config_path=config_path,
+    )
+
+    assert campaign["controller_artifact_path"] == controller_path
+    assert campaign["controller_artifact_digest"] == "controller-digest"
+    assert campaign["flight_parameters_artifact_path"] == flight_parameters_path
+    assert campaign["flight_parameters_artifact_digest"] == "flight-parameters-digest"
+
+
+def test_invalid_campaign_input_fails_before_run_creation(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+
+    config_path = REPO_ROOT / "configs" / "train_press_hover_quad.yaml"
+    config = load_config(config_path)
+    monkeypatch.setattr(train_rl, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        train_rl,
+        "_load_training_controller",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("unsupported controller artifact")),
+    )
+    monkeypatch.setattr(
+        train_rl,
+        "_run_isolated_campaign",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("campaign must not start")),
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        train_rl._run(  # noqa: SLF001
+            args=SimpleNamespace(
+                attempt_worker=False,
+                controller_artifact=None,
+                controller_artifact_digest=None,
+                flight_parameters_artifact=None,
+                flight_parameters_artifact_digest=None,
+                seed=None,
+            ),
+            config=config,
+            config_path=config_path,
+        )
+
+    assert raised.value.code == 2
+    assert capsys.readouterr().err.endswith(
+        "input artifact validation FAILED: unsupported controller artifact\n"
+    )
+    assert not (tmp_path / ".build").exists()
 
 
 def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
@@ -377,6 +484,10 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
         ),
         config=config,
         config_path=config_path,
+        controller_artifact_digest="controller-digest",
+        controller_artifact_path=Path("resolved/controller.json"),
+        flight_parameters_artifact_digest="flight-parameters-digest",
+        flight_parameters_artifact_path=Path("resolved/flight-parameters"),
         attempt_seeds=(42, 43, 44),
         policy_root=policy_root,
         repo_root=tmp_path,
@@ -409,7 +520,7 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         attempt_dir.mkdir()
         (attempt_dir / "attempt_report.json").write_text(
-            '{"schema_version": 15, "report_kind": "attempt", "status": "training"}\n'
+            '{"schema_version": 16, "report_kind": "attempt", "status": "training"}\n'
         )
         raise KeyboardInterrupt
 
@@ -429,6 +540,10 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
             ),
             config=config,
             config_path=config_path,
+            controller_artifact_digest="controller-digest",
+            controller_artifact_path=Path("resolved/controller.json"),
+            flight_parameters_artifact_digest="flight-parameters-digest",
+            flight_parameters_artifact_path=Path("resolved/flight-parameters"),
             attempt_seeds=(42, 43, 44),
             policy_root=policy_root,
             repo_root=tmp_path,
@@ -444,6 +559,66 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
     assert (run_dir / report["active_attempt"]["report"]).is_file()
     assert not (policy_root / "latest").exists()
     assert not (policy_root / "best").exists()
+
+
+def test_campaign_parent_reports_missing_worker_report_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+
+    config_path = REPO_ROOT / "configs" / "train_press_hover_quad.yaml"
+    config = load_config(config_path)
+    policy_root = tmp_path / "training" / "press-hover"
+    run_dir = policy_root / "campaign"
+
+    def make_run_dir(**_kwargs):
+        run_dir.mkdir(parents=True)
+        return run_dir
+
+    monkeypatch.setattr(train_rl, "_make_run_dir", make_run_dir)
+    monkeypatch.setattr(train_rl, "probe_telemetry", lambda: {"gpu_utilization_rate": 0.5})
+    monkeypatch.setattr(
+        train_rl.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
+    )
+    monkeypatch.delenv("RL_RUN_ID", raising=False)
+
+    with pytest.raises(RuntimeError, match="exited without an attempt report"):
+        train_rl._run_isolated_campaign(  # noqa: SLF001
+            args=SimpleNamespace(
+                procedural_smoke=False,
+                max_iterations=1,
+                num_envs=64,
+                controller_artifact=None,
+                scene=None,
+                strict=False,
+            ),
+            config=config,
+            config_path=config_path,
+            controller_artifact_digest="controller-digest",
+            controller_artifact_path=Path("resolved/controller.json"),
+            flight_parameters_artifact_digest="flight-parameters-digest",
+            flight_parameters_artifact_path=Path("resolved/flight-parameters"),
+            attempt_seeds=(42,),
+            policy_root=policy_root,
+            repo_root=tmp_path,
+        )
+
+    report = json.loads((run_dir / "training_report.json").read_text())
+    assert report["status"] == "attempt_failed"
+    assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
+    attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
+    assert attempt_report == {
+        "schema_version": 16,
+        "report_kind": "attempt",
+        "status": "failed",
+        "artifact_run_id": "campaign",
+        "attempt_index": 0,
+        "training_seed": 42,
+    }
 
 
 def test_interrupt_handlers_raise_keyboard_interrupt(
@@ -567,34 +742,52 @@ def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path)
     assert metadata == {"source_commit": "abc123", "source_dirty": True}
 
 
-def test_training_flight_envelope_must_match_controller_qualification() -> None:
+def test_training_flight_parameters_must_match_controller_qualification() -> None:
     train_rl = _load_train_rl_module()
-    artifact_dir = REPO_ROOT / "tests/fixtures/flight_envelope"
-    envelope = load_flight_envelope(artifact_dir)
+    artifact_dir = REPO_ROOT / "tests/fixtures/flight_parameters"
+    flight_parameters = load_flight_parameters(artifact_dir)
     config = SimpleNamespace(
         rl=SimpleNamespace(
             training=SimpleNamespace(
-                flight_envelope_artifact=str(artifact_dir),
+                flight_parameters_artifact=str(artifact_dir),
                 vehicle_id=0,
             )
         ),
         vehicles={"x500_01": SimpleNamespace(id=0)},
     )
 
-    loaded, digest = train_rl._load_training_flight_envelope(  # noqa: SLF001
+    loaded, digest, run_dir = train_rl._load_training_flight_parameters(  # noqa: SLF001
+        artifact_path=None,
         config=config,
         controller_artifact=SimpleNamespace(
-            flight_envelope_fingerprint=envelope.artifact_fingerprint
+            flight_parameters_run_id=flight_parameters.run_id,
+            flight_parameters_fingerprint=flight_parameters.artifact_fingerprint,
         ),
         repo_root=REPO_ROOT,
     )
-    assert loaded == envelope
+    assert loaded == flight_parameters
     assert len(digest) == 64
+    assert run_dir == artifact_dir
 
     with pytest.raises(ValueError, match="does not match"):
-        train_rl._load_training_flight_envelope(  # noqa: SLF001
+        train_rl._load_training_flight_parameters(  # noqa: SLF001
+            artifact_path=None,
             config=config,
-            controller_artifact=SimpleNamespace(flight_envelope_fingerprint="other"),
+            controller_artifact=SimpleNamespace(
+                flight_parameters_run_id=flight_parameters.run_id,
+                flight_parameters_fingerprint="other",
+            ),
+            repo_root=REPO_ROOT,
+        )
+
+    with pytest.raises(ValueError, match="run ID does not match"):
+        train_rl._load_training_flight_parameters(  # noqa: SLF001
+            artifact_path=None,
+            config=config,
+            controller_artifact=SimpleNamespace(
+                flight_parameters_run_id="another-run",
+                flight_parameters_fingerprint=flight_parameters.artifact_fingerprint,
+            ),
             repo_root=REPO_ROOT,
         )
 

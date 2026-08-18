@@ -136,10 +136,12 @@ def _controller_settings() -> ControllerSettings:
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(0.5, 0.5, 0.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_observation_hold_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
         velocity_observation_bias_command_start_mps=0.0,
         velocity_observation_bias_command_full_mps=0.01,
         velocity_estimator_bias_decay_hz=0.0,
+        velocity_estimator_bias_hold_decay_hz=(0.0, 0.0, 0.0),
         velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
@@ -849,7 +851,7 @@ def test_seed_controller_state_matches_held_velocity_setpoint_boundary(kind: str
     assert state.outer_loop_elapsed_s == pytest.approx(-0.004)
 
 
-def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
+def test_seeded_estimator_bias_blends_hold_and_motion_decay_by_command():
     steady_bias = np.array([0.001, -0.003, 0.002])
     params = build_actuation_params(
         geometry=_quad_geometry(),
@@ -858,6 +860,7 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
             _controller_settings(),
             velocity_observation_bias_mps=tuple(steady_bias),
             velocity_estimator_bias_decay_hz=2.0,
+            velocity_estimator_bias_hold_decay_hz=(1.0, 0.5, 0.25),
         ),
         mass=_MASS_KG,
     )
@@ -887,23 +890,25 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
     assert initial_bias == pytest.approx(np.array([0.1, -0.2, 0.3]) - steady_bias)
 
     controller, _omega = _step_controller(
-        params, controller, np.zeros(4), _level_rest_state(), 0.004
+        params, controller, np.array([0.02, 0.0, 0.0, 0.0]), _level_rest_state(), 0.004
     )
     controller, _omega = _step_controller(
-        params, controller, np.zeros(4), _level_rest_state(), 0.004
+        params, controller, np.array([0.02, 0.0, 0.0, 0.0]), _level_rest_state(), 0.004
     )
 
-    expected_decay = math.exp(-2.0 * math.pi * 2.0 / 125.0)
+    expected_decay = np.exp(-2.0 * math.pi * np.array([2.0, 0.5, 0.25]) / 125.0)
     assert controller.velocity_estimator_bias_enu == pytest.approx(initial_bias * expected_decay)
 
 
-def test_seeded_observation_bias_is_gated_componentwise_by_velocity_setpoint():
+def test_seeded_observation_adapters_are_gated_componentwise_by_velocity_setpoint():
     steady_bias = np.array([0.01, -0.02, 0.03])
     params = build_actuation_params(
         geometry=_quad_geometry(),
         action_cfg=_action_cfg("velocity"),
         controller_settings=replace(
             _controller_settings(),
+            velocity_observation_scale=(2.0, 2.0, 2.0),
+            velocity_observation_hold_scale=(1.0, 1.0, 1.0),
             velocity_observation_bias_mps=tuple(steady_bias),
             velocity_observation_bias_command_start_mps=0.01,
             velocity_observation_bias_command_full_mps=0.03,
@@ -914,7 +919,7 @@ def test_seeded_observation_bias_is_gated_componentwise_by_velocity_setpoint():
     controller = seed_actuation_controller_state(
         params=params,
         controller_dt_s=0.004,
-        physical_linear_velocity_enu=zero,
+        physical_linear_velocity_enu=np.ones(3),
         filtered_linear_velocity_enu=zero,
         velocity_setpoint_enu_mps=np.array([0.0, -0.02, 0.03]),
         angular_velocity_body_flu=zero,
@@ -934,7 +939,7 @@ def test_seeded_observation_bias_is_gated_componentwise_by_velocity_setpoint():
     )
 
     assert controller.velocity_estimator_bias_enu == pytest.approx(
-        np.array([0.0, -0.5 * steady_bias[1], -steady_bias[2]])
+        -np.array([1.0, 1.5, 2.0]) - np.array([0.0, 0.5 * steady_bias[1], steady_bias[2]])
     )
 
 
@@ -1110,6 +1115,7 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state(k
         _controller_settings(),
         hover_thrust_normalized=0.57,
         velocity_estimator_bias_decay_hz=0.02,
+        velocity_estimator_bias_hold_decay_hz=(0.02, 0.02, 0.02),
         angular_velocity_filter_hz=10.0,
         horizontal_velocity_error_gain_scale=8.0 / 7.0,
         horizontal_velocity_error_gain_start_mps=0.1,
@@ -1197,6 +1203,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     settings = replace(
         _controller_settings(),
         hover_thrust_normalized=0.57,
+        velocity_observation_hold_scale=(0.8, 1.1, 0.9),
         velocity_observation_bias_mps=(0.001, -0.003, 0.002),
         horizontal_velocity_error_gain_scale=1.19,
         horizontal_velocity_braking_gain_scale=0.8,

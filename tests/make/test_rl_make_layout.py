@@ -56,7 +56,7 @@ def test_root_makefile_includes_rl_makefile_and_training_makefile_is_removed() -
 
 def test_alignment_targets_are_defined_only_in_alignment_makefile() -> None:
     targets = (
-        "alignment-capture-reference",
+        "alignment-prepare-reference",
         "alignment-benchmark-capacity",
         "alignment-sweep-target",
         "alignment-fit",

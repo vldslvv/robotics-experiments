@@ -13,12 +13,26 @@ reference. `robotics_experiments.alignment` owns probe definitions, generic
 candidate search, metrics, evidence bundles, and publication. RL depends only
 on the controller artifact and never imports alignment.
 
-`robotics_experiments.flight_parameters` separately owns the task-neutral
-hover envelope described in `docs/FLIGHT_PARAMETERS.md`. Both controller
-definitions resolve the same published envelope. The selected target settings
-are replayed through the 30-second `stability-hover-pose` profile and must keep
-position and attitude within its bounds. The exact envelope fingerprint enters
-the comparison fingerprint and strict controller artifact.
+`robotics_experiments.flight_parameters` owns the task-neutral schema-1 hover
+and controller-response evidence described in `docs/FLIGHT_PARAMETERS.md`.
+Alignment no longer launches a private PX4 reference capture. Its preparation
+step resolves and pins one immutable flight-parameters run, validates that its
+lossless response evidence exactly covers the authored fit, validation, and
+stability profiles, then exposes its `reference.json`, ULog, and bridge log to
+the existing alignment evaluator through relative symlinks. The selected target
+settings are still replayed through the full 30-second
+`stability-hover-pose` profile and must keep position and attitude within the
+full-window hover bounds. No alignment metric, search, ranking, or acceptance
+logic changes at this boundary. The exact flight-parameters fingerprint enters
+the comparison fingerprint and strict controller artifact. The capture manifest
+and controller artifact also record the resolved producer `run_id`; an authored
+`latest` selector is never retained as lineage.
+
+Input validation completes before the alignment run directory is created. An
+invalid or incompatible flight-parameters selector therefore exits with one
+preflight error and leaves no empty or partially staged alignment run. The
+consumer never copies those producer-owned inputs; final alignment evidence
+retains relative references to the pinned timestamped bundle.
 
 The dependency direction is:
 
@@ -96,13 +110,16 @@ fields. The `coarse-to-fine-beam` strategy:
 5. deduplicates settings by their exact float32 controller representation.
 
 A zero-centered fitted field may declare a positive
-`selection_regularization_scale`. If the registered metric finds any
-quality-passing candidates, the search selects the passing candidate with the
-smallest dimensionless L2 correction across those declared fields, then uses
-the response metrics as tie-breakers. If no candidate passes, gate proximity
-continues to determine selection. This keeps an estimator-offset fit from
-spending unnecessary correction authority merely to improve an already-passing
-trace metric.
+`selection_regularization_scale`. Among candidates that pass both the registered
+response metric and the pinned flight-parameters qualification, final selection
+uses the smallest dimensionless L2 correction across those declared fields,
+then the response metrics as tie-breakers. If no candidate passes the response
+metric, gate proximity continues to determine the diagnostic selection; if
+response candidates pass but none fit the flight parameters, the best response
+candidate remains diagnostic evidence and cannot publish. This keeps an
+estimator-offset fit from spending unnecessary correction authority merely to
+improve an already-passing trace metric without allowing that correction to
+escape the measured hover envelope.
 
 The default uses one persistent worker and 128 candidate slots. This is the
 measured useful-throughput optimum for the current GPU; additional workers
@@ -124,8 +141,8 @@ Isaac Lab's simulation-context ownership.
 
 ## Evidence and boundary audit
 
-PX4 capture uses the ordinary fleet/bridge path with a deterministic policy
-adapter. The alignment experiment selects PX4 logging profile `17`, preserving
+Flight-parameters response capture uses the ordinary fleet/bridge path with a
+deterministic policy adapter. Its experiment selects PX4 logging profile `17`, preserving
 the default topic set plus full-rate attitude, rate, thrust, torque, and
 actuator topics needed for exact 250 Hz replay. Its configured pusher is
 deployed after takeoff and before probe
@@ -143,8 +160,11 @@ held collective setpoints, the held body-rate setpoint, the filtered yaw-torque
 state, velocity and rate integrals, estimator filters, and the hover estimate.
 Resetting any held state
 to a neutral value makes a profile's result depend on where capture happened to
-land in PX4's asynchronous controller schedule and is therefore invalid. One
-run directory keeps:
+land in PX4's asynchronous controller schedule and is therefore invalid. The
+flight-parameters bundle retains these response traces without reduction.
+Alignment preparation validates exact profile order, commands, cadence, sample
+counts, split identity, completion, and controller-boundary state before
+pinning the resolved run. One alignment run directory keeps:
 
 - the ULog and bridge log;
 - reference and target traces;
@@ -210,17 +230,23 @@ scans that upstream vertical setpoint over zero through three physics ticks so
 outer-loop phase error remains separate from controller gains. A
 zero-through-three-tick delay scan compares the target attitude-loop output to
 PX4's downstream rates setpoint so asynchronous module handoff error remains
-separate from controller gains. The
-target-only `velocity_observation_scale`,
+separate from controller gains. The target-only motion-rate
+`velocity_observation_scale`, low-command `velocity_observation_hold_scale`,
 steady world-ENU `velocity_observation_bias_mps`,
 the componentwise command-magnitude transition
 `velocity_observation_bias_command_start_mps` /
-`velocity_observation_bias_command_full_mps`, `velocity_estimator_bias_decay_hz`,
+`velocity_observation_bias_command_full_mps`, the motion-rate
+`velocity_estimator_bias_decay_hz`, the componentwise low-command
+`velocity_estimator_bias_hold_decay_hz`,
 per-axis `velocity_filter_hz`, and
 `angular_velocity_filter_hz` model the evidenced physical-to-estimated state
 boundary without changing the pinned PX4 controller gains. The smooth command
-transition suppresses steady correction during exact zero-command ringdown and
-reaches the authored bias outside that band uniformly for X/Y/Z. The core replay
+transition suppresses steady correction during exact zero-command ringdown,
+blends observation scale from its hold mapping to its motion mapping, and
+reaches the authored bias outside that band uniformly for X/Y/Z. It also blends
+estimator-bias persistence from each axis's low-command hold rate to the motion
+rate.
+The core replay
 bypasses these target-only adapters because its inputs are already
 PX4-estimated state; the physical-state replay retains them and therefore
 audits the deployment boundary.
@@ -271,19 +297,21 @@ make test-integration-alignment-target
 Run the full campaign with:
 
 ```bash
+make measure-flight-parameters
 make align-controllers
 ```
 
-The campaign runs the authoritative integration gate against its run-local
+`align-controllers` begins with `alignment-prepare-reference`; it never captures
+PX4 reference data. The campaign runs the authoritative integration gate against its run-local
 `controller.json` after replay and before finalization. A failure therefore
 preserves diagnostic evidence without advancing `latest` or `best`.
 
 `controller.json` is the downstream product. It contains complete controller
 settings, the control modes certified by the accepted probe-family list, and
-the exact flight-envelope fingerprint used by its hover-pose qualification;
+the exact flight-parameters fingerprint used by its hover-pose qualification;
 policy-owned normalized action scales are not alignment fields. Candidate traces and ULogs are
 valuable reproducibility evidence, but policy training consumes only the
-controller artifact and the independently published matching flight envelope.
+controller artifact and the independently published matching flight parameters.
 `latest` and comparable `best` links advance only for a fully accepted bundle.
 
 ## Change policy

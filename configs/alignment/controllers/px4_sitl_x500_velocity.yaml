@@ -3,7 +3,7 @@ controller_id: px4-sitl-x500-v1
 controller_schema_version: 1
 backend: px4-sitl
 experiment_config: configs/alignment_px4_x500_velocity.yaml
-flight_envelope_artifact: .build/flight-envelopes/holybro-x500-v2-hover-v1/latest
+flight_parameters_artifact: .build/flight-parameters/holybro-x500-v2-hover-v1/latest
 vehicle: x500_01
 airframe: holybro_x500_v2.usda
 image: vv-px4-sitl
@@ -29,11 +29,13 @@ settings:
   ki_vel: [0.4, 0.4, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [1.0, 1.0, 1.0]
+  velocity_observation_hold_scale: [1.0, 1.0, 1.0]
   velocity_observation_bias_mps: [0.0, 0.0, 0.0]
   velocity_observation_bias_command_start_mps: 0.0
   velocity_observation_bias_command_full_mps: 0.01
   # PX4 supplies the estimator signal directly; these target-side adapters are inactive.
   velocity_estimator_bias_decay_hz: 0.0
+  velocity_estimator_bias_hold_decay_hz: [0.0, 0.0, 0.0]
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
   velocity_filter_hz: [0.0, 0.0, 0.0]
   velocity_derivative_filter_hz: 5.0
@@ -223,6 +225,7 @@ probe_families:
       - name: stability-hover-pose
         split: stability
         axis: combined
+        hold_position: true
         commands:
           - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 30.0}
   - name: ctbr

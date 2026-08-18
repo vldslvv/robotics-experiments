@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 import torch
 
-from robotics_experiments.flight_parameters import evaluate_hover_pose, load_flight_envelope
-from robotics_experiments.rl import evaluate_flight_envelope
+from robotics_experiments.flight_parameters import evaluate_hover_pose, load_flight_parameters
+from robotics_experiments.rl import evaluate_flight_parameters
 
-_ENVELOPE = load_flight_envelope(
-    Path(__file__).parents[3] / "fixtures/flight_envelope/flight_envelope.json"
+_ENVELOPE = load_flight_parameters(
+    Path(__file__).parents[3] / "fixtures/flight_parameters/flight_parameters.json"
 )
 
 
@@ -25,7 +25,7 @@ def test_batched_evaluation_matches_flight_parameter_contract(backend: str) -> N
     )
     expected = tuple(
         evaluate_hover_pose(
-            envelope=_ENVELOPE,
+            flight_parameters=_ENVELOPE,
             target_position_enu_m=(0.0, 0.0, 0.0),
             target_attitude_flu_enu_wxyz=(1.0, 0.0, 0.0, 0.0),
             position_enu_m=tuple(position),
@@ -40,8 +40,8 @@ def test_batched_evaluation_matches_flight_parameter_contract(backend: str) -> N
         position_input = positions
         attitude_input = attitudes
 
-    actual = evaluate_flight_envelope(
-        envelope=_ENVELOPE,
+    actual = evaluate_flight_parameters(
+        flight_parameters=_ENVELOPE,
         position_error_enu_m=position_input,
         attitude_error_flu_enu_wxyz=attitude_input,
     )

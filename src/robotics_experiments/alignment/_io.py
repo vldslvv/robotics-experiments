@@ -32,7 +32,6 @@ from robotics_experiments.alignment._models import (
 __all__: list[str] = []
 
 _TRACE_SCHEMA_VERSION = 1
-_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({_TRACE_SCHEMA_VERSION})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _SEARCH_STRATEGIES = frozenset({"coarse-to-fine-beam"})
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
@@ -156,6 +155,10 @@ def _settings(
             value=settings["velocity_observation_scale"],
             name=f"{name}.velocity_observation_scale",
         ),
+        velocity_observation_hold_scale=_vector(
+            value=settings["velocity_observation_hold_scale"],
+            name=f"{name}.velocity_observation_hold_scale",
+        ),
         velocity_observation_bias_mps=_vector(
             value=settings["velocity_observation_bias_mps"],
             name=f"{name}.velocity_observation_bias_mps",
@@ -174,6 +177,10 @@ def _settings(
             value=settings["velocity_estimator_bias_decay_hz"],
             name=f"{name}.velocity_estimator_bias_decay_hz",
             nonnegative=True,
+        ),
+        velocity_estimator_bias_hold_decay_hz=_vector(
+            value=settings["velocity_estimator_bias_hold_decay_hz"],
+            name=f"{name}.velocity_estimator_bias_hold_decay_hz",
         ),
         velocity_filter_hz=_vector(
             value=settings["velocity_filter_hz"],
@@ -267,6 +274,8 @@ def _settings(
         "kp_vel",
         "ki_vel",
         "kd_vel",
+        "velocity_observation_scale",
+        "velocity_observation_hold_scale",
         "velocity_filter_hz",
         "velocity_integral_limit_mps2",
         "kp_att",
@@ -275,6 +284,7 @@ def _settings(
         "kd_rate",
         "kff_rate",
         "rate_integral_limit",
+        "velocity_estimator_bias_hold_decay_hz",
     ):
         if any(value < 0.0 for value in getattr(parsed, field_name)):
             raise ValueError(f"{name}.{field_name} values must be non-negative")
@@ -335,6 +345,17 @@ def _profiles(*, value: Any, family_name: str, control_mode: str) -> tuple[Probe
             raise ValueError(
                 f"{name}.axis must be x, y, z, roll, pitch, yaw, collective, or combined"
             )
+        expected_profile_fields = {"name", "split", "axis", "commands"}
+        if set(profile) not in (
+            expected_profile_fields,
+            expected_profile_fields | {"hold_position"},
+        ):
+            raise ValueError(f"{name} fields mismatch")
+        hold_position = profile.get("hold_position", False)
+        if type(hold_position) is not bool:
+            raise ValueError(f"{name}.hold_position must be a boolean")
+        if hold_position and (control_mode != "velocity" or split != "stability"):
+            raise ValueError(f"{name}.hold_position requires a stability velocity profile")
         raw_commands = profile.get("commands")
         if not isinstance(raw_commands, list) or not raw_commands:
             raise ValueError(f"{name}.commands must be a non-empty list")
@@ -401,6 +422,7 @@ def _profiles(*, value: Any, family_name: str, control_mode: str) -> tuple[Probe
                 split=split,
                 axis=axis,
                 commands=tuple(commands),
+                hold_position=hold_position,
             )
         )
     return tuple(profiles)
@@ -1049,7 +1071,7 @@ class _TraceFileEvaluator:
             path = run_dir / "target_candidates.json"
             key = _fingerprint(asdict(settings))
             payload = self._load_candidate_payload(path=path)
-        if payload.get("schema_version") not in _SUPPORTED_TRACE_SCHEMA_VERSIONS:
+        if payload.get("schema_version") != _TRACE_SCHEMA_VERSION:
             raise RuntimeError(f"{path} has an unsupported trace schema")
         if payload.get("controller_id") != definition.controller_id:
             raise RuntimeError(f"{path} was captured for a different controller")
@@ -1103,9 +1125,9 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
             value=definition.get("experiment_config"),
             name="experiment_config",
         ),
-        flight_envelope_artifact=_string(
-            value=definition.get("flight_envelope_artifact"),
-            name="flight_envelope_artifact",
+        flight_parameters_artifact=_string(
+            value=definition.get("flight_parameters_artifact"),
+            name="flight_parameters_artifact",
         ),
         vehicle=_string(value=definition.get("vehicle"), name="vehicle"),
         airframe=_string(value=definition.get("airframe"), name="airframe"),

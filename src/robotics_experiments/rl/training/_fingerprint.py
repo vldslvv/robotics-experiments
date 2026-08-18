@@ -16,7 +16,7 @@ def _press_comparison_fingerprint(
     *,
     config: ExperimentConfig,
     contract: PolicyContract,
-    flight_envelope_fingerprint: str,
+    flight_parameters_fingerprint: str,
 ) -> str | None:
     if contract.policy_interface is not PolicyInterface.PRESS:
         return None
@@ -47,7 +47,7 @@ def _press_comparison_fingerprint(
         "policy_rate_hz": contract.policy_rate_hz,
         "action_kind": contract.action_kind,
         "action_dimension": contract.action_dim,
-        "flight_envelope_fingerprint": flight_envelope_fingerprint,
+        "flight_parameters_fingerprint": flight_parameters_fingerprint,
     }
     encoded = json.dumps(
         payload,

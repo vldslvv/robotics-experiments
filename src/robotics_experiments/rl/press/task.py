@@ -15,10 +15,10 @@ from robotics_experiments.config import (
     PressApproachTerminationConfig,
     PressApproachVelocityReferenceConfig,
 )
-from robotics_experiments.flight_parameters import FlightEnvelope
-from robotics_experiments.rl.flight_envelope import (
-    FlightEnvelopeEvaluation,
-    evaluate_flight_envelope,
+from robotics_experiments.flight_parameters import FlightParameters
+from robotics_experiments.rl.flight_parameters import (
+    HoverEvaluation,
+    evaluate_flight_parameters,
 )
 
 __all__ = [
@@ -114,7 +114,7 @@ class PressApproachTerminationFlags(Generic[ArrayT]):
 
     @property
     def flight_failure(self) -> ArrayT:
-        """Return raw flight-envelope failures, including collision-coincident ones."""
+        """Return raw flight-parameters failures, including collision-coincident ones."""
         return self.crash | self.altitude | self.range_undershoot | self.relative_envelope
 
     @property
@@ -138,7 +138,7 @@ class PressApproachResult(Generic[ArrayT]):
     angular_speed_radps: ArrayT
     contact_clear: ArrayT
     strict_goal: ArrayT
-    envelope: FlightEnvelopeEvaluation[ArrayT]
+    hover_evaluation: HoverEvaluation[ArrayT]
 
 
 def _where(condition: ArrayT, yes: ArrayT | Scalar, no: ArrayT | Scalar) -> ArrayT:
@@ -209,7 +209,7 @@ def initial_press_approach_state(
     relative_switch_pos_m: ArrayT,
     relative_switch_quat_xyzw: ArrayT,
     goal_cfg: PressApproachGoalConfig,
-    flight_envelope: FlightEnvelope,
+    flight_parameters: FlightParameters,
     position_error_enu_m: ArrayT,
     attitude_error_flu_enu_wxyz: ArrayT,
 ) -> PressApproachState[ArrayT]:
@@ -218,13 +218,13 @@ def initial_press_approach_state(
         relative_switch_pos_m=relative_switch_pos_m,
         goal_cfg=goal_cfg,
     )
-    envelope = evaluate_flight_envelope(
-        envelope=flight_envelope,
+    hover_evaluation = evaluate_flight_parameters(
+        flight_parameters=flight_parameters,
         position_error_enu_m=position_error_enu_m,
         attitude_error_flu_enu_wxyz=attitude_error_flu_enu_wxyz,
     )
     normalized_pose_error = _pairwise_maximum(
-        envelope.position_utilization, envelope.attitude_utilization
+        hover_evaluation.position_utilization, hover_evaluation.attitude_utilization
     )
     return PressApproachState(
         normalized_position_error=normalized_position_error,
@@ -241,7 +241,7 @@ def reset_press_approach_state(
     relative_switch_pos_m: ArrayT,
     relative_switch_quat_xyzw: ArrayT,
     goal_cfg: PressApproachGoalConfig,
-    flight_envelope: FlightEnvelope,
+    flight_parameters: FlightParameters,
     position_error_enu_m: ArrayT,
     attitude_error_flu_enu_wxyz: ArrayT,
 ) -> PressApproachState[ArrayT]:
@@ -250,7 +250,7 @@ def reset_press_approach_state(
         relative_switch_pos_m=relative_switch_pos_m,
         relative_switch_quat_xyzw=relative_switch_quat_xyzw,
         goal_cfg=goal_cfg,
-        flight_envelope=flight_envelope,
+        flight_parameters=flight_parameters,
         position_error_enu_m=position_error_enu_m,
         attitude_error_flu_enu_wxyz=attitude_error_flu_enu_wxyz,
     )
@@ -405,7 +405,7 @@ def step_press_approach(
     goal_cfg: PressApproachGoalConfig,
     reward_cfg: PressApproachRewardConfig,
     termination_cfg: PressApproachTerminationConfig,
-    flight_envelope: FlightEnvelope,
+    flight_parameters: FlightParameters,
     hold_steps: int,
     approach_enabled: bool,
 ) -> PressApproachResult[ArrayT]:
@@ -417,8 +417,8 @@ def step_press_approach(
     )
     linear_speed = _norm(sample.linear_velocity_mps)
     angular_speed = _norm(sample.angular_velocity_radps)
-    envelope_evaluation = evaluate_flight_envelope(
-        envelope=flight_envelope,
+    envelope_evaluation = evaluate_flight_parameters(
+        flight_parameters=flight_parameters,
         position_error_enu_m=sample.position_error_enu_m,
         attitude_error_flu_enu_wxyz=sample.attitude_error_flu_enu_wxyz,
     )
@@ -519,5 +519,5 @@ def step_press_approach(
         angular_speed_radps=angular_speed,
         contact_clear=~collision,
         strict_goal=stable_goal,
-        envelope=envelope_evaluation,
+        hover_evaluation=envelope_evaluation,
     )
