@@ -16,8 +16,9 @@ def _press_comparison_fingerprint(
     *,
     config: ExperimentConfig,
     contract: PolicyContract,
+    flight_envelope_fingerprint: str,
 ) -> str | None:
-    if contract.policy_interface is not PolicyInterface.PRESS_APPROACH:
+    if contract.policy_interface is not PolicyInterface.PRESS:
         return None
     vehicle_label, vehicle = next(
         (label, item)
@@ -25,7 +26,7 @@ def _press_comparison_fingerprint(
         if item.id == config.rl.training.vehicle_id
     )
     payload = {
-        "comparison_revision": 17,
+        "comparison_revision": 18,
         "evaluation": asdict(config.rl.press.evaluation),
         "goal": asdict(config.rl.press.goal),
         "handoff": asdict(config.rl.press.handoff),
@@ -46,6 +47,7 @@ def _press_comparison_fingerprint(
         "policy_rate_hz": contract.policy_rate_hz,
         "action_kind": contract.action_kind,
         "action_dimension": contract.action_dim,
+        "flight_envelope_fingerprint": flight_envelope_fingerprint,
     }
     encoded = json.dumps(
         payload,

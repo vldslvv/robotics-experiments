@@ -8,6 +8,7 @@ include make/tests.mk
 include make/integration-tests.mk
 include make/alignment.mk
 include make/rl.mk
+include make/flight-parameters.mk
 include make/benchmarks.mk
 include make/flight-analysis.mk
 
@@ -52,6 +53,7 @@ help:
 		'  make alignment-sweep-target Replay all declarative Isaac Lab candidates' \
 		'  make alignment-fit         Score candidates and update latest/best links' \
 		'  make test-integration-alignment-target Validate the selected target envelope' \
+		'  make measure-flight-envelope Capture and publish task-neutral hover parameters' \
 		'' \
 		'RL, Isaac Lab, and press workflow targets:' \
 		'' \

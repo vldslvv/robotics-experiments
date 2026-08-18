@@ -1,5 +1,9 @@
 """Public task-neutral reinforcement-learning contract."""
 
+from robotics_experiments.rl.flight_envelope import (
+    FlightEnvelopeEvaluation,
+    evaluate_flight_envelope,
+)
 from robotics_experiments.rl.observation import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
@@ -23,12 +27,14 @@ from robotics_experiments.rl.policy import (
 __all__ = [
     "HOVER_OBSERVATION_DIM",
     "HOVER_OBSERVATION_SCHEMA_VERSION",
+    "FlightEnvelopeEvaluation",
     "LoadedPolicy",
     "METADATA_FILENAME",
     "POLICY_FILENAME",
     "PolicyContract",
     "PolicyInterface",
     "PolicyMetadata",
+    "evaluate_flight_envelope",
     "hover_observation_from_state",
     "load_policy",
     "load_policy_metadata",

@@ -6,6 +6,8 @@ import math
 
 import torch
 
+from robotics_experiments.flight_parameters import FlightEnvelope
+from robotics_experiments.rl.flight_envelope import evaluate_flight_envelope
 from robotics_experiments.rl.press import HandoffGate
 
 __all__: list[str] = []
@@ -47,6 +49,58 @@ def _rotation_ball_from_unit_samples(
         (torch.cos(half_angle)[:, None], axis * torch.sin(half_angle)[:, None]),
         dim=-1,
     )
+
+
+def _quaternion_from_rpy(*, rpy_rad: torch.Tensor) -> torch.Tensor:
+    half = 0.5 * rpy_rad
+    cr, cp, cy = torch.cos(half).unbind(dim=-1)
+    sr, sp, sy = torch.sin(half).unbind(dim=-1)
+    return torch.stack(
+        (
+            cr * cp * cy + sr * sp * sy,
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+        ),
+        dim=-1,
+    )
+
+
+def _hover_pose_from_unit_samples(
+    *, unit_samples: torch.Tensor, envelope: FlightEnvelope
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Sample target-local poses from the measured hover envelope."""
+    if unit_samples.ndim != 2 or unit_samples.shape[1] != 6:
+        raise ValueError("hover reset requires unit_samples with shape (count, 6)")
+
+    hover = envelope.hover
+    position_lower = unit_samples.new_tensor(hover.position_error_enu_m.lower)
+    position_upper = unit_samples.new_tensor(hover.position_error_enu_m.upper)
+    position_error = position_lower + unit_samples[:, :3] * (position_upper - position_lower)
+    radial_utilization = torch.maximum(
+        torch.linalg.vector_norm(position_error[:, :2], dim=-1)
+        / hover.horizontal_position_error_m.upper,
+        torch.linalg.vector_norm(position_error, dim=-1) / hover.position_error_m.upper,
+    )
+    position_error /= radial_utilization.clamp_min(1.0)[:, None]
+    interior_scale = 1.0 - math.sqrt(torch.finfo(unit_samples.dtype).eps)
+    position_error *= interior_scale
+
+    attitude_lower = unit_samples.new_tensor(hover.attitude_error_rpy_rad.lower)
+    attitude_upper = unit_samples.new_tensor(hover.attitude_error_rpy_rad.upper)
+    rpy = attitude_lower + unit_samples[:, 3:] * (attitude_upper - attitude_lower)
+    attitude = _quaternion_from_rpy(rpy_rad=rpy)
+    for _ in range(2):
+        utilization = evaluate_flight_envelope(
+            envelope=envelope,
+            position_error_enu_m=torch.zeros_like(position_error),
+            attitude_error_flu_enu_wxyz=attitude,
+        ).attitude_utilization
+        rpy /= utilization.clamp_min(1.0)[:, None]
+        attitude = _quaternion_from_rpy(rpy_rad=rpy)
+    rpy *= interior_scale
+    attitude = _quaternion_from_rpy(rpy_rad=rpy)
+    return position_error, attitude
 
 
 def _press_entry_state_from_unit_samples(

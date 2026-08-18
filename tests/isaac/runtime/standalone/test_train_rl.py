@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from robotics_experiments.config import RlTrainingPhaseConfig
+from robotics_experiments.flight_parameters import load_flight_envelope
 from robotics_experiments.rl.training.progress import EvaluationMetric, PolicyEvaluation
 from tests.support.paths import REPO_ROOT
 
@@ -87,6 +88,67 @@ def test_procedural_smoke_preserves_all_configured_attempt_seeds() -> None:
     )[0]
     assert "args.procedural_smoke" not in seed_selection
     assert "training_config.attempt_seeds" in seed_selection
+
+
+def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
+    monkeypatch, tmp_path: Path
+) -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl import PolicyContract, PolicyInterface
+
+    config = load_config(REPO_ROOT / "configs/train_press_approach_quad.yaml")
+    contract = PolicyContract(
+        policy_interface=PolicyInterface.PRESS,
+        obs_schema_version=1,
+        obs_dim=34,
+        policy_rate_hz=20.0,
+        action_kind="velocity",
+        action_dim=4,
+        max_body_velocity_mps=0.5,
+        max_yaw_rate_radps=1.5,
+        max_body_rate_radps=6.0,
+        hover_thrust_normalized=0.57,
+        curriculum_stage="approach",
+    )
+    policy_root = tmp_path / ".build/training/press-hover"
+    run_dir = policy_root / "accepted-hover"
+    checkpoint = run_dir / "attempt/checkpoint.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    (run_dir / "training_report.json").write_text(
+        json.dumps(
+            {
+                "status": "accepted",
+                "acceptance": {"passed": True},
+                "selected_checkpoint": "attempt/checkpoint.pt",
+            }
+        )
+    )
+    policy_root.mkdir(exist_ok=True)
+    (policy_root / "best").symlink_to(run_dir.name)
+    monkeypatch.setattr(
+        train_rl.rl,
+        "validate_policy_artifact",
+        lambda **_kwargs: SimpleNamespace(
+            contract=train_rl.replace(contract, curriculum_stage="hover"),
+            controller_digest="controller-digest",
+            flight_envelope_digest="envelope-digest",
+            values={"selected_policy_digest": "policy-digest"},
+        ),
+    )
+
+    selected = train_rl._previous_stage_checkpoint(  # noqa: SLF001
+        config=config,
+        repo_root=tmp_path,
+        contract=contract,
+        controller_digest="controller-digest",
+        flight_envelope_digest="envelope-digest",
+    )
+
+    assert selected is not None
+    assert selected[0] == checkpoint
+    assert selected[1]["stage"] == "hover"
 
 
 def test_evaluation_cache_round_trip_rebinds_candidate_identity(tmp_path: Path) -> None:
@@ -505,6 +567,38 @@ def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path)
     assert metadata == {"source_commit": "abc123", "source_dirty": True}
 
 
+def test_training_flight_envelope_must_match_controller_qualification() -> None:
+    train_rl = _load_train_rl_module()
+    artifact_dir = REPO_ROOT / "tests/fixtures/flight_envelope"
+    envelope = load_flight_envelope(artifact_dir)
+    config = SimpleNamespace(
+        rl=SimpleNamespace(
+            training=SimpleNamespace(
+                flight_envelope_artifact=str(artifact_dir),
+                vehicle_id=0,
+            )
+        ),
+        vehicles={"x500_01": SimpleNamespace(id=0)},
+    )
+
+    loaded, digest = train_rl._load_training_flight_envelope(  # noqa: SLF001
+        config=config,
+        controller_artifact=SimpleNamespace(
+            flight_envelope_fingerprint=envelope.artifact_fingerprint
+        ),
+        repo_root=REPO_ROOT,
+    )
+    assert loaded == envelope
+    assert len(digest) == 64
+
+    with pytest.raises(ValueError, match="does not match"):
+        train_rl._load_training_flight_envelope(  # noqa: SLF001
+            config=config,
+            controller_artifact=SimpleNamespace(flight_envelope_fingerprint="other"),
+            repo_root=REPO_ROOT,
+        )
+
+
 def test_checkpoint_restore_loads_optimizer_and_iteration(tmp_path: Path) -> None:
     torch = pytest.importorskip("torch")
     from robotics_experiments.rl.training import rsl_rl
@@ -674,8 +768,8 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
     runner = object()
 
     class FakeEnv:
-        def configure_training_phase(self, phase):
-            calls.append(("task_phase", phase))
+        def configure_training_phase(self, phase, phase_number):
+            calls.append(("task_phase", phase, phase_number))
 
         def reset(self):
             calls.append(("reset", torch.is_inference_mode_enabled()))
@@ -715,7 +809,7 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
     assert calls[0][1]["checkpoint_path"] == checkpoint
     assert calls[1][1]["phase"] is phase
     assert calls[1][1]["phase_number"] == 2
-    assert calls[-2] == ("task_phase", phase)
+    assert calls[-2] == ("task_phase", phase, 2)
     assert calls[-1] == ("reset", True)
 
 

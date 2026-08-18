@@ -9,7 +9,7 @@ class PolicyInterface(str, Enum):
     """Supported runtime observation/adapter contracts."""
 
     HOVER = "hover"
-    PRESS_APPROACH = "press-approach"
+    PRESS = "press"
 
 
 HOVER_OBSERVATION_SCHEMA_VERSION = 1
@@ -22,7 +22,7 @@ INTERFACE_OBSERVATIONS = {
         HOVER_OBSERVATION_SCHEMA_VERSION,
         HOVER_OBSERVATION_DIM,
     ),
-    PolicyInterface.PRESS_APPROACH: (
+    PolicyInterface.PRESS: (
         PRESS_OBSERVATION_SCHEMA_VERSION,
         PRESS_OBSERVATION_DIM,
     ),

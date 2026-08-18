@@ -50,6 +50,10 @@ from robotics_experiments.controller import (
     load_controller_artifact,
     resolve_controller_path,
 )
+from robotics_experiments.flight_parameters import (
+    FlightEnvelope,
+    load_flight_envelope_bundle,
+)
 from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
 from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training._monitoring import (
@@ -130,6 +134,12 @@ def _validate_policy_name(policy_name: str) -> str:
     return policy_name
 
 
+def _campaign_phases(*, config: ExperimentConfig) -> tuple[RlTrainingPhaseConfig, ...]:
+    if config.rl.training.task_id == "Isaac-Switch-Press-Direct-v1":
+        return tuple(config.rl.press.selected_stage().phases)
+    return tuple(config.rl.training.phases)
+
+
 def _git_source_metadata(*, repo_root: Path) -> dict[str, str | bool]:
     git = ["git", "-c", f"safe.directory={repo_root.resolve()}"]
     commit = subprocess.run(
@@ -156,6 +166,7 @@ def _build_env(
     num_envs: int | None,
     experiment_config: ExperimentConfig,
     controller_settings,
+    flight_envelope: FlightEnvelope,
     policy_contract=None,
 ):
     # AppLauncher must start before the Isaac Lab workflow import.
@@ -168,6 +179,7 @@ def _build_env(
         seed=seed,
         num_envs=num_envs,
         policy_contract=policy_contract,
+        flight_envelope=flight_envelope,
     )
 
 
@@ -179,18 +191,22 @@ def _artifact_metadata(
     artifact_run_id: str,
     controller_artifact: ControllerArtifact,
     controller_digest: str,
+    flight_envelope: FlightEnvelope,
+    flight_envelope_digest: str,
 ) -> dict[str, Any]:
     metadata = rl.policy_metadata(
         action_cfg=config.rl.action,
         controller_artifact=controller_artifact,
         controller_digest=controller_digest,
+        flight_envelope=flight_envelope,
+        flight_envelope_digest=flight_envelope_digest,
         obs_schema_version=int(env_cfg.observation_schema_version),
         obs_dim=int(env_cfg.observation_space),
         policy_rate_hz=config.rl.policy_rate_hz,
         policy_interface=str(env_cfg.policy_interface),
         curriculum_stage=(
-            config.rl.press.curriculum_stage
-            if str(env_cfg.policy_interface) == rl.PolicyInterface.PRESS_APPROACH.value
+            config.rl.press.selected_stage().name
+            if str(env_cfg.policy_interface) == rl.PolicyInterface.PRESS.value
             else None
         ),
     )
@@ -325,6 +341,93 @@ def _load_training_controller(
         )
     controller_path = resolve_controller_path(artifact_path)
     return artifact, _file_sha256(controller_path)
+
+
+def _load_training_flight_envelope(
+    *,
+    config: ExperimentConfig,
+    controller_artifact: ControllerArtifact,
+    repo_root: Path,
+) -> tuple[FlightEnvelope, str]:
+    artifact_path = Path(config.rl.training.flight_envelope_artifact)
+    if not artifact_path.is_absolute():
+        artifact_path = repo_root / artifact_path
+    bundle = load_flight_envelope_bundle(path=artifact_path)
+    envelope = bundle.envelope
+    try:
+        vehicle_label = next(
+            label
+            for label, vehicle in config.vehicles.items()
+            if vehicle.id == config.rl.training.vehicle_id
+        )
+    except StopIteration as exc:
+        raise ValueError(
+            f"rl.training.vehicle_id={config.rl.training.vehicle_id} is not in the experiment"
+        ) from exc
+    mismatches = []
+    if envelope.vehicle != vehicle_label:
+        mismatches.append(f"vehicle {envelope.vehicle!r} != {vehicle_label!r}")
+    if envelope.source_backend != "px4-sitl":
+        mismatches.append(f"source backend {envelope.source_backend!r} != 'px4-sitl'")
+    if envelope.artifact_fingerprint != controller_artifact.flight_envelope_fingerprint:
+        mismatches.append("artifact fingerprint does not match the controller qualification")
+    if mismatches:
+        raise ValueError("flight envelope is incompatible: " + "; ".join(mismatches))
+    return envelope, bundle.envelope_digest
+
+
+def _previous_stage_checkpoint(
+    *,
+    config: ExperimentConfig,
+    repo_root: Path,
+    contract: rl.PolicyContract,
+    controller_digest: str,
+    flight_envelope_digest: str,
+) -> tuple[Path, dict[str, Any]] | None:
+    stages = tuple(config.rl.press.curriculum.stages)
+    active_index = next(
+        index
+        for index, stage in enumerate(stages)
+        if stage.name == config.rl.press.curriculum.active_stage
+    )
+    if active_index == 0:
+        return None
+
+    previous = stages[active_index - 1]
+    run_dir = (repo_root / ".build" / "training" / f"press-{previous.name}" / "best").resolve(
+        strict=True
+    )
+    metadata = rl.validate_policy_artifact(artifact_dir=run_dir)
+    if replace(metadata.contract, curriculum_stage=contract.curriculum_stage) != contract:
+        raise ValueError("previous press stage has an incompatible policy contract")
+    if metadata.contract.curriculum_stage != previous.name:
+        raise ValueError("previous press stage artifact does not match curriculum order")
+    if metadata.controller_digest != controller_digest:
+        raise ValueError("previous press stage uses a different controller artifact")
+    if metadata.flight_envelope_digest != flight_envelope_digest:
+        raise ValueError("previous press stage uses a different flight envelope")
+
+    report = json.loads((run_dir / _REPORT_FILENAME).read_text(encoding="utf-8"))
+    acceptance = report.get("acceptance")
+    if (
+        report.get("status") != "accepted"
+        or not isinstance(acceptance, dict)
+        or not acceptance.get("passed")
+    ):
+        raise ValueError("previous press stage has no accepted campaign")
+    selected_checkpoint = report.get("selected_checkpoint")
+    if not isinstance(selected_checkpoint, str):
+        raise ValueError("previous press stage report has no selected checkpoint")
+    checkpoint = (run_dir / selected_checkpoint).resolve(strict=True)
+    if not checkpoint.is_relative_to(run_dir):
+        raise ValueError("previous press stage checkpoint escapes its campaign")
+    return checkpoint, {
+        "method": "previous-accepted-stage",
+        "stage": previous.name,
+        "run_id": run_dir.name,
+        "checkpoint_sha256": _file_sha256(checkpoint),
+        "policy_digest": metadata.values["selected_policy_digest"],
+    }
 
 
 def _capped_phases(
@@ -489,6 +592,7 @@ def _evaluation_worker_main(
             num_envs=evaluation_config.episodes_per_seed,
             experiment_config=config,
             controller_settings=metadata.controller_settings,
+            flight_envelope=metadata.flight_envelope,
             policy_contract=metadata.contract,
         )
         telemetry = TelemetrySampler(
@@ -524,6 +628,9 @@ def _evaluation_worker_main(
                         seeds=seeds,
                         episodes_per_seed=evaluation_config.episodes_per_seed,
                         goal_config=config.rl.press.goal,
+                        hold_steps=round(
+                            config.rl.press.selected_stage().hold_s * config.rl.policy_rate_hz
+                        ),
                         report=_report,
                         trace_worst_episode=False,
                     )
@@ -804,7 +911,7 @@ def _training_report(
         "report_kind": "campaign",
         "artifact_run_id": run_dir.name,
         "policy_name": config.rl.training.policy_name,
-        "policy_interface": rl.PolicyInterface.PRESS_APPROACH.value,
+        "policy_interface": rl.PolicyInterface.PRESS.value,
         "comparison_fingerprint": comparison_fingerprint,
         "phases": [asdict(phase) for phase in phases],
         "plateau_criteria": asdict(criteria),
@@ -985,12 +1092,14 @@ def _select_attempt_candidate(
     return next(candidate for candidate in candidates if candidate.evaluation is selected)
 
 
-def _configure_training_environment(*, env, phase: RlTrainingPhaseConfig) -> None:
+def _configure_training_environment(
+    *, env, phase: RlTrainingPhaseConfig, phase_number: int
+) -> None:
     if phase.range_undershoot_min_m is None:
         return
     if not hasattr(env, "configure_training_phase"):
         raise ValueError("task-specific training phases are unsupported by the selected task")
-    env.configure_training_phase(phase)
+    env.configure_training_phase(phase, phase_number)
 
 
 def _restore_phase_branch(
@@ -1011,7 +1120,7 @@ def _restore_phase_branch(
     )
     _report(f"refinement restore COMPLETE iteration={restored_iteration}")
     training.configure_phase(runner=runner, phase=phase, phase_number=phase_number)
-    _configure_training_environment(env=env, phase=phase)
+    _configure_training_environment(env=env, phase=phase, phase_number=phase_number)
     _report(
         f"refinement configuration COMPLETE learning_rate={phase.learning_rate} "
         f"range_undershoot_min_m={phase.range_undershoot_min_m}; resetting environments"
@@ -1168,6 +1277,8 @@ def _run_new_training(
     device: str,
     controller_artifact: ControllerArtifact,
     controller_digest: str,
+    flight_envelope: FlightEnvelope,
+    flight_envelope_digest: str,
     run_dir: Path,
     attempt_index_offset: int = 0,
 ) -> None:
@@ -1175,10 +1286,10 @@ def _run_new_training(
         raise ValueError("a training worker must own exactly one isolated attempt")
     training_config = config.rl.training
     phases = (
-        _procedural_smoke_phases(phases=tuple(training_config.phases))
+        _procedural_smoke_phases(phases=_campaign_phases(config=config))
         if args.procedural_smoke
         else _capped_phases(
-            phases=tuple(training_config.phases),
+            phases=_campaign_phases(config=config),
             maximum_iterations=args.max_iterations,
         )
     )
@@ -1233,6 +1344,7 @@ def _run_new_training(
                 num_envs=args.num_envs,
                 experiment_config=config,
                 controller_settings=controller_artifact.selected_settings,
+                flight_envelope=flight_envelope,
             )
             runner: Any = None
             evaluate_candidate: Any = None
@@ -1246,12 +1358,11 @@ def _run_new_training(
                         artifact_run_id=run_dir.name,
                         controller_artifact=controller_artifact,
                         controller_digest=controller_digest,
+                        flight_envelope=flight_envelope,
+                        flight_envelope_digest=flight_envelope_digest,
                     )
-                    if metadata["policy_interface"] != rl.PolicyInterface.PRESS_APPROACH.value:
+                    if metadata["policy_interface"] != rl.PolicyInterface.PRESS.value:
                         raise ValueError("campaign requires the press deterministic evaluator")
-                    metadata["initialization"] = {
-                        "method": env_cfg.policy_config.actor.output_initialization
-                    }
                     metadata["training_phases"] = [asdict(phase) for phase in phases]
                     metadata["plateau_criteria"] = asdict(training_config.plateau)
                 _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
@@ -1259,6 +1370,7 @@ def _run_new_training(
                 attempt_fingerprint = _press_comparison_fingerprint(
                     config=config,
                     contract=contract,
+                    flight_envelope_fingerprint=flight_envelope.artifact_fingerprint,
                 )
                 if attempt_fingerprint is None:
                     raise ValueError("press campaign did not produce a comparison fingerprint")
@@ -1270,6 +1382,19 @@ def _run_new_training(
                 _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
                 attempt_metadata = metadata
                 fingerprint = comparison_fingerprint
+                previous_stage = _previous_stage_checkpoint(
+                    config=config,
+                    repo_root=repo_root,
+                    contract=contract,
+                    controller_digest=controller_digest,
+                    flight_envelope_digest=flight_envelope_digest,
+                )
+                metadata["initialization"] = (
+                    {"method": env_cfg.policy_config.actor.output_initialization}
+                    if previous_stage is None
+                    else previous_stage[1]
+                )
+                _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
                 runner = training.build_runner(
                     env=env,
                     training_config=training_config,
@@ -1284,10 +1409,17 @@ def _run_new_training(
                     phase=phases[0],
                     phase_number=1,
                 )
-                training.initialize_actor_output(
-                    runner=runner,
-                    method=env_cfg.policy_config.actor.output_initialization,
-                )
+                if previous_stage is None:
+                    training.initialize_actor_output(
+                        runner=runner,
+                        method=env_cfg.policy_config.actor.output_initialization,
+                    )
+                else:
+                    training.restore_checkpoint(
+                        runner=runner,
+                        checkpoint_path=previous_stage[0],
+                        device=device,
+                    )
                 checkpoints_dir = attempt_dir / "checkpoints"
                 checkpoints_dir.mkdir()
                 initial_checkpoint = checkpoints_dir / "phase_01_model_0.pt"
@@ -1552,7 +1684,11 @@ def _run_new_training(
                             phase=phase,
                             phase_number=phase_index + 1,
                         )
-                        _configure_training_environment(env=env, phase=phase)
+                        _configure_training_environment(
+                            env=env,
+                            phase=phase,
+                            phase_number=phase_index + 1,
+                        )
                         _report(
                             "initial phase configuration COMPLETE "
                             f"learning_rate={phase.learning_rate} "
@@ -1823,10 +1959,10 @@ def _run_isolated_campaign(
 ) -> None:
     training_config = config.rl.training
     phases = (
-        _procedural_smoke_phases(phases=tuple(training_config.phases))
+        _procedural_smoke_phases(phases=_campaign_phases(config=config))
         if args.procedural_smoke
         else _capped_phases(
-            phases=tuple(training_config.phases),
+            phases=_campaign_phases(config=config),
             maximum_iterations=args.max_iterations,
         )
     )
@@ -2106,6 +2242,11 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             config=config,
             repo_root=repo_root,
         )
+        flight_envelope, flight_envelope_digest = _load_training_flight_envelope(
+            config=config,
+            controller_artifact=controller_artifact,
+            repo_root=repo_root,
+        )
         _run_new_training(
             args=args,
             config=config,
@@ -2116,6 +2257,8 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             device="cuda:0" if torch.cuda.is_available() else "cpu",
             controller_artifact=controller_artifact,
             controller_digest=controller_digest,
+            flight_envelope=flight_envelope,
+            flight_envelope_digest=flight_envelope_digest,
             run_dir=run_dir,
             attempt_index_offset=args.attempt_index,
         )

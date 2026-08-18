@@ -36,6 +36,18 @@ fit/publication, and the alignment target-envelope gate.
 
 ## Targets
 
+`make measure-flight-envelope` is an owning campaign rather than part of the
+aggregate integration suite. It invokes the internal
+`test-integration-flight-parameters-sample` target once per configured trial.
+Each invocation uses the ordinary strict PX4/Isaac harness with isolated
+processes and run artifacts, then copies its single ULog beside the raw
+ground-truth pose candidate and bridge log. The host-safe `flight_parameters`
+coordinator decodes that ULog, rejects any trial that does not prove the PX4
+hover mode/control/goal contract, and writes the selected neutral trace and
+verification record. After every configured trial succeeds, it derives and
+validates the immutable hover-envelope bundle and atomically advances its
+relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
+
 - `make test-integration` runs `test-integration-isaac` and
   `test-integration-px4-takeoff`.
 - `make test-integration-all` runs every target in `INTEGRATION_TEST_TARGETS`:

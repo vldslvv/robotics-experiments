@@ -101,6 +101,11 @@ done
 : "${INTEGRATION_VERBOSE:=0}"
 : "${ISAAC_TEST_EXTRA_ARGS:=}"
 : "${ALIGNMENT_CAPTURE_RUN_DIR:=}"
+: "${FLIGHT_PARAMETERS_CONFIG:=}"
+: "${FLIGHT_PARAMETERS_RUN_ID:=}"
+: "${FLIGHT_PARAMETERS_TRIAL_INDEX:=}"
+: "${FLIGHT_PARAMETERS_TRIAL_DIR:=}"
+: "${FLIGHT_PARAMETERS_TRIAL_DIR_CONTAINER:=}"
 : "${PRESS_NAVIGATION_MEASUREMENT_OUTPUT:=}"
 
 # shellcheck source-path=SCRIPTDIR
@@ -307,6 +312,22 @@ cleanup() {
         fi
     fi
 
+    if [ -n "${FLIGHT_PARAMETERS_TRIAL_DIR}" ]; then
+        mapfile -t flight_parameter_ulogs < <(find "${PX4_LOGS}" -type f -name '*.ulg' -print)
+        if [ "${#flight_parameter_ulogs[@]}" -ne 1 ]; then
+            echo "Flight parameter capture expected exactly one ULog, found ${#flight_parameter_ulogs[@]}." >&2
+            status=1
+            timing_status="fail"
+        elif [ ! -d "${FLIGHT_PARAMETERS_TRIAL_DIR}" ]; then
+            echo "Flight parameter capture did not create ${FLIGHT_PARAMETERS_TRIAL_DIR}." >&2
+            status=1
+            timing_status="fail"
+        else
+            cp "${flight_parameter_ulogs[0]}" "${FLIGHT_PARAMETERS_TRIAL_DIR}/flight.ulg"
+            echo "  Flight parameter ULog: ${FLIGHT_PARAMETERS_TRIAL_DIR}/flight.ulg"
+        fi
+    fi
+
     integration_timing "total" "${SCRIPT_START_MS}" "${timing_status}"
     exit "${status}"
 }
@@ -396,6 +417,10 @@ if docker run --rm \
     -e "ALIGNMENT_REFERENCE=${ALIGNMENT_REFERENCE:-}" \
     -e "ALIGNMENT_TARGET=${ALIGNMENT_TARGET:-}" \
     -e "ROBOTICS_ALIGNMENT_RUN_DIR=${ROBOTICS_ALIGNMENT_RUN_DIR:-}" \
+    -e "FLIGHT_PARAMETERS_CONFIG=${FLIGHT_PARAMETERS_CONFIG}" \
+    -e "FLIGHT_PARAMETERS_RUN_ID=${FLIGHT_PARAMETERS_RUN_ID}" \
+    -e "FLIGHT_PARAMETERS_TRIAL_INDEX=${FLIGHT_PARAMETERS_TRIAL_INDEX}" \
+    -e "FLIGHT_PARAMETERS_TRIAL_DIR=${FLIGHT_PARAMETERS_TRIAL_DIR_CONTAINER}" \
     -e "PX4_BENCHMARK_IMAGE=${PX4_IMAGE}" \
     -e "PX4_TEST_CONTAINER_NAME=${PRIMARY_PX4_CONTAINER}" \
     -e "PX4_TEST_LOGS_DIR=${PX4_TEST_LOGS_DIR}" \

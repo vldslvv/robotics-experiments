@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, fields, replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from robotics_experiments.config import (
     PressApproachTerminationConfig,
     PressApproachVelocityReferenceConfig,
 )
+from robotics_experiments.flight_parameters import load_flight_envelope
 from robotics_experiments.rl.press import (
     PressApproachInput,
     PressApproachRewardTerms,
@@ -65,6 +67,9 @@ _TERMINATION = PressApproachTerminationConfig(
     max_vertical_error_m=0.30,
     contact_force_threshold_n=0.25,
 )
+_ENVELOPE = load_flight_envelope(
+    Path(__file__).parents[4] / "fixtures/flight_envelope/flight_envelope.json"
+)
 
 
 def _quat(*, angle_rad: float) -> np.ndarray:
@@ -85,9 +90,14 @@ def _sample(
     pusher_collision: bool = False,
     time_out: bool = False,
 ) -> PressApproachInput[np.ndarray]:
+    relative_quat_xyzw = _quat(angle_rad=attitude_error_rad)
     return PressApproachInput(
         relative_switch_pos_m=np.array([[range_m, lateral_m, vertical_m]]),
-        relative_switch_quat_xyzw=_quat(angle_rad=attitude_error_rad),
+        relative_switch_quat_xyzw=relative_quat_xyzw,
+        position_error_enu_m=np.array(
+            [[_GOAL.velocity_reference.range_center_m - range_m, -lateral_m, -vertical_m]]
+        ),
+        attitude_error_flu_enu_wxyz=relative_quat_xyzw[:, [3, 0, 1, 2]],
         linear_velocity_mps=np.array([[closing_speed_mps, 0.0, 0.0]]),
         angular_velocity_radps=np.array([[angular_speed_radps, 0.0, 0.0]]),
         body_z_world_z=np.array([upright]),
@@ -104,6 +114,9 @@ def _state(*, range_m: float = 0.50) -> PressApproachState[np.ndarray]:
         relative_switch_pos_m=sample.relative_switch_pos_m,
         relative_switch_quat_xyzw=sample.relative_switch_quat_xyzw,
         goal_cfg=_GOAL,
+        flight_envelope=_ENVELOPE,
+        position_error_enu_m=sample.position_error_enu_m,
+        attitude_error_flu_enu_wxyz=sample.attitude_error_flu_enu_wxyz,
     )
 
 
@@ -118,6 +131,9 @@ def _step(
         goal_cfg=_GOAL,
         reward_cfg=_REWARD,
         termination_cfg=_TERMINATION,
+        flight_envelope=_ENVELOPE,
+        hold_steps=100,
+        approach_enabled=True,
     )
 
 
@@ -170,12 +186,12 @@ def test_normalized_pose_error_uses_all_three_strict_pose_tolerances() -> None:
 
 
 def test_approach_rewards_only_position_progress() -> None:
-    state = _state(range_m=0.50)
+    state = _state(range_m=0.70)
     closer = _step(
         state=state,
-        sample=_sample(range_m=0.45, attitude_error_rad=np.deg2rad(20.0)),
+        sample=_sample(range_m=0.60, attitude_error_rad=np.deg2rad(20.0)),
     )
-    farther = _step(state=state, sample=_sample(range_m=0.55))
+    farther = _step(state=state, sample=_sample(range_m=0.80))
     assert closer.rewards.position_progress[0] > 0.0
     assert farther.rewards.position_progress[0] < 0.0
     assert closer.rewards.stabilization[0] == 0.0
@@ -186,11 +202,10 @@ def test_position_ready_stage_rewards_stabilization_quality() -> None:
     moving = _step(sample=_sample(range_m=0.41, closing_speed_mps=0.015))
     tilted = _step(sample=_sample(range_m=0.41, attitude_error_rad=np.deg2rad(0.5)))
     captured = _step(sample=_sample(range_m=0.43))
-    outside = _step(sample=_sample(range_m=0.45))
+    outside = _step(sample=_sample(range_m=0.52))
     assert settled.rewards.stabilization[0] == pytest.approx(1.0)
-    expected_single_half_error = 1.0 / (1.0 + np.sqrt(0.2 * 0.5**2))
-    assert moving.rewards.stabilization[0] == pytest.approx(expected_single_half_error)
-    assert tilted.rewards.stabilization[0] == pytest.approx(expected_single_half_error)
+    assert moving.rewards.stabilization[0] == settled.rewards.stabilization[0]
+    assert 0.0 < tilted.rewards.stabilization[0] < settled.rewards.stabilization[0]
     assert 0.0 < captured.rewards.stabilization[0] < settled.rewards.stabilization[0]
     assert outside.rewards.stabilization[0] == 0.0
     assert settled.rewards.position_progress[0] == 0.0
@@ -271,6 +286,9 @@ def test_reset_replaces_only_selected_environment() -> None:
         relative_switch_pos_m=np.array([[0.48, 0.0, 0.0]]),
         relative_switch_quat_xyzw=_quat(angle_rad=0.0),
         goal_cfg=_GOAL,
+        flight_envelope=_ENVELOPE,
+        position_error_enu_m=np.array([[-0.07, 0.0, 0.0]]),
+        attitude_error_flu_enu_wxyz=np.array([[1.0, 0.0, 0.0, 0.0]]),
     )
     assert reset.normalized_position_error[0] == 1.0
     assert reset.normalized_pose_error[0] == 1.0
@@ -306,6 +324,9 @@ def test_numpy_and_torch_transitions_match() -> None:
         goal_cfg=_GOAL,
         reward_cfg=_REWARD,
         termination_cfg=_TERMINATION,
+        flight_envelope=_ENVELOPE,
+        hold_steps=100,
+        approach_enabled=True,
     )
     for field in fields(PressApproachRewardTerms):
         np.testing.assert_allclose(

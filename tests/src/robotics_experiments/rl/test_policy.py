@@ -13,6 +13,7 @@ import pytest
 
 from robotics_experiments.commanding import PolicyInput
 from robotics_experiments.controller import ControllerArtifact, ControllerSettings
+from robotics_experiments.flight_parameters import FlightEnvelope, load_flight_envelope
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     METADATA_FILENAME,
@@ -97,6 +98,10 @@ def _controller_settings() -> ControllerSettings:
     )
 
 
+def _flight_envelope() -> FlightEnvelope:
+    return load_flight_envelope(REPO_ROOT / "tests/fixtures/flight_envelope")
+
+
 def _controller_artifact() -> ControllerArtifact:
     settings = _controller_settings()
     return ControllerArtifact(
@@ -118,6 +123,7 @@ def _controller_artifact() -> ControllerArtifact:
         command_rate_hz=20.0,
         certified_control_modes=("velocity", "ctbr"),
         probe_suite_fingerprint="probes",
+        flight_envelope_fingerprint=_flight_envelope().artifact_fingerprint,
         selected_settings=settings,
         settings_fingerprint=hashlib.sha256(
             json.dumps(
@@ -148,11 +154,13 @@ def _metadata(
         action_cfg=action_cfg,
         controller_artifact=_controller_artifact(),
         controller_digest="digest",
+        flight_envelope=_flight_envelope(),
+        flight_envelope_digest="envelope-digest",
         obs_schema_version=1,
         obs_dim=obs_dim,
         policy_rate_hz=rate_hz,
         policy_interface=interface,
-        curriculum_stage=("approach" if interface is PolicyInterface.PRESS_APPROACH else None),
+        curriculum_stage=("approach" if interface is PolicyInterface.PRESS else None),
     )
 
 
@@ -225,6 +233,15 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
         load_policy_metadata(artifact_dir=tmp_path)
 
 
+def test_policy_rejects_flight_envelope_not_qualified_by_controller(tmp_path: Path) -> None:
+    metadata = _metadata()
+    metadata["controller"]["artifact"]["flight_envelope_fingerprint"] = "other-envelope"
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+
+    with pytest.raises(ValueError, match="does not match its controller"):
+        load_policy_metadata(artifact_dir=tmp_path)
+
+
 def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
     from robotics_experiments.commanding import VelocitySetpoint
     from robotics_experiments.px4_bridge import VehicleState
@@ -258,7 +275,7 @@ def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
 def test_load_policy_carries_metadata_contract_and_accepts_batches(tmp_path: Path) -> None:
     artifact = _write_torch_artifact(
         tmp_path,
-        _metadata(interface=PolicyInterface.PRESS_APPROACH),
+        _metadata(interface=PolicyInterface.PRESS),
     )
 
     loaded = load_policy(artifact_dir=artifact)
@@ -287,10 +304,16 @@ def test_metadata_rejects_every_legacy_artifact(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="controller"):
         load_policy_metadata(artifact_dir=tmp_path)
 
-    legacy_press = _metadata(interface=PolicyInterface.PRESS_APPROACH)
+    legacy_press = _metadata(interface=PolicyInterface.PRESS)
     legacy_press.pop("controller")
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_press))
     with pytest.raises(ValueError, match="controller"):
+        load_policy_metadata(artifact_dir=tmp_path)
+
+    legacy_envelope = _metadata()
+    legacy_envelope.pop("flight_envelope")
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_envelope))
+    with pytest.raises(ValueError, match="flight_envelope"):
         load_policy_metadata(artifact_dir=tmp_path)
 
 
@@ -303,7 +326,7 @@ def test_press_metadata_requires_known_curriculum_stage(
     stage: str | None,
     message: str,
 ) -> None:
-    metadata = _metadata(interface=PolicyInterface.PRESS_APPROACH)
+    metadata = _metadata(interface=PolicyInterface.PRESS)
     if stage is None:
         metadata.pop("curriculum_stage")
     else:
@@ -333,7 +356,7 @@ def _preflight_config(*, artifacts: list[Path], action_cfg=None, policy_rate_hz=
         rl=SimpleNamespace(
             action=_action_cfg(max_body_velocity_mps=99.0) if action_cfg is None else action_cfg,
             policy_rate_hz=policy_rate_hz,
-            press=SimpleNamespace(curriculum_stage="approach"),
+            press=SimpleNamespace(curriculum=SimpleNamespace(active_stage="approach")),
         ),
         driver=SimpleNamespace(control_rate_hz=50.0),
     )
@@ -345,14 +368,14 @@ def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Pat
     old_run.mkdir(parents=True)
     _write_metadata_artifact(
         old_run,
-        _metadata(interface=PolicyInterface.PRESS_APPROACH),
+        _metadata(interface=PolicyInterface.PRESS),
     )
     latest_run = policy_root / "latest-run"
     latest_run.mkdir()
     _write_metadata_artifact(
         latest_run,
         _metadata(
-            interface=PolicyInterface.PRESS_APPROACH,
+            interface=PolicyInterface.PRESS,
             action_cfg=_action_cfg(max_body_velocity_mps=0.5),
             rate_hz=17.0,
         ),
@@ -377,7 +400,7 @@ def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> 
         artifact.mkdir()
         _write_metadata_artifact(
             artifact,
-            _metadata(interface=PolicyInterface.PRESS_APPROACH, rate_hz=rate_hz),
+            _metadata(interface=PolicyInterface.PRESS, rate_hz=rate_hz),
         )
         artifacts.append(artifact)
 
@@ -423,6 +446,8 @@ def test_hover_adapter_requires_hold_duration() -> None:
             controller_run_id="test-run",
             controller_digest="digest",
             controller_comparison_fingerprint="comparison",
+            flight_envelope=_flight_envelope(),
+            flight_envelope_digest="envelope-digest",
             values={},
         ),
         inference=lambda observation: np.zeros(4),
@@ -442,7 +467,7 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
     loaded = LoadedPolicy(
         metadata=PolicyMetadata(
             contract=PolicyContract(
-                policy_interface=PolicyInterface.PRESS_APPROACH,
+                policy_interface=PolicyInterface.PRESS,
                 obs_schema_version=1,
                 obs_dim=34,
                 policy_rate_hz=20.0,
@@ -458,6 +483,8 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
             controller_run_id="test-run",
             controller_digest="digest",
             controller_comparison_fingerprint="comparison",
+            flight_envelope=_flight_envelope(),
+            flight_envelope_digest="envelope-digest",
             values={},
         ),
         inference=lambda observation: inference_calls.append(observation) or np.ones(4),  # type: ignore[func-returns-value]  # concise call recording
@@ -493,7 +520,7 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
     loaded = LoadedPolicy(
         metadata=PolicyMetadata(
             contract=PolicyContract(
-                policy_interface=PolicyInterface.PRESS_APPROACH,
+                policy_interface=PolicyInterface.PRESS,
                 obs_schema_version=1,
                 obs_dim=34,
                 policy_rate_hz=20.0,
@@ -509,6 +536,8 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
             controller_run_id="test-run",
             controller_digest="digest",
             controller_comparison_fingerprint="comparison",
+            flight_envelope=_flight_envelope(),
+            flight_envelope_digest="envelope-digest",
             values={},
         ),
         inference=lambda _observation: np.array([1.2, -0.5, 0.25, -0.1]),
@@ -566,7 +595,7 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
         "right_mps": 0.25,
         "yaw_rate_radps": 0.15000000000000002,
     }
-    assert diagnostic["stable_goal_count"] == 0
+    assert diagnostic["stable_goal_count"] == 1
     assert diagnostic["contact"] is False
     assert diagnostic["complete"] is False
 
@@ -580,6 +609,11 @@ def test_current_press_artifact_preflights_when_available() -> None:
     metadata = json.loads((artifact / METADATA_FILENAME).read_text())
     if metadata.get("artifact_kind") != "robotics-experiments-policy":
         with pytest.raises(ValueError, match="policy-v1"):
+            validate_policy_artifact(artifact_dir=artifact)
+        return
+    controller = metadata.get("controller", {}).get("artifact", {})
+    if "flight_envelope_fingerprint" not in controller or "flight_envelope" not in metadata:
+        with pytest.raises(ValueError, match="flight_envelope|fields mismatch"):
             validate_policy_artifact(artifact_dir=artifact)
         return
     validated = _preflight_policy_artifacts(

@@ -241,61 +241,81 @@ def _validate_alignment(experiment: ExperimentConfig) -> None:
         raise ValueError("alignment.execution.gpu_sample_interval_s must be finite and positive")
 
 
+def _validate_training_phases(*, phases, path: str, range_limit_m: float) -> None:
+    if not phases:
+        raise ValueError(f"{path} must contain at least one phase")
+    for index, phase in enumerate(phases):
+        phase_path = f"{path}[{index}]"
+        if phase.max_iterations <= 0 or phase.evaluation_interval <= 0:
+            raise ValueError(
+                f"{phase_path} max_iterations and evaluation_interval must be positive"
+            )
+        if phase.evaluation_interval > phase.max_iterations:
+            raise ValueError(f"{phase_path}.evaluation_interval must not exceed max_iterations")
+        if not math.isfinite(phase.learning_rate) or phase.learning_rate <= 0.0:
+            raise ValueError(f"{phase_path}.learning_rate must be finite and positive")
+        if phase.schedule not in {"fixed", "adaptive"}:
+            raise ValueError(f"{phase_path}.schedule must be 'fixed' or 'adaptive'")
+        if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
+            raise ValueError(f"{phase_path}.entropy_coef must be finite and non-negative")
+        if phase.range_undershoot_min_m is not None and (
+            not math.isfinite(phase.range_undershoot_min_m)
+            or not 0.0 < phase.range_undershoot_min_m <= range_limit_m
+        ):
+            raise ValueError(
+                f"{phase_path}.range_undershoot_min_m must be positive and no greater "
+                f"than {range_limit_m}"
+            )
+
+
+def _validate_plateau(*, plateau, path: str) -> None:
+    if not plateau.metric_name.strip():
+        raise ValueError(f"{path}.metric_name must be non-empty")
+    if plateau.direction not in {"minimize", "maximize"}:
+        raise ValueError(f"{path}.direction must be 'minimize' or 'maximize'")
+    if not math.isfinite(plateau.minimum_delta) or plateau.minimum_delta <= 0.0:
+        raise ValueError(f"{path}.minimum_delta must be finite and positive")
+    if plateau.patience_evaluations <= 0:
+        raise ValueError(f"{path}.patience_evaluations must be positive")
+
+
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     training = experiment.rl.training
     if not training.controller_artifact.strip():
         raise ValueError("rl.training.controller_artifact must be non-empty")
-    if not training.phases:
-        raise ValueError("rl.training.phases must contain at least one phase")
+    if not training.flight_envelope_artifact.strip():
+        raise ValueError("rl.training.flight_envelope_artifact must be non-empty")
     attempt_seeds = tuple(training.attempt_seeds)
     if not attempt_seeds or len(set(attempt_seeds)) != len(attempt_seeds):
         raise ValueError("rl.training.attempt_seeds must be nonempty and unique")
-    for index, phase in enumerate(training.phases):
-        path = f"rl.training.phases[{index}]"
-        if phase.max_iterations <= 0 or phase.evaluation_interval <= 0:
-            raise ValueError(f"{path} max_iterations and evaluation_interval must be positive")
-        if phase.evaluation_interval > phase.max_iterations:
-            raise ValueError(f"{path}.evaluation_interval must not exceed max_iterations")
-        if not math.isfinite(phase.learning_rate) or phase.learning_rate <= 0.0:
-            raise ValueError(f"{path}.learning_rate must be finite and positive")
-        if phase.schedule not in {"fixed", "adaptive"}:
-            raise ValueError(f"{path}.schedule must be 'fixed' or 'adaptive'")
-        if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
-            raise ValueError(f"{path}.entropy_coef must be finite and non-negative")
-        if phase.range_undershoot_min_m is not None and (
-            not math.isfinite(phase.range_undershoot_min_m)
-            or not 0.0 < phase.range_undershoot_min_m <= experiment.rl.press.goal.range_min_m
-        ):
+    if training.task_id == "Isaac-Switch-Press-Direct-v1":
+        stage = experiment.rl.press.selected_stage()
+        phases = stage.phases
+        plateau = training.plateau
+        range_limit_m = experiment.rl.press.goal.range_min_m
+        if training.policy_name != f"press-{stage.name}":
+            raise ValueError("press policy_name must match the active ordered stage")
+        if experiment.rl.episode_length_s != stage.episode_length_s:
             raise ValueError(
-                f"{path}.range_undershoot_min_m must be positive and no greater than "
-                "rl.press.goal.range_min_m when configured"
+                "rl.episode_length_s must match the active press curriculum episode_length_s"
             )
-    configured_undershoot_limits = tuple(
-        phase.range_undershoot_min_m
-        for phase in training.phases
-        if phase.range_undershoot_min_m is not None
+    else:
+        phases = training.phases
+        plateau = training.plateau
+        range_limit_m = math.inf
+    _validate_training_phases(
+        phases=phases,
+        path="rl.press.curriculum active stage phases"
+        if training.task_id == "Isaac-Switch-Press-Direct-v1"
+        else "rl.training.phases",
+        range_limit_m=range_limit_m,
     )
-    if configured_undershoot_limits:
-        if len(configured_undershoot_limits) != len(training.phases):
-            raise ValueError(
-                "rl.training.phases must configure range_undershoot_min_m consistently"
-            )
-        if configured_undershoot_limits != tuple(sorted(configured_undershoot_limits)):
-            raise ValueError("rl.training.phases range_undershoot_min_m must be nondecreasing")
-        if configured_undershoot_limits[-1] != experiment.rl.press.goal.range_min_m:
-            raise ValueError(
-                "rl.training.phases final range_undershoot_min_m must equal "
-                "rl.press.goal.range_min_m"
-            )
-    plateau = training.plateau
-    if not plateau.metric_name.strip():
-        raise ValueError("rl.training.plateau.metric_name must be non-empty")
-    if plateau.direction not in {"minimize", "maximize"}:
-        raise ValueError("rl.training.plateau.direction must be 'minimize' or 'maximize'")
-    if not math.isfinite(plateau.minimum_delta) or plateau.minimum_delta <= 0.0:
-        raise ValueError("rl.training.plateau.minimum_delta must be finite and positive")
-    if plateau.patience_evaluations <= 0:
-        raise ValueError("rl.training.plateau.patience_evaluations must be positive")
+    _validate_plateau(
+        plateau=plateau,
+        path="rl.press.curriculum active stage plateau"
+        if training.task_id == "Isaac-Switch-Press-Direct-v1"
+        else "rl.training.plateau",
+    )
     if (
         not math.isfinite(training.evaluation_worker_timeout_s)
         or training.evaluation_worker_timeout_s <= 0.0
@@ -338,12 +358,15 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
             )
 
 
-def _validate_press_approach(experiment: ExperimentConfig) -> None:
+def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
     press = experiment.rl.press
-    if press.curriculum_stage != "approach":
-        raise ValueError(
-            f"unknown rl.press.curriculum_stage={press.curriculum_stage!r}; " "expected 'approach'"
-        )
+    stage = press.selected_stage()
+    if len(stage.training_hold_s) != len(stage.phases):
+        raise ValueError("active press stage must provide one hold duration per training phase")
+    if not math.isclose(
+        sum(source.weight for source in stage.reset_mix), 1.0, rel_tol=0.0, abs_tol=1.0e-9
+    ):
+        raise ValueError("active press stage reset weights must sum to one")
     handoff = press.handoff
     if not (
         math.isfinite(handoff.switch_range_min_m)
@@ -444,10 +467,10 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.press.goal range bounds must be positive and ordered")
     if (
         not math.isfinite(press.termination.range_undershoot_min_m)
-        or press.termination.range_undershoot_min_m != goal.range_min_m
+        or press.termination.range_undershoot_min_m >= goal.range_min_m
     ):
         raise ValueError(
-            "rl.press.termination.range_undershoot_min_m must equal rl.press.goal.range_min_m"
+            "press stage termination.range_undershoot_min_m must be below goal.range_min_m"
         )
     reference = goal.velocity_reference
     if not goal.range_min_m <= reference.range_center_m <= goal.range_max_m:
@@ -483,12 +506,6 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
             raise ValueError(f"rl.press.goal.{name} must be finite and positive")
     if goal.stable_steps <= 0:
         raise ValueError("rl.press.goal.stable_steps must be positive")
-
-    if handoff.switch_range_min_m <= goal.range_max_m:
-        raise ValueError(
-            "rl.press.handoff.switch_range_min_m must exceed rl.press.goal.range_max_m"
-        )
-
     for field in fields(press.reward):
         name = field.name
         value = getattr(press.reward, name)
@@ -505,20 +522,18 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.press.evaluation.validation_seeds must be nonempty and unique")
     if len(test_seeds) != 3 or len(set(test_seeds)) != len(test_seeds):
         raise ValueError("rl.press.evaluation.test_seeds must contain exactly three unique seeds")
+    seed_groups = (
+        set(experiment.rl.training.attempt_seeds),
+        set(validation_seeds),
+        set(test_seeds),
+    )
+    overlaps = (
+        left & right for index, left in enumerate(seed_groups) for right in seed_groups[index + 1 :]
+    )
+    if any(overlaps):
+        raise ValueError("rl training, validation, and test seeds must be mutually disjoint")
     if evaluation.episodes_per_seed != 100:
         raise ValueError("rl.press.evaluation.episodes_per_seed must equal 100")
-    seed_groups = {
-        "training": set(experiment.rl.training.attempt_seeds),
-        "validation": set(validation_seeds),
-        "test": set(test_seeds),
-    }
-    for left, right in (("training", "validation"), ("training", "test"), ("validation", "test")):
-        overlap = seed_groups[left] & seed_groups[right]
-        if overlap:
-            raise ValueError(
-                f"rl training, validation, and test seeds must be mutually disjoint; "
-                f"{left}/{right} overlap={sorted(overlap)}"
-            )
     for name, value in {
         "success_rate_min": evaluation.success_rate_min,
         "collision_rate_max": evaluation.collision_rate_max,
@@ -685,6 +700,6 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     _validate_rates(experiment)
     _validate_alignment(experiment)
     _validate_rl_policies(experiment)
-    _validate_press_approach(experiment)
+    _validate_press_curriculum(experiment)
     _validate_switches(experiment)
     return _freeze_config_graph(experiment)

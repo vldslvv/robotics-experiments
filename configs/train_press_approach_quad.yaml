@@ -3,52 +3,26 @@ defaults:
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - _self_
 
-# Stage 1 contact-free approach training selection.
+# Terminal-approach curriculum stage. It restores the accepted hover learner.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
   num_envs: 32768
-  episode_length_s: 15.0
+  episode_length_s: 45.0
   action:
     max_body_velocity_mps: 0.5
   press:
+    curriculum:
+      active_stage: approach
     policy:
       actor:
         initial_noise_std: 0.03
-    goal:
-      velocity_reference:
-        range_center_m: 0.415
-        wall_normal_max_mps: 0.04
   training:
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
     policy_name: press-approach
-    # Each attempt starts from scratch. Refinement phases restore the
-    # attempt-wide validation-selected checkpoint before changing curriculum.
-    phases:
-      - max_iterations: 50
-        evaluation_interval: 10
-        learning_rate: 1.0e-4
-        schedule: fixed
-        entropy_coef: 0.0
-        range_undershoot_min_m: 0.38
-      - max_iterations: 30
-        evaluation_interval: 5
-        learning_rate: 3.0e-5
-        schedule: fixed
-        entropy_coef: 0.0
-        range_undershoot_min_m: 0.39
-      - max_iterations: 100
-        evaluation_interval: 5
-        learning_rate: 1.0e-5
-        schedule: fixed
-        entropy_coef: 0.0
-        range_undershoot_min_m: 0.40
     plateau:
       metric_name: mean_normalized_pose_error
-      direction: minimize
-      minimum_delta: 0.003
-      patience_evaluations: 10
     evaluation_worker_timeout_s: 600.0
     telemetry_sample_interval_s: 1.0
     gpu_utilization_target_rate: 0.95

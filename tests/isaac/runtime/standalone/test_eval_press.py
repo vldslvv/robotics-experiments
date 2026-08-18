@@ -18,7 +18,7 @@ def _contract():
     from robotics_experiments.rl import PolicyContract, PolicyInterface
 
     return PolicyContract(
-        policy_interface=PolicyInterface.PRESS_APPROACH,
+        policy_interface=PolicyInterface.PRESS,
         obs_schema_version=1,
         obs_dim=34,
         policy_rate_hz=20.0,
@@ -288,6 +288,7 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         seeds=(202,),
         episodes_per_seed=2,
         goal_config=_goal(),
+        hold_steps=100,
         report=reports.append,
         trace_worst_episode=True,
     )
@@ -307,9 +308,11 @@ def _config():
     return SimpleNamespace(
         rl=SimpleNamespace(
             training=SimpleNamespace(task_id="press-task"),
+            policy_rate_hz=20.0,
             press=SimpleNamespace(
-                curriculum_stage="approach",
+                selected_stage=lambda: SimpleNamespace(name="approach", hold_s=5.0),
                 goal=_goal(),
+                termination=SimpleNamespace(range_undershoot_min_m=0.40),
                 evaluation=SimpleNamespace(
                     validation_seeds=(101, 202, 303),
                     test_seeds=(404, 505, 606),
@@ -366,7 +369,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
         return env, SimpleNamespace(
             observation_schema_version=1,
             observation_space=34,
-            policy_interface="press-approach",
+            policy_interface="press",
         )
 
     monkeypatch.setattr(
@@ -424,6 +427,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
+            flight_envelope=object(),
             values={
                 "selected_checkpoint_iteration": 10,
                 "selected_policy_digest": digest,
@@ -470,7 +474,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
             SimpleNamespace(
                 observation_schema_version=1,
                 observation_space=34,
-                policy_interface="press-approach",
+                policy_interface="press",
             ),
         ),
     )
@@ -480,6 +484,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
+            flight_envelope=object(),
             values={"selected_checkpoint_iteration": 10},
         ),
     )

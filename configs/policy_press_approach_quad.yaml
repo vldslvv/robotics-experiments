@@ -4,7 +4,7 @@ defaults:
   - override experiment/routine@vehicles.x500_01.routine: policy_press_approach
   - _self_
 
-# Single-drone Stage 1 approach deployment flight in the real warehouse.
+# Single-drone terminal-approach deployment flight in the real warehouse.
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 switches:

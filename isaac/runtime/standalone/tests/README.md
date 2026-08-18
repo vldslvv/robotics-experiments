@@ -38,6 +38,17 @@ ends with the probe policy and lets teardown stop the ephemeral simulator;
 landing and auto-disarm are outside this controller target. It is not a
 press-policy scenario and adds no commanding routine kind.
 
+`flight_parameters_capture.py` is the isolated hover-evidence leaf owned by
+`make measure-flight-envelope`. Each fresh PX4/Isaac invocation uses the
+ordinary arm, takeoff, and hover routine and records a long raw simulator
+ground-truth pose candidate at the configured cadence. It does not infer hover
+from the routine cursor or kinematics. The host coordinator decodes the
+corresponding completed PX4 ULog inside `flight_parameters`, proves the PX4
+mode/control/goal contract, and only then selects the settled measurement
+window. The raw trace, ULog, verification record, selected trace, and bridge
+log remain together as trial evidence. Envelope derivation and publication
+remain in the host-safe `robotics_experiments.flight_parameters` module.
+
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
 gate, invoked by `make test-integration-press-contact-chain` with one
 environment. It spawns the real paired switch/lamp, orients the switch into the

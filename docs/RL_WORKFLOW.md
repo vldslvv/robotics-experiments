@@ -19,9 +19,14 @@ lazy `robotics_experiments.workflows.isaac_lab` package.
 
 RL never imports alignment. Before Isaac Lab is constructed, training loads a
 quality-passing schema-1 controller artifact and validates its vehicle, airframe,
-cadence, certified control mode, and four-dimensional action contract. Policy metadata embeds the complete
-controller record and its digest. Evaluation and deployment reuse that embedded
-record; they never resolve a newer alignment implicitly.
+cadence, certified control mode, and four-dimensional action contract. It also
+loads the task-neutral schema-1 flight envelope, validates its complete bundle,
+vehicle and PX4 SITL source, and requires its fingerprint to match the
+controller's hover qualification. Policy metadata embeds the complete
+controller and flight-envelope records with their digests. Evaluation and
+deployment reuse those embedded records; they never resolve newer alignment or
+flight-parameter publications implicitly. The collection and envelope contract
+is defined in `docs/FLIGHT_PARAMETERS.md`.
 
 The registered tasks are `Isaac-Drone-Hover-Direct-v1` and
 `Isaac-Switch-Press-Direct-v1`. Both use the normalized controller seam. The
@@ -50,9 +55,9 @@ independent 50 Hz OFFBOARD stream, using the attitude at each transmission. The
 world command is held across the faster controller and physics substeps,
 matching deployment through PX4's body-NED MAVLink receiver.
 
-## Press approach task
+## Press policy curriculum
 
-The `press-approach` policy consumes the schema-1 34-value observation and
+The press policy consumes the schema-1 34-value observation and
 emits four normalized velocity actions. The observation contains relative switch
 pose, vehicle motion and attitude, pusher state, contact and lamp state, previous
 action, handoff mode, estimator health, and availability bits. Training and
@@ -61,34 +66,37 @@ translation action to 0.5 m/s. Normalized scratch exploration starts at 0.03
 standard deviation, or 0.015 m/s for a
 translation component at the task scale.
 
-The current stage learns a contact-free approach and stable hover within
-0.40-0.42 m of the switch, not switch activation. Success requires 100
-consecutive 20 Hz samples (five continuous seconds) satisfying:
+`rl.press.curriculum.stages` is an ordered list. A training config selects one
+entry by name; there are no parent or child links. The first entry starts from
+scratch. A later entry restores the complete accepted checkpoint published as
+`best` by the entry immediately before it. Each entry owns its reset
+mixture, hold schedule, episode duration, and PPO phases. The current order is
+`hover`, then `approach`.
 
-- combined lateral/vertical error <= 0.01 m;
-- full switch-relative quaternion geodesic error <= 1 degree;
-- linear speed <= 0.03 m/s;
-- angular speed <= 0.05 rad/s;
-- no pusher or body collision.
+The hover stage starts around the common 0.48 m press target using only poses
+sampled from the pinned flight-parameter artifact. Its training phases require
+5, 15, then 30 continuous seconds inside that measured envelope. The approach
+stage adds measured navigation-handoff resets while retaining target-local
+envelope resets. Both remain parts of the press task; neither activates the
+switch yet.
 
-The reset distribution is the deployable handoff envelope: its range and
-combined lateral/vertical position bounds cover the measured production
-waypoint-and-settle arrivals plus the configured margins, together with low
-translational/angular speed, fresh valid pose, no contact, and healthy
-estimation. Every training and held-out reset samples the complete position
-envelope and a volume-uniform axis-angle rotation ball bounded by the measured
-rotation envelope. The same Hydra handoff
-bounds drive Lab reset and live actor entry, so new scratch training is never
-initialized with less pose variation than production navigation. Training,
-validation, and test all use this complete distribution.
+Success uses only the measured position and pose bounds: asymmetric ENU axis
+bounds, horizontal and 3D position bounds, roll/pitch/yaw bounds, tilt, and full
+orientation error. Speed is observable and may contribute diagnostic cost, but
+it is not part of the hover acceptance predicate. Contact or another flight
+failure still terminates the episode. Training resolves the envelope bundle
+once and policy metadata pins its exact fingerprint and digest, so a later
+`latest` measurement cannot change an active campaign.
 
 The accepted 2026-08-12 schema-2 production campaign recorded ten successful
 arrivals: switch range 0.464594-0.498991 m, maximum combined lateral/vertical
 error 0.033746 m, and maximum full relative-attitude error 0.016339 rad
 (0.93616 degree). With the explicit 0.005 m position and 0.25 degree rotation
-margins, the authored shared handoff/reset envelope retains its 0.44-0.52 m
-range and 0.08 m alignment disk and uses a 0.020702 rad (1.18616 degree)
-rotation ball. The accepted sample summary is
+margins, that evidence requires 0.44-0.52 m range, a 0.08 m alignment disk, and
+a 0.020702 rad (1.18616 degree) rotation ball. The current handoff gate extends
+the range maximum to 0.67 m for the nominal 0.60 m waypoint route; its accepted
+measurement must replace the older route evidence before approach training.
+The accepted prior-route sample summary is
 `benchmarks/press_navigation_handoff/waypoint_settle_20260812.json`.
 
 Refresh the navigation evidence after changes to the GPS/IMU sensor models,
@@ -121,14 +129,16 @@ Isaac process, environment, actor, critic, runner, and optimizer. The campaign
 coordinator never owns a training environment: a completed worker exits before
 the next seed starts, making simulator and GPU cleanup an operating-system
 process boundary. The default seeds are 42, 43, and 44; the campaign stops after
-the first completed attempt with a validation-passing checkpoint. External
-checkpoint initialization, process resume, actor-only copy, and post-run
-fine-tuning remain unsupported.
+the first completed attempt with a validation-passing checkpoint. Apart from
+the preceding ordered press stage, external checkpoint initialization, process
+resume, actor-only copy, and post-run fine-tuning remain unsupported.
 
-Hydra `rl.training.phases` defines an ordered schedule within each attempt. Each
+The selected `rl.press.curriculum.stages[].phases` entry defines the ordered
+schedule within each press attempt; task-neutral training continues to use
+`rl.training.phases`. Each
 phase declares maximum iterations, validation cadence, learning rate, schedule,
-entropy coefficient, and the training-only recovery boundary. The first phase starts from
-the new scratch actor. Before every later phase, the campaign restores the
+entropy coefficient, and the training-only recovery boundary. The first phase
+starts from the stage-initial learner. Before every later phase, the campaign restores the
 attempt-wide best checkpoint's actor, critic, optimizer, and learner iteration,
 then applies the new phase settings and resets every training environment. This
 is a validation-selected fine-tuning branch with reset environment state, not an
@@ -144,28 +154,27 @@ from the phase reference, and declares a plateau after 10 consecutive stale
 evaluations. Raw aggregate task cost remains diagnostic and cannot select a
 timeout-heavy checkpoint over demonstrated pose progress.
 
-Training and held-out evaluation use a 15-second episode horizon so the actor
-can approach and then satisfy the five-second dwell. The press configuration
-runs:
+Hover training uses a 40-second episode horizon; approach uses 45 seconds. Both
+press stages run:
 
 1. 50 iterations at `1e-4`, fixed schedule and zero entropy, with recovery
-   permitted down to 0.38 m;
+   with the 0.40 m safety boundary;
 2. 30 iterations at `3e-5`, fixed schedule and zero entropy, with recovery
-   permitted down to 0.39 m;
+   with the 0.40 m safety boundary;
 3. 100 iterations at `1e-5`, fixed schedule and zero entropy, with the strict
    0.40 m undershoot boundary.
 
 The broad phase evaluates every ten updates and both refinement phases evaluate
 every five. Model zero and every cadence-aligned phase boundary are evaluated;
-there is no extra boundary update. Every phase uses the strict 100-sample goal
-and the complete handoff reset envelope. The campaign totals 180 attempted PPO
-updates. Training advances after a phase reaches its maximum or the same plateau
-rule fires.
+there is no extra boundary update. Hover expands the continuous measured-envelope
+hold from 5 to 15 to 30 seconds. Approach uses the complete 30-second hold in
+every phase. The campaign totals 180 attempted PPO updates. Training advances
+after a phase reaches its maximum or the same plateau rule fires.
 
 Run training with:
 
 ```bash
-make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml
+make train-rl HYDRA_CONFIG=configs/train_press_hover_quad.yaml
 ```
 
 The GPU procedural gate keeps every phase/restore boundary, performs one update
@@ -173,7 +182,7 @@ per phase on every configured attempt seed, and deliberately stops before
 reserved test seeds are used:
 
 ```bash
-make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml \
+make train-rl HYDRA_CONFIG=configs/train_press_hover_quad.yaml \
   TRAIN_ARGS=--procedural-smoke
 ```
 
@@ -182,12 +191,12 @@ attempt, including full attempt teardown/recreation, and stops without using
 the reserved test seeds.
 
 Use the campaign-scoped TensorBoard log directory under
-`.build/training/press-approach/<run-id>/logs`. Each attempt is exactly one
+`.build/training/press-hover/<run-id>/logs`. Each attempt is exactly one
 TensorBoard run containing its `train/`, `val/`, and `system/` metrics; the
 selected attempt also receives `test/`. The standard monitor is:
 
 ```bash
-make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-approach/<run-id>/logs
+make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-hover/<run-id>/logs
 ```
 
 and is served at `http://127.0.0.1:6006` by default. The training wrapper prints
@@ -231,18 +240,13 @@ sampler failure terminates at the interval boundary with evidence preserved.
 The configured `0.95` GPU-utilization target is diagnostic: a miss is recorded
 as the measured bottleneck and never changes policy qualification.
 
-The press-approach PPO reward has five signed contributions split across two
-episode-level stages. The stage is derived from the current physical sample,
-not hidden policy state: outside a fixed 0.03 m radius around the target
-position, `position_progress` is ten times the
-decrease in the RMS-normalized range and alignment error. Inside that envelope,
-`stabilization` is `1 / (1 + error)`, where error is the RMS of normalized
-range, alignment, full quaternion-geodesic attitude, linear-speed, and
-angular-speed error. Leaving the position envelope returns directly to
-approach. This gives
-the policy an explicit position objective before asking it to hold position,
-pose, and motion. `strict_hold` is one on every complete strict-goal sample.
-`terminal_outcome` is +150 on 100-sample success and -300 on every unsuccessful
+The press PPO reward has five signed contributions. In the approach stage,
+`position_progress` rewards reduction in target error until the measured
+position envelope is reached; the hover stage disables this term.
+`stabilization` is `1 / (1 + utilization)` inside the measured position bounds,
+where utilization is the larger of exact position and attitude envelope
+utilization. `strict_hold` is one on every complete envelope-passing sample.
+`terminal_outcome` is +150 on the selected stage's hold success and -300 on every unsuccessful
 termination, including timeout. The first monitored scratch campaign showed
 range undershoot as the dominant early flight failure, so the one added factor,
 `predictive_barrier`, penalizes squared projected undershoot of the strict range
@@ -255,9 +259,9 @@ Contact remains a binding predicate without a separate PPO shaping term.
 Training metrics use semantic groups without numeric prefixes:
 `train/reward/`, `train/outcome/`, `train/goal/`, `train/state/`,
 `train/optimization/`, `train/performance/`, and `train/schedule/`.
-`train/schedule/recovery_boundary_m` advances from 0.38 m through 0.39 m to the
-strict 0.40 m limit. Goal pass rates and dwell fractions always refer to the
-strict goal. Validation and test use matching `outcome/`, `goal/`, `state/`,
+`train/schedule/recovery_boundary_m` records the stage's configured safety
+boundary. Envelope pass rate, utilization, and dwell fractions refer to the
+pinned measured envelope. Validation and test use matching `outcome/`, `goal/`, `state/`,
 `trace/`, and `cost/` subgroups. Hardware telemetry is under `system/`.
 
 ## Validation, final test, artifact, and acceptance
@@ -307,7 +311,7 @@ After selection, the exported actor is immutable. A new uncached worker runs the
 disjoint final workload: 100 episodes for each of seeds 404, 505, and 606. The
 resulting raw `PolicyEvaluation` is the sole input to
 `evaluate_press_acceptance`. Every gate is independently binding: finite traces,
-at least 0.95 success, at most 0.01 collision, at least 0.40 m minimum closest
+at least 0.95 success, zero collision, at least 0.40 m minimum closest
 range, and exactly zero other flight failures. Test data cannot affect training,
 phase advancement, checkpoint selection, or retries. A test failure ends the
 command immediately and preserves evidence without publishing.
@@ -315,9 +319,10 @@ command immediately and preserves evidence without publishing.
 A policy artifact is exactly `policy.pt` plus `policy_meta.json`. Metadata uses
 the strict schema-1 `robotics-experiments-policy` contract and records policy
 interface, observation/action contracts, cadence, controller artifact and
-digest, comparison fingerprint, source commit, dirty state, and training phase
-provenance. Older policy schemas and policies without complete controller
-provenance are unsupported.
+digest, flight-envelope artifact and digest, comparison fingerprint, source
+commit, dirty state, and training phase provenance. Older policy schemas and
+policies without complete controller and flight-envelope provenance are
+unsupported.
 
 On acceptance, publication copies the already-tested actor bytes and verifies
 their digest. Metadata and the report record both workloads, selected and tested

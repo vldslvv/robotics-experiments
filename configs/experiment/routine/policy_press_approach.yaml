@@ -1,7 +1,7 @@
 defaults:
   - default
 
-# Stop at a safe staging point before the short move to the 0.47 m actor-entry
+# Stop at a safe staging point before the short move to the 0.60 m actor-entry
 # target. The final completion radius covers the measured PX4 waypoint error;
 # the policy handoff and training reset cover the measured post-settle position
 # distribution. The long navigation leg must not use the handoff point as its
@@ -18,7 +18,7 @@ steps:
     hold_s: 2.0
   - kind: goto
     x: 0.0
-    y: 17.40
+    y: 17.24
     z: 2.5
     ground_speed_m_s: 0.5
     position_tol_m: 0.05
@@ -27,7 +27,7 @@ steps:
     hold_s: 2.0
   - kind: goto
     x: 0.0
-    y: 17.52
+    y: 17.39
     z: 2.5
     ground_speed_m_s: 0.08
     position_tol_m: 0.06
@@ -40,7 +40,7 @@ steps:
     # acceptance claim; inspect the originating campaign report when needed.
     artifact: .build/training/press-approach/latest
     switch_index: 0
-    timeout_s: 20.0
+    timeout_s: 45.0
   - kind: goto
     x: 0.0
     y: 14.0

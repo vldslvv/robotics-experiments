@@ -374,17 +374,17 @@ def _prepare_policy_observer(
         (policy.switch_index, policy.metadata.contract)
         for policy in preflight.policies
         if policy.vehicle_label == spawned.label
-        and policy.metadata.contract.policy_interface is PolicyInterface.PRESS_APPROACH
+        and policy.metadata.contract.policy_interface is PolicyInterface.PRESS
     ]
     if not press_descriptors:
         return spawned
     indices = {switch_index for switch_index, _contract in press_descriptors}
     if len(indices) != 1 or next(iter(indices)) < 0:
-        raise ValueError("press-approach policy steps require one shared non-negative switch_index")
+        raise ValueError("press policy steps require one shared non-negative switch_index")
     switch_index = next(iter(indices))
     if switch_index >= state.config.switches.num_switches:
         raise ValueError(
-            f"press-approach switch_index={switch_index} is outside "
+            f"press switch_index={switch_index} is outside "
             f"num_switches={state.config.switches.num_switches}"
         )
     reset = state.config.rl.press.reset

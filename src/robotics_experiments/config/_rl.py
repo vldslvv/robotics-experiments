@@ -14,6 +14,9 @@ __all__ = [
     "PressApproachVelocityReferenceConfig",
     "PressHandoffConfig",
     "PressNavigationNoiseConfig",
+    "PressCurriculumConfig",
+    "PressCurriculumResetSourceConfig",
+    "PressCurriculumStageConfig",
     "PressResetConfig",
     "PressTaskConfig",
     "RlConfig",
@@ -310,6 +313,34 @@ class RlTrainingPhaseConfig(_FreezableConfig):
 
 
 @dataclass
+class PressCurriculumResetSourceConfig(_FreezableConfig):
+    """One typed reset source in a press curriculum-stage mixture."""
+
+    source: str
+    weight: float
+
+
+@dataclass
+class PressCurriculumStageConfig(_FreezableConfig):
+    """The task distribution and training schedule for one ordered press stage."""
+
+    name: str
+    reset_mix: List[PressCurriculumResetSourceConfig]
+    hold_s: float
+    training_hold_s: List[float]
+    episode_length_s: float
+    phases: List[RlTrainingPhaseConfig]
+
+
+@dataclass
+class PressCurriculumConfig(_FreezableConfig):
+    """A linear, validation-gated press-policy curriculum."""
+
+    active_stage: str
+    stages: List[PressCurriculumStageConfig]
+
+
+@dataclass
 class RlTrainingConfig(_FreezableConfig):
     """PPO training hyperparameters + task selection for ``make train-rl``.
 
@@ -323,6 +354,8 @@ class RlTrainingConfig(_FreezableConfig):
             ``latest`` symlink.
         controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
+        flight_envelope_artifact: Flight-envelope bundle or publication link
+            resolved and matched to the controller artifact before training.
         phases: Ordered curriculum phases executed by each fresh attempt.
         telemetry_sample_interval_s: Diagnostic hardware sampling cadence.
         gpu_utilization_target_rate: Diagnostic GPU-utilization target in [0, 1].
@@ -342,6 +375,7 @@ class RlTrainingConfig(_FreezableConfig):
     vehicle_id: int
     policy_name: str
     controller_artifact: str
+    flight_envelope_artifact: str
     phases: List[RlTrainingPhaseConfig]
     plateau: RlPlateauCriteriaConfig
     evaluation_worker_timeout_s: float
@@ -364,19 +398,19 @@ class PressTaskConfig(_FreezableConfig):
     """Named press curriculum-stage config.
 
     Attributes:
-        curriculum_stage: Required stage name written to artifacts.
+        curriculum: Ordered typed stages and the stage selected by this config.
         policy: Task-owned actor/critic topology.
         handoff: Thresholds for the nav -> policy handoff gate.
         navigation_noise: Measured final-waypoint position variation that the
             handoff and training-reset envelope must cover.
-        goal: Stable approach target and dense velocity reference.
-        reward: Approach-stage reward weights.
+        goal: Shared target pose and velocity reference.
+        reward: Shared reward weights; the stage decides which terms apply.
         reset: Physical scene and initial-state ranges.
-        termination: Contact and flight-envelope failure conditions.
-        evaluation: Deterministic approach workload and acceptance targets.
+        termination: Shared safety termination conditions.
+        evaluation: Shared deterministic workload and acceptance thresholds.
     """
 
-    curriculum_stage: str
+    curriculum: PressCurriculumConfig
     policy: RlPolicyConfig
     handoff: PressHandoffConfig
     navigation_noise: PressNavigationNoiseConfig
@@ -385,6 +419,18 @@ class PressTaskConfig(_FreezableConfig):
     reset: PressResetConfig
     termination: PressApproachTerminationConfig
     evaluation: PressApproachEvaluationConfig
+
+    def selected_stage(self) -> PressCurriculumStageConfig:
+        """Return the configured stage after loader validation."""
+
+        matches = [
+            stage for stage in self.curriculum.stages if stage.name == self.curriculum.active_stage
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "rl.press.curriculum.active_stage must select exactly one ordered stage"
+            )
+        return matches[0]
 
 
 @dataclass

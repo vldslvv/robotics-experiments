@@ -3,6 +3,7 @@ controller_id: px4-sitl-x500-v1
 controller_schema_version: 1
 backend: px4-sitl
 experiment_config: configs/alignment_px4_x500_velocity.yaml
+flight_envelope_artifact: .build/flight-envelopes/holybro-x500-v2-hover-v1/latest
 vehicle: x500_01
 airframe: holybro_x500_v2.usda
 image: vv-px4-sitl
@@ -219,6 +220,11 @@ probe_families:
           - {velocity_body_flu_mps: [0.0, -0.6, 0.3], yaw_rate_radps: -0.5, duration_s: 1.0}
           - {velocity_body_flu_mps: [-0.5, 0.0, -0.25], yaw_rate_radps: 0.0, duration_s: 1.0}
           - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: stability-hover-pose
+        split: stability
+        axis: combined
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 30.0}
   - name: ctbr
     control_mode: ctbr
     metric: ctbr-controller-quality

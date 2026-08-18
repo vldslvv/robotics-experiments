@@ -331,6 +331,7 @@ def _evaluate_seed(
     seed: int,
     episode_count: int,
     goal_config: PressApproachGoalConfig,
+    hold_steps: int,
     report: Callable[[str], None],
     trace_worst_episode: bool,
 ) -> tuple[tuple[PressApproachEpisodeMetrics, ...], dict[str, tuple[float, int]]]:
@@ -543,7 +544,7 @@ def _evaluate_seed(
                 normalized_pose_error_sum[index].item() / trajectory_sample_count[index].item()
             ),
             max_stable_goal_fraction=(
-                float(maximum_stable_goal_steps[index].item()) / float(goal_config.stable_steps)
+                float(maximum_stable_goal_steps[index].item()) / float(hold_steps)
             ),
             closest_range_m=float(closest_range[index].item()),
             completion_time_s=(
@@ -604,6 +605,7 @@ def evaluate_press_approach_policy(
     seeds: tuple[int, ...],
     episodes_per_seed: int,
     goal_config: PressApproachGoalConfig,
+    hold_steps: int,
     report: Callable[[str], None],
     trace_worst_episode: bool,
 ) -> PressApproachEvaluationResult:
@@ -617,6 +619,7 @@ def evaluate_press_approach_policy(
             seed=seed,
             episode_count=episodes_per_seed,
             goal_config=goal_config,
+            hold_steps=hold_steps,
             report=report,
             trace_worst_episode=trace_worst_episode,
         )

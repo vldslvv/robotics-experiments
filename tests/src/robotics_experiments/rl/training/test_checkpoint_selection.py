@@ -105,7 +105,7 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     contract = PolicyContract(
-        policy_interface=PolicyInterface.PRESS_APPROACH,
+        policy_interface=PolicyInterface.PRESS,
         obs_schema_version=1,
         obs_dim=34,
         policy_rate_hz=20.0,
@@ -117,14 +117,25 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         hover_thrust_normalized=0.57,
         curriculum_stage="approach",
     )
-    fingerprint = _press_comparison_fingerprint(config=config, contract=contract)
+    fingerprint = _press_comparison_fingerprint(
+        config=config,
+        contract=contract,
+        flight_envelope_fingerprint="envelope-a",
+    )
     assert fingerprint == _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, max_body_velocity_mps=3.0),
+        flight_envelope_fingerprint="envelope-a",
     )
     assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, obs_dim=35),
+        flight_envelope_fingerprint="envelope-a",
+    )
+    assert fingerprint != _press_comparison_fingerprint(
+        config=config,
+        contract=contract,
+        flight_envelope_fingerprint="envelope-b",
     )
 
 
@@ -160,7 +171,12 @@ def test_acceptance_is_separate_from_evaluation_cost() -> None:
     from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
-    evaluation = _scored(min_closest_range_m=0.399)
+    evaluation = _scored(
+        collision_rate=0.0,
+        body_collision_rate=0.0,
+        pusher_collision_rate=0.0,
+        min_closest_range_m=0.399,
+    )
     assert evaluation.metric("held_out_task_cost") >= 0.0
     acceptance = evaluate_press_acceptance(
         evaluation=evaluation,

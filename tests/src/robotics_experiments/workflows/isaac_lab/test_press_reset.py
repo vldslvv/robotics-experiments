@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import torch
 
+from robotics_experiments.flight_parameters import load_flight_envelope
+from robotics_experiments.rl import evaluate_flight_envelope
 from robotics_experiments.rl.press import HandoffGate, quaternion_geodesic_error_rad
 from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
+    _hover_pose_from_unit_samples,
     _press_entry_state_from_unit_samples,
 )
 
@@ -22,6 +27,9 @@ _GATE = HandoffGate(
     relative_attitude_error_max_rad=0.10,
     body_z_alignment_min=0.965926,
     estimator_health_min=0.80,
+)
+_ENVELOPE = load_flight_envelope(
+    Path(__file__).parents[4] / "fixtures/flight_envelope/flight_envelope.json"
 )
 
 
@@ -54,6 +62,20 @@ def test_press_entry_reset_is_deterministic_and_covers_shared_gate() -> None:
 def test_press_entry_reset_rejects_wrong_sample_width() -> None:
     with pytest.raises(ValueError, match=r"shape \(count, 12\)"):
         _press_entry_state_from_unit_samples(unit_samples=torch.zeros((1, 13)), gate=_GATE)
+
+
+def test_hover_reset_samples_stay_inside_measured_envelope() -> None:
+    unit_samples = torch.rand((10_000, 6), generator=torch.Generator().manual_seed(42))
+    position_error, attitude_error = _hover_pose_from_unit_samples(
+        unit_samples=unit_samples,
+        envelope=_ENVELOPE,
+    )
+    evaluation = evaluate_flight_envelope(
+        envelope=_ENVELOPE,
+        position_error_enu_m=position_error,
+        attitude_error_flu_enu_wxyz=attitude_error,
+    )
+    assert torch.all(evaluation.inside)
 
 
 def test_rotation_sampling_is_volume_uniform() -> None:

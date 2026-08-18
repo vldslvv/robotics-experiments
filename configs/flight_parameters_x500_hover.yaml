@@ -1,0 +1,20 @@
+defaults:
+  - base
+  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - override experiment/routine@vehicles.x500_01.routine: flight_parameters_hover
+  - _self_
+
+# Task-neutral open scene: no switch, wall, or policy geometry participates in
+# the measured pose envelope.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
+sim:
+  enhanced_determinism: true
+
+vehicles:
+  x500_01:
+    id: 0
+    ros: {namespace: /x500_01}
+    spawn: {position_xy: [0.0, 0.0]}
+    px4:
+      logging_profile: 17

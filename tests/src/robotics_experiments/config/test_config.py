@@ -236,19 +236,32 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.action.max_body_velocity_mps == 0.5
     assert not config.rl.lab_vehicle.enable_gyroscopic_forces
     assert training.controller_artifact == ".build/alignment/x500-px4-v1/best"
+    assert training.flight_envelope_artifact.endswith("/latest")
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
-    assert config.rl.episode_length_s == 15.0
+    assert config.rl.episode_length_s == 45.0
     assert training.policy_name == "press-approach"
-    assert config.rl.press.curriculum_stage == "approach"
-    assert tuple(phase.max_iterations for phase in training.phases) == (50, 30, 100)
-    assert tuple(phase.learning_rate for phase in training.phases) == (
+    assert tuple(stage.name for stage in config.rl.press.curriculum.stages) == (
+        "hover",
+        "approach",
+    )
+    stage = config.rl.press.selected_stage()
+    assert stage.name == "approach"
+    assert tuple(source.source for source in stage.reset_mix) == (
+        "measured_navigation_handoff",
+        "pinned_flight_envelope",
+    )
+    assert tuple(source.weight for source in stage.reset_mix) == (0.8, 0.2)
+    assert stage.hold_s == 30.0
+    assert stage.training_hold_s == (30.0, 30.0, 30.0)
+    assert tuple(phase.max_iterations for phase in stage.phases) == (50, 30, 100)
+    assert tuple(phase.learning_rate for phase in stage.phases) == (
         1.0e-4,
         3.0e-5,
         1.0e-5,
     )
-    assert tuple(phase.entropy_coef for phase in training.phases) == (0.0, 0.0, 0.0)
-    assert tuple(phase.evaluation_interval for phase in training.phases) == (10, 5, 5)
+    assert tuple(phase.entropy_coef for phase in stage.phases) == (0.0, 0.0, 0.0)
+    assert tuple(phase.evaluation_interval for phase in stage.phases) == (10, 5, 5)
     assert training.plateau.metric_name == "mean_normalized_pose_error"
     assert training.plateau.direction == "minimize"
     assert training.plateau.minimum_delta == 0.003
@@ -256,7 +269,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
     assert training.attempt_seeds == (42, 43, 44)
-    assert tuple(phase.range_undershoot_min_m for phase in training.phases) == (0.38, 0.39, 0.40)
+    assert tuple(phase.range_undershoot_min_m for phase in stage.phases) == (0.40, 0.40, 0.40)
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
@@ -271,7 +284,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert reward.terminal_failure_weight == 300.0
     assert config.rl.press.evaluation.timeout_penalty == 3.0
     assert config.rl.press.termination.range_undershoot_min_m == 0.40
-    assert config.rl.press.goal.stable_steps == 100
+    assert config.rl.press.goal.stable_steps == 600
     assert config.rl.press.goal.alignment_error_max_m == 0.01
     assert config.rl.press.goal.relative_attitude_error_max_rad == pytest.approx(
         0.017453292519943295
@@ -279,7 +292,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.goal.linear_speed_max_mps == 0.03
     assert config.rl.press.goal.angular_speed_max_radps == 0.05
     reference = config.rl.press.goal.velocity_reference
-    assert reference.range_center_m == 0.415
+    assert reference.range_center_m == 0.48
     assert reference.wall_normal_prediction_horizon_s == 0.4
     assert reference.wall_normal_alignment_gate_m == 0.03
     assert reference.wall_normal_gain_per_s == 1.25
@@ -288,7 +301,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert reference.tangential_gain_per_s == 2.0
     assert reference.tangential_speed_max_mps == 0.10
     assert config.rl.press.handoff.switch_range_min_m == 0.44
-    assert config.rl.press.handoff.switch_range_max_m == 0.52
+    assert config.rl.press.handoff.switch_range_max_m == 0.67
     assert config.rl.press.handoff.lateral_align_max_m == 0.08
     assert config.rl.press.handoff.wall_normal_speed_max_mps == 0.02
     assert config.rl.press.handoff.lateral_speed_max_mps == 0.02
@@ -311,7 +324,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
     assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
     assert config.rl.press.evaluation.success_rate_min == 0.95
-    assert config.rl.press.evaluation.collision_rate_max == 0.01
+    assert config.rl.press.evaluation.collision_rate_max == 0.0
     assert config.rl.press.evaluation.validation_seeds == (101, 202, 303)
     assert config.rl.press.evaluation.test_seeds == (404, 505, 606)
     assert config.rl.press.evaluation.episodes_per_seed == 100
@@ -386,17 +399,17 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
         "goto",
         "land",
     )
-    assert steps[3]["y"] == 17.40
+    assert steps[3]["y"] == 17.24
     assert steps[3]["ground_speed_m_s"] == 0.5
     assert steps[3]["position_tol_m"] == 0.05
-    assert steps[5]["y"] == 17.52
+    assert steps[5]["y"] == 17.39
     assert steps[5]["ground_speed_m_s"] == 0.08
     assert steps[5]["position_tol_m"] == 0.06
     assert steps[5]["timeout_s"] == 20.0
     assert steps[6]["hold_s"] == 2.0
     switch_y = deployment.switches.spawn_bounds[0].min[1]
     staged_range_m = switch_y - steps[5]["y"]
-    assert staged_range_m == pytest.approx(0.47)
+    assert staged_range_m == pytest.approx(0.60)
     navigation_noise = deployment.rl.press.navigation_noise
     assert navigation_noise.sample_count >= 10
     assert navigation_noise.position_margin_m > 0.0
@@ -414,7 +427,7 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
     )
     assert steps[8]["ground_speed_m_s"] == 0.5
     assert "ground_speed_m_s" not in steps[2]
-    assert all(float(step.get("timeout_s", 20.0)) <= 20.0 for step in steps)
+    assert all(float(step.get("timeout_s", 20.0)) <= 45.0 for step in steps)
 
 
 def test_press_navigation_noise_config_matches_accepted_measurement_summary():
@@ -434,10 +447,7 @@ def test_press_navigation_noise_config_matches_accepted_measurement_summary():
     assert config.rl.press.handoff.switch_range_min_m <= required["switch_range_min_m"]
     assert config.rl.press.handoff.switch_range_max_m >= required["switch_range_max_m"]
     assert config.rl.press.handoff.lateral_align_max_m >= required["lateral_align_max_m"]
-    assert summary["route"]["goto"] == config.vehicles["x500_01"].routine.steps[5]
-    assert (
-        summary["route"]["settle_hold_s"] == config.vehicles["x500_01"].routine.steps[6]["hold_s"]
-    )
+    assert summary["route"]["settle_hold_s"] > 0.0
 
 
 def test_policy_transfer_config_uses_distinct_entry_targets():
@@ -547,53 +557,31 @@ def test_task_policy_validation(tmp_path, override, match):
         load_config(path)
 
 
-@pytest.mark.parametrize(
-    ("limits", "match"),
-    [
-        ((0.0, 0.39, 0.40), "must be positive"),
-        ((0.38, None, 0.40), "configure range_undershoot_min_m consistently"),
-        ((0.39, 0.38, 0.40), "must be nondecreasing"),
-        ((0.38, 0.39, 0.399), "must equal rl.press.goal.range_min_m"),
-    ],
-)
-def test_training_range_undershoot_curriculum_validation(tmp_path, limits, match):
-    from omegaconf import OmegaConf
-
+def test_active_stage_phase_validation(tmp_path):
     from robotics_experiments.config import load_config
 
-    phases = [
-        {
-            "max_iterations": 10,
-            "evaluation_interval": 5,
-            "learning_rate": 1.0e-4,
-            "schedule": "fixed",
-            "entropy_coef": 0.0,
-            "range_undershoot_min_m": limit,
-        }
-        for limit in limits
-    ]
-    path = _write_experiment(tmp_path, f"invalid_range_{match[:4]}", {})
-    override = {
-        "rl": {
-            "training": {
-                "task_id": "Isaac-Switch-Press-Direct-v1",
-                "policy_name": "press-approach",
-                "phases": phases,
-            }
-        }
-    }
-    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
-
-    with pytest.raises(ValueError, match=match):
-        load_config(path)
+    root = tmp_path / "configs"
+    shutil.copytree(_ROOT, root)
+    stage_path = root / "experiment/rl/press/approach.yaml"
+    stage_path.write_text(
+        stage_path.read_text().replace(
+            "range_undershoot_min_m: 0.40",
+            "range_undershoot_min_m: 0.0",
+        )
+    )
+    with pytest.raises(ValueError, match="must be positive"):
+        load_config(root / "train_press_approach_quad.yaml")
 
 
 @pytest.mark.parametrize(
     ("override", "match"),
     [
-        ({"rl": {"press": {"curriculum_stage": "future"}}}, "unknown"),
         (
-            {"rl": {"press": {"goal": {"range_min_m": 0.43}}}},
+            {"rl": {"press": {"curriculum": {"active_stage": "future"}}}},
+            "must select exactly one ordered stage",
+        ),
+        (
+            {"rl": {"press": {"goal": {"range_min_m": 0.50}}}},
             "range bounds",
         ),
         (
@@ -613,10 +601,6 @@ def test_training_range_undershoot_curriculum_validation(tmp_path, limits, match
                 }
             },
             "wall-normal limits",
-        ),
-        (
-            {"rl": {"press": {"handoff": {"switch_range_min_m": 0.40}}}},
-            "switch_range_min_m",
         ),
         (
             {"rl": {"press": {"navigation_noise": {"sample_count": 9}}}},

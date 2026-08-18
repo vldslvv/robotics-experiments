@@ -1,11 +1,66 @@
 defaults:
   - base_press_task
 
-curriculum_stage: approach
+# Stage order is the learner lineage. The first stage starts from scratch and
+# every later stage continues from the accepted checkpoint immediately before it.
+curriculum:
+  active_stage: hover
+  stages:
+    - name: hover
+      reset_mix:
+        - source: pinned_flight_envelope
+          weight: 1.0
+      hold_s: 30.0
+      training_hold_s: [5.0, 15.0, 30.0]
+      episode_length_s: 40.0
+      phases:
+        - max_iterations: 50
+          evaluation_interval: 10
+          learning_rate: 1.0e-4
+          schedule: fixed
+          entropy_coef: 0.0
+          range_undershoot_min_m: 0.40
+        - max_iterations: 30
+          evaluation_interval: 5
+          learning_rate: 3.0e-5
+          schedule: fixed
+          entropy_coef: 0.0
+          range_undershoot_min_m: 0.40
+        - max_iterations: 100
+          evaluation_interval: 5
+          learning_rate: 1.0e-5
+          schedule: fixed
+          entropy_coef: 0.0
+          range_undershoot_min_m: 0.40
+    - name: approach
+      reset_mix:
+        - source: measured_navigation_handoff
+          weight: 0.8
+        - source: pinned_flight_envelope
+          weight: 0.2
+      hold_s: 30.0
+      training_hold_s: [30.0, 30.0, 30.0]
+      episode_length_s: 45.0
+      phases:
+        - max_iterations: 50
+          evaluation_interval: 10
+          learning_rate: 1.0e-4
+          schedule: fixed
+          entropy_coef: 0.0
+          range_undershoot_min_m: 0.40
+        - max_iterations: 30
+          evaluation_interval: 5
+          learning_rate: 3.0e-5
+          schedule: fixed
+          entropy_coef: 0.0
+          range_undershoot_min_m: 0.40
+        - max_iterations: 100
+          evaluation_interval: 5
+          learning_rate: 1.0e-5
+          schedule: fixed
+          entropy_coef: 0.0
+          range_undershoot_min_m: 0.40
 
-# Press task-owned ActorCritic topology. The actor maps the 34-value
-# schema-v1 observation to a four-value normalized action mean; the critic maps
-# the same observation to one value estimate.
 policy:
   activation: elu
   actor:
@@ -15,12 +70,13 @@ policy:
   critic:
     hidden_dims: [256, 256, 128]
 
-# Shared actor-entry envelope for Lab reset and live policy handoff.
+# This broad gate continues to cover the accepted 0.47 m route while the new
+# nominal 0.60 m route is measured. The accepted measurement will replace it.
 handoff:
   pose_confidence_min: 0.85
   pose_age_max_s: 0.1
   switch_range_min_m: 0.44
-  switch_range_max_m: 0.52
+  switch_range_max_m: 0.67
   lateral_align_max_m: 0.08
   wall_normal_speed_max_mps: 0.02
   lateral_speed_max_mps: 0.02
@@ -29,10 +85,6 @@ handoff:
   body_z_alignment_min: 0.965926
   estimator_health_min: 0.80
 
-# Accepted measurement of the exact production waypoint -> settle -> policy
-# route. The shared handoff envelope is also the Lab reset distribution, and
-# config validation requires it to cover these observed position bounds plus
-# the explicit margin. Refresh this profile when navigation sensors change.
 navigation_noise:
   source: benchmarks/press_navigation_handoff/waypoint_settle_20260812.json
   sample_count: 10
@@ -43,29 +95,27 @@ navigation_noise:
   lateral_align_max_m: 0.03374635443902746
   relative_attitude_error_max_rad: 0.01633899543191001
 
-# Stage 1 stable, contact-free approach goal and evaluation velocity reference.
+# The target is common to hover and approach. Acceptance replaces these legacy
+# pose tolerances with the pinned flight envelope; the center remains task-owned.
 goal:
-  range_min_m: 0.40
-  range_max_m: 0.42
+  range_min_m: 0.47
+  range_max_m: 0.49
   alignment_error_max_m: 0.01
   relative_attitude_error_max_rad: 0.017453292519943295
   linear_speed_max_mps: 0.03
   angular_speed_max_radps: 0.05
   body_z_alignment_min: 0.965926
-  stable_steps: 100
+  stable_steps: 600
   velocity_reference:
-    range_center_m: 0.41
+    range_center_m: 0.48
     wall_normal_prediction_horizon_s: 0.4
     wall_normal_alignment_gate_m: 0.03
     wall_normal_gain_per_s: 1.25
     wall_normal_min_mps: -0.04
-    wall_normal_max_mps: 0.08
+    wall_normal_max_mps: 0.04
     tangential_gain_per_s: 2.0
     tangential_speed_max_mps: 0.10
 
-# The reward follows the task sequence: position progress outside the fixed
-# capture radius, then bounded stabilization credit inside it. Final hold and
-# success remain strict 1x-goal predicates.
 reward:
   stabilization_capture_radius_m: 0.03
   position_progress_weight: 10.0
@@ -76,8 +126,6 @@ reward:
   terminal_failure_weight: 300.0
 
 reset:
-  # The policy-transfer experiment overrides this to false so the production
-  # actor can fly against a virtual switch pose without wall/button interaction.
   physical_contact_enabled: true
   button_geometry_scale: 1.5
   button_stiffness_scale: 0.5
@@ -101,7 +149,7 @@ evaluation:
   test_seeds: [404, 505, 606]
   episodes_per_seed: 100
   success_rate_min: 0.95
-  collision_rate_max: 0.01
+  collision_rate_max: 0.0
   collision_penalty: 4.0
   flight_failure_penalty: 3.0
   timeout_penalty: 3.0

@@ -38,14 +38,15 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         press_policy_evaluation,
     )
 
+    stage = config.rl.press.selected_stage()
     evaluation = config.rl.press.evaluation
     seeds = tuple(int(seed) for seed in evaluation.test_seeds)
     metadata = validate_policy_artifact(artifact_dir=artifact_dir)
     contract = metadata.contract
-    if contract.curriculum_stage != config.rl.press.curriculum_stage:
+    if contract.curriculum_stage != stage.name:
         raise ValueError(
             f"press artifact stage {contract.curriculum_stage!r} does not match "
-            f"configured stage {config.rl.press.curriculum_stage!r}"
+            f"configured stage {stage.name!r}"
         )
     env, env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
@@ -54,6 +55,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         seed=seeds[0],
         num_envs=evaluation.episodes_per_seed,
         policy_contract=contract,
+        flight_envelope=metadata.flight_envelope,
     )
     try:
         if (
@@ -74,6 +76,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
             seeds=seeds,
             episodes_per_seed=evaluation.episodes_per_seed,
             goal_config=config.rl.press.goal,
+            hold_steps=round(stage.hold_s * config.rl.policy_rate_hz),
             report=_report,
             trace_worst_episode=True,
         )
@@ -130,7 +133,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     acceptance = evaluate_press_acceptance(
         evaluation=evaluated,
         evaluation_config=evaluation,
-        minimum_range_m=config.rl.press.goal.range_min_m,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
     )
     if not acceptance.passed:
         raise AssertionError("press acceptance failed: " + ", ".join(acceptance.reasons))
@@ -145,7 +148,8 @@ def _resolve_artifact_dir(
 ) -> Path:
     if explicit_artifact_dir is not None:
         return explicit_artifact_dir
-    policy_root = _repo_root() / ".build" / "training" / config.rl.training.policy_name
+    stage_name = config.rl.press.selected_stage().name
+    policy_root = _repo_root() / ".build" / "training" / f"press-{stage_name}"
     run_id = os.environ.get(_RUN_ID_ENV)
     return policy_root / run_id if run_id else policy_root / "latest"
 

@@ -15,6 +15,11 @@ from robotics_experiments.config import (
     PressApproachTerminationConfig,
     PressApproachVelocityReferenceConfig,
 )
+from robotics_experiments.flight_parameters import FlightEnvelope
+from robotics_experiments.rl.flight_envelope import (
+    FlightEnvelopeEvaluation,
+    evaluate_flight_envelope,
+)
 
 __all__ = [
     "PressApproachInput",
@@ -60,6 +65,8 @@ class PressApproachInput(Generic[ArrayT]):
 
     relative_switch_pos_m: ArrayT
     relative_switch_quat_xyzw: ArrayT
+    position_error_enu_m: ArrayT
+    attitude_error_flu_enu_wxyz: ArrayT
     linear_velocity_mps: ArrayT
     angular_velocity_radps: ArrayT
     body_z_world_z: ArrayT
@@ -131,6 +138,7 @@ class PressApproachResult(Generic[ArrayT]):
     angular_speed_radps: ArrayT
     contact_clear: ArrayT
     strict_goal: ArrayT
+    envelope: FlightEnvelopeEvaluation[ArrayT]
 
 
 def _where(condition: ArrayT, yes: ArrayT | Scalar, no: ArrayT | Scalar) -> ArrayT:
@@ -201,16 +209,22 @@ def initial_press_approach_state(
     relative_switch_pos_m: ArrayT,
     relative_switch_quat_xyzw: ArrayT,
     goal_cfg: PressApproachGoalConfig,
+    flight_envelope: FlightEnvelope,
+    position_error_enu_m: ArrayT,
+    attitude_error_flu_enu_wxyz: ArrayT,
 ) -> PressApproachState[ArrayT]:
     """Create zero progress matching a NumPy or torch batch."""
     normalized_position_error = _press_approach_position_reward_error(
         relative_switch_pos_m=relative_switch_pos_m,
         goal_cfg=goal_cfg,
     )
-    normalized_pose_error = press_approach_pose_error(
-        relative_switch_pos_m=relative_switch_pos_m,
-        relative_switch_quat_xyzw=relative_switch_quat_xyzw,
-        goal_cfg=goal_cfg,
+    envelope = evaluate_flight_envelope(
+        envelope=flight_envelope,
+        position_error_enu_m=position_error_enu_m,
+        attitude_error_flu_enu_wxyz=attitude_error_flu_enu_wxyz,
+    )
+    normalized_pose_error = _pairwise_maximum(
+        envelope.position_utilization, envelope.attitude_utilization
     )
     return PressApproachState(
         normalized_position_error=normalized_position_error,
@@ -227,12 +241,18 @@ def reset_press_approach_state(
     relative_switch_pos_m: ArrayT,
     relative_switch_quat_xyzw: ArrayT,
     goal_cfg: PressApproachGoalConfig,
+    flight_envelope: FlightEnvelope,
+    position_error_enu_m: ArrayT,
+    attitude_error_flu_enu_wxyz: ArrayT,
 ) -> PressApproachState[ArrayT]:
     """Return ``state`` with only the selected environments reset."""
     fresh = initial_press_approach_state(
         relative_switch_pos_m=relative_switch_pos_m,
         relative_switch_quat_xyzw=relative_switch_quat_xyzw,
         goal_cfg=goal_cfg,
+        flight_envelope=flight_envelope,
+        position_error_enu_m=position_error_enu_m,
+        attitude_error_flu_enu_wxyz=attitude_error_flu_enu_wxyz,
     )
 
     def replaced(current: ArrayT, replacement: ArrayT) -> ArrayT:
@@ -385,6 +405,9 @@ def step_press_approach(
     goal_cfg: PressApproachGoalConfig,
     reward_cfg: PressApproachRewardConfig,
     termination_cfg: PressApproachTerminationConfig,
+    flight_envelope: FlightEnvelope,
+    hold_steps: int,
+    approach_enabled: bool,
 ) -> PressApproachResult[ArrayT]:
     """Advance the stable, contact-free approach objective exactly once."""
     current_range = sample.relative_switch_pos_m[..., 0]
@@ -394,32 +417,23 @@ def step_press_approach(
     )
     linear_speed = _norm(sample.linear_velocity_mps)
     angular_speed = _norm(sample.angular_velocity_radps)
-    normalized_pose_error = press_approach_pose_error(
-        relative_switch_pos_m=sample.relative_switch_pos_m,
-        relative_switch_quat_xyzw=sample.relative_switch_quat_xyzw,
-        goal_cfg=goal_cfg,
+    envelope_evaluation = evaluate_flight_envelope(
+        envelope=flight_envelope,
+        position_error_enu_m=sample.position_error_enu_m,
+        attitude_error_flu_enu_wxyz=sample.attitude_error_flu_enu_wxyz,
+    )
+    normalized_pose_error = _pairwise_maximum(
+        envelope_evaluation.position_utilization,
+        envelope_evaluation.attitude_utilization,
     )
     normalized_position_error = _press_approach_position_reward_error(
         relative_switch_pos_m=sample.relative_switch_pos_m,
         goal_cfg=goal_cfg,
     )
-    normalized_range_error, normalized_alignment_error = _press_approach_position_components(
-        relative_switch_pos_m=sample.relative_switch_pos_m,
-        goal_cfg=goal_cfg,
-    )
-    range_center = 0.5 * (goal_cfg.range_min_m + goal_cfg.range_max_m)
-    position_ready = (
-        _sqrt(_square(current_range - range_center) + _square(alignment_error))
-        <= reward_cfg.stabilization_capture_radius_m
-    )
+    position_ready = envelope_evaluation.position_utilization <= 1.0
 
-    stable_goal = press_approach_goal_satisfied(
-        relative_switch_pos_m=sample.relative_switch_pos_m,
-        relative_switch_quat_xyzw=sample.relative_switch_quat_xyzw,
-        linear_velocity_mps=sample.linear_velocity_mps,
-        angular_velocity_radps=sample.angular_velocity_radps,
-        contact_flag=sample.pusher_collision_flag | sample.body_collision_flag,
-        goal_cfg=goal_cfg,
+    stable_goal = envelope_evaluation.inside & ~(
+        sample.pusher_collision_flag | sample.body_collision_flag
     )
     stable_goal_steps = _where(
         stable_goal,
@@ -439,7 +453,7 @@ def step_press_approach(
     collision = sample.body_collision_flag | sample.pusher_collision_flag
     ordinary_flight_failure = flight_failure & ~collision
     failure = collision | ordinary_flight_failure
-    success = (stable_goal_steps >= goal_cfg.stable_steps) & ~failure
+    success = (stable_goal_steps >= hold_steps) & ~failure
     terminated = success | failure
     time_out = sample.time_out & ~terminated
     termination = PressApproachTerminationFlags(
@@ -463,29 +477,19 @@ def step_press_approach(
         goal_cfg.range_min_m - predicted_range,
         0.0,
     ) / (goal_cfg.range_max_m - goal_cfg.range_min_m)
-    normalized_attitude_error = relative_attitude_error / goal_cfg.relative_attitude_error_max_rad
-    normalized_linear_speed = linear_speed / goal_cfg.linear_speed_max_mps
-    normalized_angular_speed = angular_speed / goal_cfg.angular_speed_max_radps
-    normalized_stabilization_error = _sqrt(
-        0.2
-        * (
-            _square(normalized_range_error)
-            + _square(normalized_alignment_error)
-            + _square(normalized_attitude_error)
-            + _square(normalized_linear_speed)
-            + _square(normalized_angular_speed)
-        )
+    position_progress = _where(
+        position_ready,
+        _zeros_like(value=normalized_position_error),
+        reward_cfg.position_progress_weight
+        * (state.normalized_position_error - normalized_position_error),
     )
+    if not approach_enabled:
+        position_progress = _zeros_like(value=normalized_position_error)
     rewards = PressApproachRewardTerms(
-        position_progress=_where(
-            position_ready,
-            _zeros_like(value=normalized_position_error),
-            reward_cfg.position_progress_weight
-            * (state.normalized_position_error - normalized_position_error),
-        ),
+        position_progress=position_progress,
         stabilization=_where(
             position_ready,
-            reward_cfg.stabilization_weight / (1.0 + normalized_stabilization_error),
+            reward_cfg.stabilization_weight / (1.0 + normalized_pose_error),
             _zeros_like(value=normalized_position_error),
         ),
         predictive_barrier=(
@@ -515,4 +519,5 @@ def step_press_approach(
         angular_speed_radps=angular_speed,
         contact_clear=~collision,
         strict_goal=stable_goal,
+        envelope=envelope_evaluation,
     )
