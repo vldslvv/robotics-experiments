@@ -443,9 +443,10 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_observation_bias_command_full_mps",
     )
     assert target.parameters[0].candidates == pytest.approx((204.0,))
-    assert target.parameters[1].candidates == pytest.approx((0.075,))
-    assert target.parameters[2].candidates[0] == pytest.approx((0.008, -0.006, 0.0))
+    assert target.parameters[1].candidates == pytest.approx((0.075, 0.10, 0.15))
+    assert target.parameters[2].candidates[0] == pytest.approx((0.002, -0.012, 0.0))
     assert target.parameters[2].candidates[-1] == pytest.approx((0.014, 0.006, 0.0))
+    assert len(target.parameters[2].candidates) == 35
     assert target.parameters[2].selection_regularization_scale == pytest.approx(1.0)
     assert target.parameters[3].candidates[0] == pytest.approx((0.0, 1.5, 0.0))
     assert target.parameters[3].candidates[-1] == pytest.approx((0.0, 1.5, 0.0))
@@ -744,6 +745,96 @@ def test_staged_beam_search_batches_without_changing_deterministic_order() -> No
     ]
     assert batched.controller.selected_settings == serial.controller.selected_settings
     assert max(batch_evaluator.batch_sizes) > 1
+
+
+def test_alignment_reloads_only_selected_traces_after_scored_search() -> None:
+    class ScoredEvaluator(_Evaluator):
+        _retain_traces = False
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.trace_loads = 0
+
+        def evaluate(self, *, definition, settings, reference_traces):
+            del reference_traces
+            self.trace_loads += 1
+            return _response_traces(profiles=definition.profiles, settings=settings)
+
+        def evaluate_scored_batch(self, *, definition, settings, reference_traces):
+            assert reference_traces is not None
+            score = metric(name=definition.selection_metric)
+            return tuple(
+                score(
+                    reference_traces,
+                    _response_traces(profiles=definition.profiles, settings=value),
+                )
+                for value in settings
+            )
+
+    evaluator = ScoredEvaluator()
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=evaluator,
+        parameters=(ParameterSpec("command_delay_s", 1, (0.0, 0.05)),),
+    )
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=target.base_settings),
+    )
+
+    result = align(target, reference)
+
+    assert result.controller.selected_settings == target.base_settings
+    assert evaluator.trace_loads == 1
+
+
+def test_alignment_selects_response_candidate_inside_flight_envelope() -> None:
+    class EnvelopeChoiceEvaluator(_Evaluator):
+        _retain_traces = False
+
+        def evaluate(self, *, definition, settings, reference_traces):
+            del reference_traces
+            traces = _response_traces(profiles=definition.profiles, settings=settings)
+            if settings.command_delay_s != 0.0:
+                return traces
+            index = next(
+                index
+                for index, trace in enumerate(traces)
+                if trace.profile == "stability-hover-pose"
+            )
+            escaped = replace(
+                traces[index],
+                position_enu_m=tuple((1.0, 0.0, 0.0) for _value in traces[index].position_enu_m),
+            )
+            return (*traces[:index], escaped, *traces[index + 1 :])
+
+        def evaluate_scored_batch(self, *, definition, settings, reference_traces):
+            del definition, reference_traces
+            return tuple(
+                MetricResult(
+                    metrics={},
+                    ranking_values=(value.command_delay_s,),
+                    fit_metrics={},
+                    validation_metrics={},
+                    quality_passed=True,
+                )
+                for value in settings
+            )
+
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=EnvelopeChoiceEvaluator(),
+        parameters=(ParameterSpec("command_delay_s", 1, (0.0, 0.05)),),
+    )
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=target.base_settings),
+    )
+
+    result = align(target, reference)
+
+    assert result.controller.selected_settings.command_delay_s == pytest.approx(0.05)
+    assert result.controller.advisory_quality_passed
 
 
 def test_effective_key_aliases_float32_equivalent_settings_and_stops_fixed_point() -> None:

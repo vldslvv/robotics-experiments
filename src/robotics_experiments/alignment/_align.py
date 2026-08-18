@@ -748,25 +748,63 @@ def align(
         target=target,
         reference_traces=reference_traces,
     )
+    repo_root = Path(__file__).resolve().parents[3]
+
+    def load_candidate_traces(*, candidate: CandidateScore) -> tuple[ProbeTrace, ...]:
+        traces = outcome.target_traces.get(candidate.settings)
+        if traces is not None:
+            return traces
+        return target.evaluator.evaluate(
+            definition=target,
+            settings=outcome.trace_sources[candidate.settings],
+            reference_traces=reference_traces,
+        )
+
     selected = outcome.selected
+    selected_traces = load_candidate_traces(candidate=selected)
+    flight_envelope_fingerprint, envelope_reasons = _flight_envelope_qualification(
+        target=target,
+        target_traces=selected_traces,
+        repo_root=repo_root,
+    )
+    response_passing = sorted(
+        (
+            candidate
+            for candidate in outcome.candidate_scores
+            if candidate.usable and outcome.metric_results[candidate.index].quality_passed
+        ),
+        key=lambda candidate: (candidate.ranking_values, candidate.index),
+    )
+    for candidate in response_passing:
+        if candidate is selected:
+            reasons = envelope_reasons
+            traces = selected_traces
+        else:
+            traces = load_candidate_traces(candidate=candidate)
+            fingerprint, reasons = _flight_envelope_qualification(
+                target=target,
+                target_traces=traces,
+                repo_root=repo_root,
+            )
+            if fingerprint != flight_envelope_fingerprint:
+                raise RuntimeError("flight envelope changed during alignment selection")
+        if not reasons:
+            selected = candidate
+            selected_traces = traces
+            envelope_reasons = reasons
+            break
     selected_result = outcome.metric_results[selected.index]
     quality_reasons = [
         f"{gate.name}={gate.value:.6g} exceeds {gate.limit:.6g}"
         for gate in selected_result.gates
         if gate.value > gate.limit
     ]
-    repo_root = Path(__file__).resolve().parents[3]
+    quality_reasons.extend(envelope_reasons)
     source_commit, source_dirty = _git_source(repo_root=repo_root)
     experiment_fingerprint = _resolved_experiment_fingerprint(
         target=target,
         repo_root=repo_root,
     )
-    flight_envelope_fingerprint, envelope_reasons = _flight_envelope_qualification(
-        target=target,
-        target_traces=outcome.target_traces[selected.settings],
-        repo_root=repo_root,
-    )
-    quality_reasons.extend(envelope_reasons)
     probe_suite_fingerprint = _fingerprint([asdict(family) for family in target.probe_families])
     comparison_fingerprint = _fingerprint(
         {

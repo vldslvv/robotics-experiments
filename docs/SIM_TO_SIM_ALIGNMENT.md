@@ -96,13 +96,16 @@ fields. The `coarse-to-fine-beam` strategy:
 5. deduplicates settings by their exact float32 controller representation.
 
 A zero-centered fitted field may declare a positive
-`selection_regularization_scale`. If the registered metric finds any
-quality-passing candidates, the search selects the passing candidate with the
-smallest dimensionless L2 correction across those declared fields, then uses
-the response metrics as tie-breakers. If no candidate passes, gate proximity
-continues to determine selection. This keeps an estimator-offset fit from
-spending unnecessary correction authority merely to improve an already-passing
-trace metric.
+`selection_regularization_scale`. Among candidates that pass both the registered
+response metric and the pinned flight-envelope qualification, final selection
+uses the smallest dimensionless L2 correction across those declared fields,
+then the response metrics as tie-breakers. If no candidate passes the response
+metric, gate proximity continues to determine the diagnostic selection; if
+response candidates pass but none fit the flight envelope, the best response
+candidate remains diagnostic evidence and cannot publish. This keeps an
+estimator-offset fit from spending unnecessary correction authority merely to
+improve an already-passing trace metric without allowing that correction to
+escape the measured hover envelope.
 
 The default uses one persistent worker and 128 candidate slots. This is the
 measured useful-throughput optimum for the current GPU; additional workers
