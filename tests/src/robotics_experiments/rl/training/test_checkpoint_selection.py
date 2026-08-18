@@ -181,11 +181,29 @@ def test_acceptance_is_separate_from_evaluation_cost() -> None:
     acceptance = evaluate_press_acceptance(
         evaluation=evaluation,
         evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.goal.range_min_m,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
     )
     assert not acceptance.passed
     assert acceptance.reasons == ("minimum closest range",)
     assert len(acceptance.gates) == 5
+
+
+def test_acceptance_includes_configured_range_safety_boundary() -> None:
+    from robotics_experiments.config import load_config
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    acceptance = evaluate_press_acceptance(
+        evaluation=_scored(
+            collision_rate=0.0,
+            body_collision_rate=0.0,
+            pusher_collision_rate=0.0,
+            min_closest_range_m=0.40,
+        ),
+        evaluation_config=config.rl.press.evaluation,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+    )
+    assert acceptance.passed
 
 
 @pytest.mark.parametrize(
@@ -206,7 +224,7 @@ def test_every_acceptance_gate_is_individually_binding(overrides, failed_gate: s
     acceptance = evaluate_press_acceptance(
         evaluation=_scored(**overrides),
         evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.goal.range_min_m,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
     )
     assert not acceptance.passed
     assert failed_gate in acceptance.reasons

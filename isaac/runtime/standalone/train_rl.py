@@ -1202,7 +1202,7 @@ def _finalize_campaign(
     acceptance = evaluate_press_acceptance(
         evaluation=test_evaluation,
         evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.goal.range_min_m,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
     )
     write_evaluation_scalars(
         writer=writer,
@@ -1559,7 +1559,7 @@ def _run_new_training(
                     validation = evaluate_press_acceptance(
                         evaluation=evaluation,
                         evaluation_config=config.rl.press.evaluation,
-                        minimum_range_m=config.rl.press.goal.range_min_m,
+                        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
                     )
                     candidates.append(
                         _AttemptSelection(
