@@ -561,13 +561,51 @@ def test_flight_parameters_response_accepts_bridge_quantized_cadence(
         replace(
             trace,
             initial_controller_state_valid=True,
-            time_s=tuple(
-                time_s + (0.01 if index % 2 else 0.0) for index, time_s in enumerate(trace.time_s)
+            time_s=(
+                *(
+                    time_s + (0.01 if index % 2 else 0.0)
+                    for index, time_s in enumerate(trace.time_s)
+                ),
+                sum(command.duration_s for command in profile.commands) - 0.01,
+            ),
+            command_velocity_body_flu_mps=(
+                *trace.command_velocity_body_flu_mps,
+                profile.commands[-1].velocity_body_flu_mps,
+            ),
+            command_yaw_rate_radps=(
+                *trace.command_yaw_rate_radps,
+                profile.commands[-1].yaw_rate_radps,
+            ),
+            command_collective_thrust_normalized=(
+                *trace.command_collective_thrust_normalized,
+                profile.commands[-1].collective_thrust_normalized,
+            ),
+            command_body_rate_flu_radps=(
+                *trace.command_body_rate_flu_radps,
+                profile.commands[-1].body_rate_flu_radps,
+            ),
+            position_enu_m=(*trace.position_enu_m, trace.position_enu_m[-1]),
+            attitude_flu_enu_wxyz=(
+                *trace.attitude_flu_enu_wxyz,
+                trace.attitude_flu_enu_wxyz[-1],
+            ),
+            velocity_body_flu_mps=(
+                *trace.velocity_body_flu_mps,
+                trace.velocity_body_flu_mps[-1],
+            ),
+            velocity_enu_mps=(*trace.velocity_enu_mps, trace.velocity_enu_mps[-1]),
+            angular_velocity_body_flu_radps=(
+                *trace.angular_velocity_body_flu_radps,
+                trace.angular_velocity_body_flu_radps[-1],
             ),
         )
-        for trace in _response_traces(
-            profiles=definition.profiles,
-            settings=definition.base_settings,
+        for profile, trace in zip(
+            definition.profiles,
+            _response_traces(
+                profiles=definition.profiles,
+                settings=definition.base_settings,
+            ),
+            strict=True,
         )
     )
     path = tmp_path / "flight_parameters_response.json"

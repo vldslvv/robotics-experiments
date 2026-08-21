@@ -6,69 +6,61 @@ import json
 import math
 import os
 import shutil
+from bisect import bisect_right
+from itertools import accumulate
 from pathlib import Path
 from typing import Any
 
 from robotics_experiments.alignment._io import _trace
-from robotics_experiments.alignment._models import ControllerDefinition, ProbeCommand, ProbeTrace
+from robotics_experiments.alignment._models import ControllerDefinition, ProbeProfile, ProbeTrace
 from robotics_experiments.flight_parameters import load_flight_parameters_bundle
 
 __all__: list[str] = []
 
 
-def _expected_commands(
-    *, definition: ControllerDefinition, profile_name: str
-) -> tuple[ProbeCommand, ...]:
-    return next(profile.commands for profile in definition.profiles if profile.name == profile_name)
+def _expected_profile(*, definition: ControllerDefinition, profile_name: str) -> ProbeProfile:
+    return next(profile for profile in definition.profiles if profile.name == profile_name)
 
 
 def _validate_commands(*, definition: ControllerDefinition, trace: ProbeTrace) -> None:
-    commands = _expected_commands(definition=definition, profile_name=trace.profile)
-    expected_velocity = tuple(
-        command.velocity_body_flu_mps
-        for command in commands
-        for _ in range(round(command.duration_s * definition.command_rate_hz))
-    )
-    expected_yaw = tuple(
-        command.yaw_rate_radps
-        for command in commands
-        for _ in range(round(command.duration_s * definition.command_rate_hz))
-    )
-    expected_collective = tuple(
-        command.collective_thrust_normalized
-        for command in commands
-        for _ in range(round(command.duration_s * definition.command_rate_hz))
-    )
-    expected_body_rate = tuple(
-        command.body_rate_flu_radps
-        for command in commands
-        for _ in range(round(command.duration_s * definition.command_rate_hz))
-    )
+    profile = _expected_profile(definition=definition, profile_name=trace.profile)
+    commands = profile.commands
+    period = 1.0 / definition.command_rate_hz
+    duration_s = sum(command.duration_s for command in commands)
     actual_count = len(trace.time_s)
-    expected_count = len(expected_velocity)
-    if actual_count != expected_count:
+    expected_count = round(duration_s * definition.command_rate_hz)
+    if abs(actual_count - expected_count) > 1:
         raise ValueError(
             f"flight parameters profile {trace.profile!r} has {actual_count} samples; "
-            f"alignment requires {expected_count}"
+            f"alignment requires {expected_count} within one bridge-quantized sample"
         )
+    if trace.time_s[-1] >= duration_s or any(
+        not math.isclose(actual, index * period, rel_tol=0.0, abs_tol=period / 2.0)
+        for index, actual in enumerate(trace.time_s)
+    ):
+        raise ValueError(
+            f"flight parameters profile {trace.profile!r} does not match alignment cadence"
+        )
+    command_ends = tuple(accumulate(command.duration_s for command in commands))
+    command_indices = tuple(bisect_right(command_ends, time_s + 1.0e-9) for time_s in trace.time_s)
+    if any(index >= len(commands) for index in command_indices):
+        raise ValueError(
+            f"flight parameters profile {trace.profile!r} exceeds its command duration"
+        )
+    expected_velocity = tuple(commands[index].velocity_body_flu_mps for index in command_indices)
+    expected_yaw = tuple(commands[index].yaw_rate_radps for index in command_indices)
+    expected_collective = tuple(
+        commands[index].collective_thrust_normalized for index in command_indices
+    )
+    expected_body_rate = tuple(commands[index].body_rate_flu_radps for index in command_indices)
     if (
-        trace.command_velocity_body_flu_mps != expected_velocity
+        (not profile.hold_position and trace.command_velocity_body_flu_mps != expected_velocity)
         or trace.command_yaw_rate_radps != expected_yaw
         or trace.command_collective_thrust_normalized != expected_collective
         or trace.command_body_rate_flu_radps != expected_body_rate
     ):
         raise ValueError(
             f"flight parameters profile {trace.profile!r} does not contain the exact commands"
-        )
-    period = 1.0 / definition.command_rate_hz
-    # Runtime policy ticks are quantized to the bridge tick. Validate against
-    # the ideal schedule so alternating ticks cannot accumulate cadence drift.
-    if any(
-        not math.isclose(actual, index * period, rel_tol=0.0, abs_tol=period / 2.0)
-        for index, actual in enumerate(trace.time_s)
-    ):
-        raise ValueError(
-            f"flight parameters profile {trace.profile!r} does not match alignment cadence"
         )
 
 

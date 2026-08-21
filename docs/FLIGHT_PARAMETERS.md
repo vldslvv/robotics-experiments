@@ -77,8 +77,10 @@ inside the alignment run, and validates before fitting that the response has:
 
 Cadence validation compares every retained timestamp with the ideal command
 schedule while allowing up to half a command period for bridge-tick
-quantization. This admits the runtime's alternating adjacent-tick schedule but
-rejects accumulated drift; the timestamps and response samples are not
+quantization and one adjacent-tick sample at a command-duration boundary. It
+derives the expected command at each actual timestamp, admitting the runtime's
+alternating adjacent-tick schedule while rejecting accumulated drift or an
+incorrect command sequence. The timestamps and response samples are not
 resampled or reduced.
 
 It then copies the reference JSON, ULog, and bridge log byte-for-byte into the
