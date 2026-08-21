@@ -123,6 +123,7 @@ def _controller_artifact() -> ControllerArtifact:
         command_rate_hz=20.0,
         certified_control_modes=("velocity", "ctbr"),
         probe_suite_fingerprint="probes",
+        flight_parameters_run_id=_flight_parameters().run_id,
         flight_parameters_fingerprint=_flight_parameters().artifact_fingerprint,
         selected_settings=settings,
         settings_fingerprint=hashlib.sha256(
@@ -236,6 +237,17 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
 def test_policy_rejects_flight_parameters_not_qualified_by_controller(tmp_path: Path) -> None:
     metadata = _metadata()
     metadata["controller"]["artifact"]["flight_parameters_fingerprint"] = "other-flight-parameters"
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+
+    with pytest.raises(ValueError, match="does not match its controller"):
+        load_policy_metadata(artifact_dir=tmp_path)
+
+
+def test_policy_rejects_flight_parameters_run_not_qualified_by_controller(
+    tmp_path: Path,
+) -> None:
+    metadata = _metadata()
+    metadata["controller"]["artifact"]["flight_parameters_run_id"] = "another-run"
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
 
     with pytest.raises(ValueError, match="does not match its controller"):

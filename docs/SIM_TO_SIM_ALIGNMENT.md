@@ -24,7 +24,9 @@ settings are still replayed through the full 30-second
 `stability-hover-pose` profile and must keep position and attitude within the
 full-window hover bounds. No alignment metric, search, ranking, or acceptance
 logic changes at this boundary. The exact flight-parameters fingerprint enters
-the comparison fingerprint and strict controller artifact.
+the comparison fingerprint and strict controller artifact. The capture manifest
+and controller artifact also record the resolved producer `run_id`; an authored
+`latest` selector is never retained as lineage.
 
 Input validation completes before the alignment run directory is created. An
 invalid or incompatible flight-parameters selector therefore exits with one

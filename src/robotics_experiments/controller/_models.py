@@ -78,6 +78,7 @@ class ControllerArtifact:
     command_rate_hz: float
     certified_control_modes: tuple[str, ...]
     probe_suite_fingerprint: str
+    flight_parameters_run_id: str
     flight_parameters_fingerprint: str
     selected_settings: ControllerSettings
     settings_fingerprint: str

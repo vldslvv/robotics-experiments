@@ -371,6 +371,8 @@ def _load_training_flight_parameters(
         mismatches.append(f"vehicle {flight_parameters.vehicle!r} != {vehicle_label!r}")
     if flight_parameters.source_backend != "px4-sitl":
         mismatches.append(f"source backend {flight_parameters.source_backend!r} != 'px4-sitl'")
+    if flight_parameters.run_id != controller_artifact.flight_parameters_run_id:
+        mismatches.append("run ID does not match the controller qualification")
     if flight_parameters.artifact_fingerprint != controller_artifact.flight_parameters_fingerprint:
         mismatches.append("artifact fingerprint does not match the controller qualification")
     if mismatches:

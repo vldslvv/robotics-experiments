@@ -641,7 +641,7 @@ def _flight_parameters_qualification(
     target: ControllerDefinition,
     target_traces: tuple[ProbeTrace, ...],
     repo_root: Path,
-) -> tuple[str, list[str]]:
+) -> tuple[str, str, list[str]]:
     run_dir_value = os.environ.get("ROBOTICS_ALIGNMENT_RUN_DIR")
     pinned_artifact = (
         Path(run_dir_value) / "flight_parameters" if run_dir_value else Path("missing")
@@ -688,7 +688,7 @@ def _flight_parameters_qualification(
         reasons.append(
             f"flight-parameters attitude utilization={attitude_utilization:.6g} exceeds 1"
         )
-    return flight_parameters.artifact_fingerprint, reasons
+    return flight_parameters.run_id, flight_parameters.artifact_fingerprint, reasons
 
 
 def _git_source(*, repo_root: Path) -> tuple[str, bool]:
@@ -777,7 +777,11 @@ def align(
 
     selected = outcome.selected
     selected_traces = load_candidate_traces(candidate=selected)
-    flight_parameters_fingerprint, qualification_reasons = _flight_parameters_qualification(
+    (
+        flight_parameters_run_id,
+        flight_parameters_fingerprint,
+        qualification_reasons,
+    ) = _flight_parameters_qualification(
         target=target,
         target_traces=selected_traces,
         repo_root=repo_root,
@@ -796,12 +800,12 @@ def align(
             traces = selected_traces
         else:
             traces = load_candidate_traces(candidate=candidate)
-            fingerprint, reasons = _flight_parameters_qualification(
+            run_id, fingerprint, reasons = _flight_parameters_qualification(
                 target=target,
                 target_traces=traces,
                 repo_root=repo_root,
             )
-            if fingerprint != flight_parameters_fingerprint:
+            if run_id != flight_parameters_run_id or fingerprint != flight_parameters_fingerprint:
                 raise RuntimeError("flight parameters changed during alignment selection")
         if not reasons:
             selected = candidate
@@ -859,6 +863,7 @@ def align(
             dict.fromkeys(family.control_mode for family in target.probe_families)
         ),
         probe_suite_fingerprint=probe_suite_fingerprint,
+        flight_parameters_run_id=flight_parameters_run_id,
         flight_parameters_fingerprint=flight_parameters_fingerprint,
         selected_settings=selected.settings,
         settings_fingerprint=_fingerprint(asdict(selected.settings)),

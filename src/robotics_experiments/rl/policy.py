@@ -157,7 +157,11 @@ def policy_metadata(
     curriculum_stage: str | None = None,
 ) -> dict[str, Any]:
     """Compose metadata for a contract authored by a training config."""
-    if flight_parameters.artifact_fingerprint != controller_artifact.flight_parameters_fingerprint:
+    if (
+        flight_parameters.run_id != controller_artifact.flight_parameters_run_id
+        or flight_parameters.artifact_fingerprint
+        != controller_artifact.flight_parameters_fingerprint
+    ):
         raise ValueError("flight parameters do not match the controller qualification")
     interface = PolicyInterface(policy_interface)
     metadata = {
@@ -271,7 +275,10 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
         metadata=metadata,
         artifact_dir=artifact_dir,
     )
-    if flight_parameters.artifact_fingerprint != controller.flight_parameters_fingerprint:
+    if (
+        flight_parameters.run_id != controller.flight_parameters_run_id
+        or flight_parameters.artifact_fingerprint != controller.flight_parameters_fingerprint
+    ):
         raise ValueError(
             f"policy artifact {artifact_dir} flight-parameters artifact "
             "does not match its controller"

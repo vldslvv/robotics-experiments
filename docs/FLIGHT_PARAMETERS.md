@@ -136,5 +136,6 @@ candidates.
 
 Alignment and RL record the exact artifact fingerprint. They never silently
 switch to a newer `latest`: alignment pins the resolved run during preparation,
-and training rejects a flight-parameters artifact that does not match its
-controller qualification.
+records its canonical `run_id`, and training rejects a flight-parameters
+artifact whose `run_id` or fingerprint does not match its controller
+qualification.

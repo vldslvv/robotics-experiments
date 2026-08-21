@@ -25,8 +25,10 @@ vehicle and PX4 SITL source, and requires its fingerprint to match the
 controller's hover qualification. Policy metadata embeds the complete
 controller and flight-parameters records with their digests. Evaluation and
 deployment reuse those embedded records; they never resolve newer alignment or
-flight-parameter publications implicitly. The collection and statistics contract
-is defined in `docs/FLIGHT_PARAMETERS.md`.
+flight-parameter publications implicitly. Selectors such as `best` and `latest`
+are accepted as operator inputs, but persisted lineage uses the embedded
+producer `run_id` values and digests. The collection and statistics contract is
+defined in `docs/FLIGHT_PARAMETERS.md`.
 
 The campaign parent performs this input preflight before creating a run
 directory or launching an attempt. It resolves both selectors once and passes

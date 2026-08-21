@@ -760,7 +760,8 @@ def test_training_flight_parameters_must_match_controller_qualification() -> Non
         artifact_path=None,
         config=config,
         controller_artifact=SimpleNamespace(
-            flight_parameters_fingerprint=flight_parameters.artifact_fingerprint
+            flight_parameters_run_id=flight_parameters.run_id,
+            flight_parameters_fingerprint=flight_parameters.artifact_fingerprint,
         ),
         repo_root=REPO_ROOT,
     )
@@ -772,7 +773,21 @@ def test_training_flight_parameters_must_match_controller_qualification() -> Non
         train_rl._load_training_flight_parameters(  # noqa: SLF001
             artifact_path=None,
             config=config,
-            controller_artifact=SimpleNamespace(flight_parameters_fingerprint="other"),
+            controller_artifact=SimpleNamespace(
+                flight_parameters_run_id=flight_parameters.run_id,
+                flight_parameters_fingerprint="other",
+            ),
+            repo_root=REPO_ROOT,
+        )
+
+    with pytest.raises(ValueError, match="run ID does not match"):
+        train_rl._load_training_flight_parameters(  # noqa: SLF001
+            artifact_path=None,
+            config=config,
+            controller_artifact=SimpleNamespace(
+                flight_parameters_run_id="another-run",
+                flight_parameters_fingerprint=flight_parameters.artifact_fingerprint,
+            ),
             repo_root=REPO_ROOT,
         )
 

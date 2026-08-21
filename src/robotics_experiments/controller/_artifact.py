@@ -319,6 +319,7 @@ def controller_artifact_from_payload(value: Any, /) -> ControllerArtifact:
             "vehicle",
             "airframe",
             "probe_suite_fingerprint",
+            "flight_parameters_run_id",
             "flight_parameters_fingerprint",
             "source_commit",
             "target_image",

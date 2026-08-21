@@ -124,10 +124,8 @@ def prepare_alignment_reference(
         raise ValueError("flight parameters response profile count is insufficient for alignment")
     run_dir.mkdir(parents=True, exist_ok=True)
     pinned_flight_parameters = run_dir / "flight_parameters"
-    pinned_flight_parameters.symlink_to(
-        os.path.relpath(bundle.run_dir, start=run_dir),
-        target_is_directory=True,
-    )
+    immutable_reference = os.path.relpath(bundle.run_dir, start=run_dir)
+    pinned_flight_parameters.symlink_to(immutable_reference, target_is_directory=True)
     for source_relative, destination in (
         (evidence.reference_path, run_dir / "reference.json"),
         (evidence.ulog_path, run_dir / "reference.ulg"),
@@ -138,8 +136,9 @@ def prepare_alignment_reference(
         json.dumps(
             {
                 "schema_version": 1,
+                "flight_parameters_run_id": bundle.flight_parameters.run_id,
                 "flight_parameters_fingerprint": (bundle.flight_parameters.artifact_fingerprint),
-                "flight_parameters_artifact": "flight_parameters",
+                "flight_parameters_artifact": immutable_reference,
                 "artifacts": {
                     "reference_trace": "reference.json",
                     "px4_ulog": "reference.ulg",

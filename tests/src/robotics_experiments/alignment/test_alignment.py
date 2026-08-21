@@ -665,7 +665,7 @@ def test_alignment_references_immutable_flight_parameter_inputs(
     tmp_path: Path,
 ) -> None:
     definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
-    bundle_dir = tmp_path / "flight-parameters" / "timestamped-run"
+    bundle_dir = tmp_path / "flight-parameters" / "20260821T180358Z"
     response_dir = bundle_dir / "response" / "repetition-001"
     response_dir.mkdir(parents=True)
     evidence = SimpleNamespace(
@@ -687,6 +687,7 @@ def test_alignment_references_immutable_flight_parameter_inputs(
         lambda **_kwargs: SimpleNamespace(
             run_dir=bundle_dir,
             flight_parameters=SimpleNamespace(
+                run_id="20260821T180358Z",
                 artifact_fingerprint="fingerprint",
                 response=SimpleNamespace(repetitions=1, traces=(evidence,)),
             ),
@@ -706,6 +707,10 @@ def test_alignment_references_immutable_flight_parameter_inputs(
     )
 
     assert (run_dir / "flight_parameters").is_symlink()
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["flight_parameters_run_id"] == "20260821T180358Z"
+    assert "20260821T180358Z" in manifest["flight_parameters_artifact"]
+    assert manifest["flight_parameters_artifact"] != "flight_parameters"
     for name, source in (
         ("reference.json", bundle_dir / evidence.reference_path),
         ("reference.ulg", bundle_dir / evidence.ulog_path),
@@ -1570,6 +1575,7 @@ def test_controller_and_selection_artifacts_are_compact_and_exact(tmp_path: Path
     )
     controller = load_controller_artifact(run_dir)
     assert controller.certified_control_modes == ("velocity",)
+    assert controller.flight_parameters_run_id == "fixture"
     reconstructed = load_selection(run_dir=run_dir, controller=controller)
     assert reconstructed.candidates == result.candidates
     assert reconstructed.selected_candidate_index == result.selected_candidate_index
