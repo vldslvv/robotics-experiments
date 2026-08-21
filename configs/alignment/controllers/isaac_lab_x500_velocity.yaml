@@ -3,7 +3,7 @@ controller_id: isaac-lab-x500-v1
 controller_schema_version: 1
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
-flight_envelope_artifact: .build/flight-envelopes/holybro-x500-v2-hover-v1/latest
+flight_parameters_artifact: .build/flight-parameters/holybro-x500-v2-hover-v1/latest
 vehicle: x500_01
 airframe: holybro_x500_v2.usda
 image: vv-isaac-lab-custom

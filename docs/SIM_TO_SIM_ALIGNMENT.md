@@ -13,15 +13,18 @@ reference. `robotics_experiments.alignment` owns probe definitions, generic
 candidate search, metrics, evidence bundles, and publication. RL depends only
 on the controller artifact and never imports alignment.
 
-`robotics_experiments.flight_parameters` separately owns the task-neutral
-hover envelope described in `docs/FLIGHT_PARAMETERS.md`. Both controller
-definitions resolve the same published envelope. The selected target settings
-are replayed through the 30-second `stability-hover-pose` profile and must keep
-position and attitude within its bounds. That profile explicitly holds its
-captured initial position: PX4 records the corrective velocity commands and
-Isaac Lab replays those exact commands. A zero-velocity command is not treated
-as proof of position hold. The exact envelope fingerprint enters the comparison
-fingerprint and strict controller artifact.
+`robotics_experiments.flight_parameters` owns the task-neutral schema-1 hover
+and controller-response evidence described in `docs/FLIGHT_PARAMETERS.md`.
+Alignment no longer launches a private PX4 reference capture. Its preparation
+step resolves and pins one immutable flight-parameters run, validates that its
+lossless response evidence exactly covers the authored fit, validation, and
+stability profiles, then stages the same `reference.json`, ULog, and bridge-log
+bytes consumed by the existing alignment evaluator. The selected target
+settings are still replayed through the full 30-second
+`stability-hover-pose` profile and must keep position and attitude within the
+full-window hover bounds. No alignment metric, search, ranking, or acceptance
+logic changes at this boundary. The exact flight-parameters fingerprint enters
+the comparison fingerprint and strict controller artifact.
 
 The dependency direction is:
 
@@ -100,11 +103,11 @@ fields. The `coarse-to-fine-beam` strategy:
 
 A zero-centered fitted field may declare a positive
 `selection_regularization_scale`. Among candidates that pass both the registered
-response metric and the pinned flight-envelope qualification, final selection
+response metric and the pinned flight-parameters qualification, final selection
 uses the smallest dimensionless L2 correction across those declared fields,
 then the response metrics as tie-breakers. If no candidate passes the response
 metric, gate proximity continues to determine the diagnostic selection; if
-response candidates pass but none fit the flight envelope, the best response
+response candidates pass but none fit the flight parameters, the best response
 candidate remains diagnostic evidence and cannot publish. This keeps an
 estimator-offset fit from spending unnecessary correction authority merely to
 improve an already-passing trace metric without allowing that correction to
@@ -130,8 +133,8 @@ Isaac Lab's simulation-context ownership.
 
 ## Evidence and boundary audit
 
-PX4 capture uses the ordinary fleet/bridge path with a deterministic policy
-adapter. The alignment experiment selects PX4 logging profile `17`, preserving
+Flight-parameters response capture uses the ordinary fleet/bridge path with a
+deterministic policy adapter. Its experiment selects PX4 logging profile `17`, preserving
 the default topic set plus full-rate attitude, rate, thrust, torque, and
 actuator topics needed for exact 250 Hz replay. Its configured pusher is
 deployed after takeoff and before probe
@@ -149,8 +152,11 @@ held collective setpoints, the held body-rate setpoint, the filtered yaw-torque
 state, velocity and rate integrals, estimator filters, and the hover estimate.
 Resetting any held state
 to a neutral value makes a profile's result depend on where capture happened to
-land in PX4's asynchronous controller schedule and is therefore invalid. One
-run directory keeps:
+land in PX4's asynchronous controller schedule and is therefore invalid. The
+flight-parameters bundle retains these response traces without reduction.
+Alignment preparation validates exact profile order, commands, cadence, sample
+counts, split identity, completion, and controller-boundary state before
+pinning the resolved run. One alignment run directory keeps:
 
 - the ULog and bridge log;
 - reference and target traces;
@@ -277,19 +283,21 @@ make test-integration-alignment-target
 Run the full campaign with:
 
 ```bash
+make measure-flight-parameters
 make align-controllers
 ```
 
-The campaign runs the authoritative integration gate against its run-local
+`align-controllers` begins with `alignment-prepare-reference`; it never captures
+PX4 reference data. The campaign runs the authoritative integration gate against its run-local
 `controller.json` after replay and before finalization. A failure therefore
 preserves diagnostic evidence without advancing `latest` or `best`.
 
 `controller.json` is the downstream product. It contains complete controller
 settings, the control modes certified by the accepted probe-family list, and
-the exact flight-envelope fingerprint used by its hover-pose qualification;
+the exact flight-parameters fingerprint used by its hover-pose qualification;
 policy-owned normalized action scales are not alignment fields. Candidate traces and ULogs are
 valuable reproducibility evidence, but policy training consumes only the
-controller artifact and the independently published matching flight envelope.
+controller artifact and the independently published matching flight parameters.
 `latest` and comparable `best` links advance only for a fully accepted bundle.
 
 ## Change policy

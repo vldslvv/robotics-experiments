@@ -81,7 +81,7 @@ the current contents and the intended home for that kind of code.
   candidate fitting/ranking, alignment evidence, and controller publication.
   Upstream of RL; no Isaac, Kit, PX4-container, or RL dependency.
 - `src/robotics_experiments/flight_parameters/` -> Host-safe task-neutral
-  flight config, trace, envelope derivation/evaluation, and strict artifact
+  flight config, hover statistics, lossless response traces, and strict artifact
   publication. Shared by alignment and RL; no Isaac, Kit, PX4-container,
   alignment, or RL dependency.
 - `src/robotics_experiments/runtime/` -> Host-agnostic fleet runtime: frozen
@@ -268,18 +268,23 @@ the current contents and the intended home for that kind of code.
   only after those acceptance checks; `best` compares only within one
   fingerprint.
 - Flight-parameter invariants: read `docs/FLIGHT_PARAMETERS.md` before touching
-  `src/robotics_experiments/flight_parameters/`, flight configs, hover capture,
-  or envelope consumers. Schema 1 supports hover only. The envelope is
-  task-neutral position/pose evidence and must not acquire switch, wall,
-  actuator, or reward fields. Complete bundles use immutable run directories,
+  `src/robotics_experiments/flight_parameters/`, flight configs, hover or
+  controller-response capture, or evidence consumers. Schema 1 is the only
+  schema and supports repeated hover plus lossless controller-response evidence.
+  Flight parameters are task-neutral and must not acquire switch, wall, reward,
+  policy, or consumer-specific fields. Complete bundles use immutable run directories,
   an exact manifest, and an atomically advanced relative `latest` symlink.
   PX4 hover evidence must be decoded from the completed ULog inside
   `flight_parameters` and prove the mode, control, airborne, and held-goal
   states for the selected interval. A routine label, elapsed time, or low
   velocity is not proof of hover, and this evidence-only decoding does not
   broaden the shared commanding GCS port.
-  Alignment and RL must match the exact envelope fingerprint; a consumer must
-  not resolve a newer artifact implicitly after recording provenance.
+  Hover traces retain the full alignment window and separate final-24-second
+  policy statistics (maximum, RMSE, p95, and p99). Alignment preparation must
+  validate complete exact-cadence fit/validation/stability response traces and
+  stage them losslessly without changing alignment logic. Alignment and RL must
+  match the exact flight-parameters fingerprint; a consumer must not resolve a
+  newer artifact implicitly after recording provenance.
 - When launching an RL training run for the user, provide a run-scoped
   monitoring path (TensorBoard by default) and report the local URL and log
   directory. Keep monitoring available while the run is active unless the user

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import subprocess
 from collections import Counter
 from collections.abc import Mapping
@@ -33,8 +34,8 @@ from robotics_experiments.alignment._models import (
 from robotics_experiments.config import load_config
 from robotics_experiments.flight_parameters import (
     evaluate_hover_pose,
-    load_flight_envelope,
-    validate_flight_envelope_bundle,
+    load_flight_parameters,
+    validate_flight_parameters_bundle,
 )
 
 __all__: list[str] = []
@@ -620,7 +621,7 @@ def _validate_pair(
         "alignment_id",
         "controller_schema_version",
         "experiment_config",
-        "flight_envelope_artifact",
+        "flight_parameters_artifact",
         "vehicle",
         "airframe",
         "command_rate_hz",
@@ -635,19 +636,29 @@ def _validate_pair(
         raise ValueError(f"incompatible controller definitions: {', '.join(mismatches)}")
 
 
-def _flight_envelope_qualification(
+def _flight_parameters_qualification(
     *,
     target: ControllerDefinition,
     target_traces: tuple[ProbeTrace, ...],
     repo_root: Path,
 ) -> tuple[str, list[str]]:
-    artifact_path = Path(target.flight_envelope_artifact)
-    if not artifact_path.is_absolute():
-        artifact_path = repo_root / artifact_path
-    validate_flight_envelope_bundle(artifact_path)
-    envelope = load_flight_envelope(artifact_path)
-    if envelope.vehicle != target.vehicle or envelope.source_backend != "px4-sitl":
-        raise ValueError("flight envelope is incompatible with controller alignment")
+    run_dir_value = os.environ.get("ROBOTICS_ALIGNMENT_RUN_DIR")
+    pinned_artifact = (
+        Path(run_dir_value) / "flight_parameters" if run_dir_value else Path("missing")
+    )
+    if pinned_artifact.exists():
+        artifact_path = pinned_artifact
+    else:
+        artifact_path = Path(target.flight_parameters_artifact)
+        if not artifact_path.is_absolute():
+            artifact_path = repo_root / artifact_path
+    validate_flight_parameters_bundle(artifact_path)
+    flight_parameters = load_flight_parameters(artifact_path)
+    if (
+        flight_parameters.vehicle != target.vehicle
+        or flight_parameters.source_backend != "px4-sitl"
+    ):
+        raise ValueError("flight parameters are incompatible with controller alignment")
     try:
         trace = next(item for item in target_traces if item.profile == "stability-hover-pose")
     except StopIteration as exc:
@@ -660,7 +671,7 @@ def _flight_envelope_qualification(
     attitude_utilization = 0.0
     for position, attitude in zip(trace.position_enu_m, trace.attitude_flu_enu_wxyz, strict=True):
         evaluation = evaluate_hover_pose(
-            envelope=envelope,
+            flight_parameters=flight_parameters,
             target_position_enu_m=trace.initial_position_enu_m,
             target_attitude_flu_enu_wxyz=target_attitude,
             position_enu_m=position,
@@ -670,10 +681,14 @@ def _flight_envelope_qualification(
         attitude_utilization = max(attitude_utilization, evaluation.attitude_utilization)
     reasons = []
     if position_utilization > 1.0:
-        reasons.append(f"flight-envelope position utilization={position_utilization:.6g} exceeds 1")
+        reasons.append(
+            f"flight-parameters position utilization={position_utilization:.6g} exceeds 1"
+        )
     if attitude_utilization > 1.0:
-        reasons.append(f"flight-envelope attitude utilization={attitude_utilization:.6g} exceeds 1")
-    return envelope.artifact_fingerprint, reasons
+        reasons.append(
+            f"flight-parameters attitude utilization={attitude_utilization:.6g} exceeds 1"
+        )
+    return flight_parameters.artifact_fingerprint, reasons
 
 
 def _git_source(*, repo_root: Path) -> tuple[str, bool]:
@@ -762,7 +777,7 @@ def align(
 
     selected = outcome.selected
     selected_traces = load_candidate_traces(candidate=selected)
-    flight_envelope_fingerprint, envelope_reasons = _flight_envelope_qualification(
+    flight_parameters_fingerprint, qualification_reasons = _flight_parameters_qualification(
         target=target,
         target_traces=selected_traces,
         repo_root=repo_root,
@@ -777,21 +792,21 @@ def align(
     )
     for candidate in response_passing:
         if candidate is selected:
-            reasons = envelope_reasons
+            reasons = qualification_reasons
             traces = selected_traces
         else:
             traces = load_candidate_traces(candidate=candidate)
-            fingerprint, reasons = _flight_envelope_qualification(
+            fingerprint, reasons = _flight_parameters_qualification(
                 target=target,
                 target_traces=traces,
                 repo_root=repo_root,
             )
-            if fingerprint != flight_envelope_fingerprint:
-                raise RuntimeError("flight envelope changed during alignment selection")
+            if fingerprint != flight_parameters_fingerprint:
+                raise RuntimeError("flight parameters changed during alignment selection")
         if not reasons:
             selected = candidate
             selected_traces = traces
-            envelope_reasons = reasons
+            qualification_reasons = reasons
             break
     selected_result = outcome.metric_results[selected.index]
     quality_reasons = [
@@ -799,7 +814,7 @@ def align(
         for gate in selected_result.gates
         if gate.value > gate.limit
     ]
-    quality_reasons.extend(envelope_reasons)
+    quality_reasons.extend(qualification_reasons)
     source_commit, source_dirty = _git_source(repo_root=repo_root)
     experiment_fingerprint = _resolved_experiment_fingerprint(
         target=target,
@@ -816,7 +831,7 @@ def align(
             "metric_implementation": _module_fingerprint(metrics_module.__file__),
             "controller_implementation": _module_fingerprint(controller_actuation.__file__),
             "experiment": experiment_fingerprint,
-            "flight_envelope": flight_envelope_fingerprint,
+            "flight_parameters": flight_parameters_fingerprint,
             "control_modes": [family.control_mode for family in target.probe_families],
             "target_image": target.image,
             "reference_image": reference.image,
@@ -844,7 +859,7 @@ def align(
             dict.fromkeys(family.control_mode for family in target.probe_families)
         ),
         probe_suite_fingerprint=probe_suite_fingerprint,
-        flight_envelope_fingerprint=flight_envelope_fingerprint,
+        flight_parameters_fingerprint=flight_parameters_fingerprint,
         selected_settings=selected.settings,
         settings_fingerprint=_fingerprint(asdict(selected.settings)),
         advisory_quality_passed=not quality_reasons,

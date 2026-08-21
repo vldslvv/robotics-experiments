@@ -1,93 +1,98 @@
 # Flight parameters
 
 The flight-parameters workflow measures task-neutral vehicle behavior and
-publishes a strict artifact for controller alignment, policy training, and
-future simulator-to-hardware comparison. It does not know about switches,
-walls, press tasks, rewards, or policy observations.
+publishes the one strict evidence contract shared by controller alignment and
+policy training. It has no switch, wall, reward, policy-observation, or
+consumer-specific fields.
 
-## Contract
+## Schema-1 contract
 
-`robotics_experiments.flight_parameters` is a host-safe module with one flow:
+`robotics_experiments.flight_parameters` owns this flow:
 
-`flight config -> independent flight traces -> flight envelope`
+`flight-parameters config -> complete behavior traces -> FlightParameters`
 
-Schema 1 supports only the `hover` scenario. The config and artifact carry a
-scenario discriminator so later flight parameters can be added without putting
-task logic into the module. The production config is
-`configs/flight/holybro_x500_v2_hover.yaml`.
+Schema 1 is the only supported schema. There are no legacy envelope schemas,
+migrations, aliases, or compatibility loaders. Its configured behavior kinds
+are:
 
-The configured hover procedure is:
+- `hover`: repeated verified PX4 position holds used for general hover bounds
+  and distribution statistics;
+- `controller-response`: lossless command/response evidence covering the fit,
+  validation, stability, velocity, braking, yaw, and CTBR profiles currently
+  required by controller alignment.
 
-1. Start fresh PX4 SITL and Isaac processes for one trial.
-2. Send only arm and takeoff commands to the configured target pose.
-3. Capture a 51-second raw simulator ground-truth pose candidate at 20 Hz from
-   the start of the routine's hover step. The routine label is not accepted as
-   proof that the aircraft is hovering.
-4. Decode the completed PX4 ULog inside `flight_parameters`. Require the exact
-   external arm/takeoff command sequence and the PX4 transition
-   `AUTO_TAKEOFF -> AUTO_LOITER` within 15 seconds.
-5. Reject the trial if PX4 leaves `AUTO_LOITER`, enters OFFBOARD, is not armed
-   in automatic multicopter position control, reports ground contact, receives
-   a goto/reposition/landing/other external command, or changes its active
-   position or yaw goal before the measurement completes.
-6. Starting six seconds after the verified `AUTO_LOITER` transition, select
-   exactly 30 seconds of pose samples at 20 Hz. PX4 mode, control-mode, and
-   land-state reports must remain fresh throughout the selected interval.
-7. Complete the routine, tear down the ephemeral simulator, and retain the raw
-   trace, decoded verification record, selected neutral trace, ULog, and bridge
-   log.
-8. Repeat the complete trial 30 times, then derive one envelope from all 18,000
-   verified samples.
+The production config is `configs/flight/holybro_x500_v2_hover.yaml`. Behavior
+repetitions are explicit. Hover currently has 30 repetitions and controller
+response has one. If an alignment definition later requires repeated fit or
+validation evidence, the response repetition count must be raised and every
+configured repetition must be present before publication.
 
-This is 30 independent 30-second measurements, not one long hover split into
-windows. Independent process, estimator, takeoff, and settling histories are
-part of the evidence distribution. `execution.worker_count` controls safe
-campaign concurrency without changing trial identities or aggregation order.
-The six-second settling interval is measured from PX4's verified
-`AUTO_LOITER` transition. It excludes the repeatable vertical convergence seen
-during the first five seconds after loiter while retaining the steady hover
-variation that follows.
+## Hover collection and statistics
 
-Run the campaign from the repository root:
+Each hover repetition starts fresh PX4 SITL and Isaac processes. The collector
+sends only arm and takeoff, decodes the completed ULog inside
+`flight_parameters`, and proves the external commands, `AUTO_TAKEOFF ->
+AUTO_LOITER` transition, automatic position control, armed and airborne state,
+fresh reports, and unchanged held position/yaw goal. A routine label, elapsed
+time, or low velocity is not accepted as proof of hover.
+
+Six seconds after verified loiter entry, the collector retains exactly 30
+seconds at 20 Hz. All 600 samples in each trace are preserved. The published
+hover bounds use every sample from all 30 repetitions, expanded by the authored
+position and attitude margins. This full window is the controller-alignment
+qualification input and must not be shortened or resampled.
+
+For every trace, schema 1 also records raw minimum, raw maximum, maximum
+absolute error, RMSE, absolute p95, and absolute p99 for:
+
+- ENU X/Y/Z position error;
+- horizontal and three-dimensional position-error norms;
+- relative roll/pitch/yaw error;
+- tilt and quaternion-geodesic orientation error.
+
+Both full-window statistics and policy-window statistics are retained. Policy
+qualification discards the configured first six seconds and evaluates the
+final 24 seconds. `hover.acceptance_limits` is the conservative per-statistic
+limit across the 30 policy windows plus the authored unit-appropriate margin.
+Maximum absolute error, RMSE, p95, and p99 are all binding policy gates.
+
+## Controller-response collection
+
+Controller-response capture executes the complete configured profile suite at
+the exact command cadence and retains the original
+`flight_parameters_response.json`, completed
+ULog, and bridge log for each repetition. The trace is augmented from its ULog
+with the complete controller-boundary state before the flight-parameters bundle
+is finalized. No field, sample, command, timestamp, fit/validation split, or
+controller-boundary value is reduced in the artifact.
+
+Alignment preparation resolves one immutable `FlightParametersBundle`, pins it
+inside the alignment run, and validates before fitting that the response has:
+
+- every required profile exactly once and in authored order;
+- exact family, control mode, metric, split, and axis identity;
+- the exact command sequence, duration-derived sample count, and cadence;
+- complete samples and valid controller-boundary state;
+- the configured response repetitions and matching definition fingerprint.
+
+It then copies the reference JSON, ULog, and bridge log byte-for-byte into the
+filenames expected by the existing alignment workflow. Alignment search,
+metrics, ranking, fit/validation behavior, actuator audit, controller-boundary
+replay, and publication gates are unchanged.
+
+## Artifact publication
+
+Run the complete campaign from the repository root:
 
 ```bash
-make measure-flight-envelope
+make measure-flight-parameters
 ```
 
-## Hover envelope
-
-The hover envelope contains only error relative to the PX4-verified held pose:
-
-- ENU position-error observed minimum, observed maximum, lower bound, and upper
-  bound for X, Y, and Z;
-- observed maximum and upper bound for horizontal and three-dimensional
-  position-error norms;
-- relative roll, pitch, and yaw observed minimum, observed maximum, lower
-  bound, and upper bound;
-- observed maximum and upper bound for tilt and full quaternion geodesic
-  orientation error.
-
-The effective position target is reconstructed from PX4's accepted global
-takeoff goal and the trial's PX4 home anchor. The effective yaw target combines
-PX4's held NED yaw with the simultaneous simulator attitude and PX4 local
-heading, so the selected trace and target share one world frame. The authored
-config target remains in the raw and verification records for diagnosis; it is
-not assumed to be the target PX4 actually held.
-
-The published bounds are the extrema across every complete verified trace
-expanded by the configured 0.005 m position and 0.25 degree attitude margins.
-The artifact also records trial/sample counts, timing, vehicle and experiment
-fingerprints, source image/commit, the ordered evidence fingerprint, and its
-canonical payload fingerprint. Velocity, body rate, actuator output,
-wall-relative position, and switch state are not hover-envelope dimensions.
-
-## Artifacts and consumers
-
-Each immutable run is stored under:
+Each run is immutable and timestamped:
 
 ```text
-.build/flight-envelopes/<flight-id>/<run-id>/
-  flight_envelope.json
+.build/flight-parameters/<flight-parameters-id>/<run-id>/
+  flight_parameters.json
   campaign.json
   evidence/trial-001/raw_trace.json
   evidence/trial-001/hover_verification.json
@@ -95,35 +100,27 @@ Each immutable run is stored under:
   evidence/trial-001/bridge.log
   evidence/trial-001/flight.ulg
   ...
+  response/repetition-001/flight_parameters_response.json
+  response/repetition-001/flight_parameters.ulg
+  response/repetition-001/flight_parameters_bridge.log
   manifest.json
 ```
 
-The verification record contains the accepted commands and acknowledgements,
-PX4 mode transitions, active position goals, selected time interval, control
-and land-state report counts, effective target, PX4 version, hashes of its raw
-trace and ULog, and a canonical verification fingerprint. The envelope binds
-the ordered set of those fingerprints. The exact manifest inventories every
-payload by relative path, size, and SHA-256.
+`flight_parameters.json` has artifact kind
+`robotics-experiments-flight-parameters`, schema version 1, `created_at_utc`,
+the complete hover and response records, source/configuration fingerprints, an
+ordered evidence fingerprint, and a canonical artifact fingerprint. Nested
+JSON evidence kinds use the same `robotics-experiments-flight-parameters-*`
+prefix. The exact manifest inventories every file by relative path, size, and
+SHA-256.
 
-Only a complete valid bundle is published. Publication atomically advances the
-relative symlink `.build/flight-envelopes/<flight-id>/latest` to the immutable
-run. There is no `best` label because an envelope is measured evidence, not a
-ranked candidate.
+Publication succeeds only after every configured hover and response repetition
+and every manifest hash validates. It atomically advances the relative symlink
+`.build/flight-parameters/<flight-parameters-id>/latest` to that immutable run.
+There is no `best` label because these are measured inputs, not ranked
+candidates.
 
-Controller alignment requires the artifact and replays a dedicated
-`stability-hover-pose` probe through the selected Isaac Lab settings. A
-controller cannot pass quality when its simulated position or attitude leaves
-the measured bounds. The accepted controller records the exact envelope
-fingerprint.
-
-RL training independently resolves and validates the configured `latest`
-bundle before constructing Isaac Lab. It requires the envelope fingerprint to
-match the qualified controller, and embeds the complete envelope plus its file
-digest in every policy artifact. Reward and termination design can therefore
-consume the task-neutral pose bounds without importing alignment or the flight
-collector.
-
-For hardware alignment, add a hardware collection backend that emits the same
-neutral trace contract and preserve the scenario dimensions. Simulator and
-hardware envelopes can then be compared at the position/pose boundary while
-ULogs and bridge/device logs diagnose controller, estimator, or plant causes.
+Alignment and RL record the exact artifact fingerprint. They never silently
+switch to a newer `latest`: alignment pins the resolved run during preparation,
+and training rejects a flight-parameters artifact that does not match its
+controller qualification.

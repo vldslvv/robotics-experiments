@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 from robotics_experiments.flight_parameters import (
-    FlightConfig,
+    FlightParametersConfig,
     FlightTrace,
 )
 from robotics_experiments.flight_parameters._artifact import _verification_fingerprint
@@ -212,23 +212,23 @@ def _effective_position_target(
 
 
 def _measurement_indices(
-    *, config: FlightConfig, raw: RawFlightTrace, loiter_enter_us: int
+    *, config: FlightParametersConfig, raw: RawFlightTrace, loiter_enter_us: int
 ) -> tuple[int, ...]:
-    desired_start_us = loiter_enter_us + round(config.scenario.settle_s * 1_000_000)
+    desired_start_us = loiter_enter_us + round(config.hover.settle_s * 1_000_000)
     start = int(np.searchsorted(raw.time_us, desired_start_us, side="left"))
-    count = round(config.scenario.measure_s * config.scenario.sample_rate_hz)
+    count = round(config.hover.measure_s * config.hover.sample_rate_hz)
     stop = start + count
     if stop > len(raw.time_us):
         raise ValueError("raw pose trace does not cover the verified hover measurement")
     indices = tuple(range(start, stop))
-    period_us = 1_000_000.0 / config.scenario.sample_rate_hz
+    period_us = 1_000_000.0 / config.hover.sample_rate_hz
     for index in indices:
         expected_us = raw.time_us[0] + round(index * period_us)
         phase_us = raw.time_us[index] - expected_us
         if not 0 <= phase_us < period_us:
             raise ValueError("raw pose trace does not contain one sample per configured time bin")
     start_us = raw.time_us[start]
-    required_end_us = start_us + round(config.scenario.measure_s * 1_000_000)
+    required_end_us = start_us + round(config.hover.measure_s * 1_000_000)
     if raw.time_us[indices[-1]] >= required_end_us:
         raise ValueError("raw pose trace measurement timestamps exceed the selected interval")
     return indices
@@ -327,7 +327,7 @@ def _verified_yaw_target(
 
 def verify_px4_hover_evidence(
     *,
-    config: FlightConfig,
+    config: FlightParametersConfig,
     raw: RawFlightTrace,
     log: ParsedPx4HoverLog,
     raw_trace_sha256: str,
@@ -338,7 +338,7 @@ def verify_px4_hover_evidence(
     if not raw.completed or raw.failure_reason:
         raise ValueError("PX4 hover verification requires a complete raw trace")
     if (
-        raw.flight_id != config.flight_id
+        raw.flight_parameters_id != config.flight_parameters_id
         or raw.config_fingerprint != config.config_fingerprint
         or raw.source_backend != config.source_backend
         or raw.state_source != config.state_source
@@ -369,7 +369,7 @@ def verify_px4_hover_evidence(
     if loiter is None:
         raise ValueError("PX4 never transitioned from AUTO_TAKEOFF to AUTO_LOITER")
     if loiter.timestamp_us - raw.time_us[0] > round(
-        config.scenario.mode_transition_timeout_s * 1_000_000
+        config.hover.mode_transition_timeout_s * 1_000_000
     ):
         raise ValueError("PX4 AUTO_LOITER transition exceeded the configured timeout")
     unexpected = [
@@ -384,7 +384,7 @@ def verify_px4_hover_evidence(
     indices = _measurement_indices(config=config, raw=raw, loiter_enter_us=loiter.timestamp_us)
     sample_times_us = tuple(raw.time_us[index] for index in indices)
     measurement_start_us = sample_times_us[0]
-    measurement_end_us = measurement_start_us + round(config.scenario.measure_s * 1_000_000)
+    measurement_end_us = measurement_start_us + round(config.hover.measure_s * 1_000_000)
     departed_loiter = [
         event.mode
         for event in modes
@@ -395,7 +395,7 @@ def verify_px4_hover_evidence(
         raise ValueError(
             "PX4 left AUTO_LOITER before the hover measurement completed: " f"{departed_loiter}"
         )
-    max_age_us = round(config.scenario.mode_report_max_age_s * 1_000_000)
+    max_age_us = round(config.hover.mode_report_max_age_s * 1_000_000)
     control_count, land_count = _verify_measurement_state(
         log=log,
         sample_times_us=sample_times_us,
@@ -433,9 +433,9 @@ def verify_px4_hover_evidence(
         max_age_us=max_age_us,
     )
     verification = HoverVerification(
-        artifact_kind="robotics-experiments-px4-hover-verification",
+        artifact_kind="robotics-experiments-flight-parameters-px4-hover-verification",
         schema_version=1,
-        flight_id=raw.flight_id,
+        flight_parameters_id=raw.flight_parameters_id,
         campaign_run_id=raw.campaign_run_id,
         trial_index=raw.trial_index,
         config_fingerprint=raw.config_fingerprint,
@@ -468,9 +468,9 @@ def verify_px4_hover_evidence(
         }
     )
     trace = FlightTrace(
-        artifact_kind="robotics-experiments-flight-trace",
+        artifact_kind="robotics-experiments-flight-parameters-trace",
         schema_version=1,
-        flight_id=raw.flight_id,
+        flight_parameters_id=raw.flight_parameters_id,
         campaign_run_id=raw.campaign_run_id,
         trial_index=raw.trial_index,
         source_backend=raw.source_backend,
@@ -484,7 +484,7 @@ def verify_px4_hover_evidence(
         measurement_end_us=measurement_end_us,
         target_position_enu_m=effective_position,
         target_attitude_flu_enu_wxyz=effective_attitude,
-        time_s=tuple(index / config.scenario.sample_rate_hz for index in range(len(indices))),
+        time_s=tuple(index / config.hover.sample_rate_hz for index in range(len(indices))),
         position_enu_m=tuple(raw.position_enu_m[index] for index in indices),
         attitude_flu_enu_wxyz=tuple(raw.attitude_flu_enu_wxyz[index] for index in indices),
         completed=True,

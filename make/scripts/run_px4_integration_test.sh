@@ -100,7 +100,7 @@ done
 : "${INTEGRATION_LOG_TAIL_LINES:=120}"
 : "${INTEGRATION_VERBOSE:=0}"
 : "${ISAAC_TEST_EXTRA_ARGS:=}"
-: "${ALIGNMENT_CAPTURE_RUN_DIR:=}"
+: "${FLIGHT_PARAMETERS_RESPONSE_DIR:=}"
 : "${FLIGHT_PARAMETERS_CONFIG:=}"
 : "${FLIGHT_PARAMETERS_RUN_ID:=}"
 : "${FLIGHT_PARAMETERS_TRIAL_INDEX:=}"
@@ -299,16 +299,16 @@ cleanup() {
     done
     integration_timing "remove_px4_containers" "${stage_start_ms}"
 
-    if [ -n "${ALIGNMENT_CAPTURE_RUN_DIR}" ]; then
-        mapfile -t alignment_ulogs < <(find "${PX4_LOGS}" -type f -name '*.ulg' -print)
-        if [ "${#alignment_ulogs[@]}" -ne 1 ]; then
-            echo "Alignment capture expected exactly one ULog, found ${#alignment_ulogs[@]}." >&2
+    if [ -n "${FLIGHT_PARAMETERS_RESPONSE_DIR}" ]; then
+        mapfile -t flight_parameter_response_ulogs < <(find "${PX4_LOGS}" -type f -name '*.ulg' -print)
+        if [ "${#flight_parameter_response_ulogs[@]}" -ne 1 ]; then
+            echo "Flight-parameter response capture expected exactly one ULog, found ${#flight_parameter_response_ulogs[@]}." >&2
             status=1
             timing_status="fail"
         else
-            mkdir -p "${ALIGNMENT_CAPTURE_RUN_DIR}"
-            cp "${alignment_ulogs[0]}" "${ALIGNMENT_CAPTURE_RUN_DIR}/reference.ulg"
-            echo "  Alignment ULog: ${ALIGNMENT_CAPTURE_RUN_DIR}/reference.ulg"
+            mkdir -p "${FLIGHT_PARAMETERS_RESPONSE_DIR}"
+            cp "${flight_parameter_response_ulogs[0]}" "${FLIGHT_PARAMETERS_RESPONSE_DIR}/flight_parameters.ulg"
+            echo "  Flight-parameter response ULog: ${FLIGHT_PARAMETERS_RESPONSE_DIR}/flight_parameters.ulg"
         fi
     fi
 

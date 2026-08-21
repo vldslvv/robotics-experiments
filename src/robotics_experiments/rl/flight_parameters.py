@@ -1,4 +1,4 @@
-"""Batched NumPy/torch evaluation of a measured flight envelope."""
+"""Batched NumPy/torch evaluation of measured hover parameters."""
 
 from __future__ import annotations
 
@@ -8,16 +8,16 @@ from typing import Generic, TypeVar
 import numpy as np
 import torch
 
-from robotics_experiments.flight_parameters import FlightEnvelope
+from robotics_experiments.flight_parameters import FlightParameters
 
-__all__ = ["FlightEnvelopeEvaluation", "evaluate_flight_envelope"]
+__all__ = ["HoverEvaluation", "evaluate_flight_parameters"]
 
 ArrayT = TypeVar("ArrayT", np.ndarray, torch.Tensor)
 
 
 @dataclass(frozen=True)
-class FlightEnvelopeEvaluation(Generic[ArrayT]):
-    """Per-sample pose errors and maximum measured-envelope utilization."""
+class HoverEvaluation(Generic[ArrayT]):
+    """Per-sample pose errors and maximum measured-parameter utilization."""
 
     position_error_enu_m: ArrayT
     attitude_error_rpy_rad: ArrayT
@@ -83,15 +83,15 @@ def _component_utilization(*, value: ArrayT, lower: ArrayT, upper: ArrayT) -> Ar
     return abs(value) / scale
 
 
-def evaluate_flight_envelope(
+def evaluate_flight_parameters(
     *,
-    envelope: FlightEnvelope,
+    flight_parameters: FlightParameters,
     position_error_enu_m: ArrayT,
     attitude_error_flu_enu_wxyz: ArrayT,
-) -> FlightEnvelopeEvaluation[ArrayT]:
-    """Evaluate batched pose errors against one immutable measured envelope."""
+) -> HoverEvaluation[ArrayT]:
+    """Evaluate batched pose errors against immutable measured parameters."""
 
-    hover = envelope.hover
+    hover = flight_parameters.hover
     position_bounds = hover.position_error_enu_m
     attitude_bounds = hover.attitude_error_rpy_rad
     position_components = _component_utilization(
@@ -121,7 +121,7 @@ def evaluate_flight_envelope(
             orientation / hover.orientation_error_rad.upper,
         )
     )
-    return FlightEnvelopeEvaluation(
+    return HoverEvaluation(
         position_error_enu_m=position_error_enu_m,
         attitude_error_rpy_rad=rpy,
         horizontal_position_error_m=horizontal,

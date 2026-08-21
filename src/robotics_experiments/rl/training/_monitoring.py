@@ -18,7 +18,7 @@ __all__ = [
     "write_system_scalars",
 ]
 
-METRIC_REGISTRY_REVISION = 12
+METRIC_REGISTRY_REVISION = 13
 
 
 class _ScalarWriter(Protocol):

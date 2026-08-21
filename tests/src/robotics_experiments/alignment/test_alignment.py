@@ -32,6 +32,7 @@ from robotics_experiments.alignment._artifact import (
     validate_alignment_bundle,
     write_alignment_result,
 )
+from robotics_experiments.alignment._flight_parameters import _validated_payload
 from robotics_experiments.alignment._io import (
     _index_candidate_diagnostics,
     _trace,
@@ -351,7 +352,7 @@ def _definition(
         controller_schema_version=1,
         backend=backend,
         experiment_config=str(experiment),
-        flight_envelope_artifact=str(REPO_ROOT / "tests/fixtures/flight_envelope"),
+        flight_parameters_artifact=str(REPO_ROOT / "tests/fixtures/flight_parameters"),
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
@@ -518,6 +519,69 @@ def test_trace_rejects_out_of_range_initial_hover_thrust() -> None:
 
     with pytest.raises(ValueError, match="must not exceed 1"):
         _trace(value=raw, name="trace")  # noqa: SLF001 - trace validation contract
+
+
+def test_flight_parameters_response_preserves_complete_alignment_input(
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    traces = tuple(
+        replace(trace, initial_controller_state_valid=True)
+        for trace in _response_traces(
+            profiles=definition.profiles,
+            settings=definition.base_settings,
+        )
+    )
+    path = tmp_path / "flight_parameters_response.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "controller_id": definition.controller_id,
+                "definition_fingerprint": definition.definition_fingerprint,
+                "traces": [asdict(trace) for trace in traces],
+            }
+        )
+    )
+
+    payload = _validated_payload(
+        path=path,
+        definition=definition,
+        expected_profile_count=len(definition.profiles),
+    )
+
+    assert payload["traces"] == json.loads(json.dumps([asdict(trace) for trace in traces]))
+
+
+def test_flight_parameters_response_rejects_reduced_alignment_input(
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    traces = tuple(
+        replace(trace, initial_controller_state_valid=True)
+        for trace in _response_traces(
+            profiles=definition.profiles,
+            settings=definition.base_settings,
+        )
+    )
+    path = tmp_path / "flight_parameters_response.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "controller_id": definition.controller_id,
+                "definition_fingerprint": definition.definition_fingerprint,
+                "traces": [asdict(trace) for trace in traces[:-1]],
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="every alignment profile"):
+        _validated_payload(
+            path=path,
+            definition=definition,
+            expected_profile_count=len(definition.profiles),
+        )
 
 
 def test_ctbr_family_has_independent_roll_pitch_yaw_and_collective_gates() -> None:
@@ -793,7 +857,7 @@ def test_alignment_reloads_only_selected_traces_after_scored_search() -> None:
     assert evaluator.trace_loads == 1
 
 
-def test_alignment_selects_response_candidate_inside_flight_envelope() -> None:
+def test_alignment_selects_response_candidate_inside_flight_parameters() -> None:
     class EnvelopeChoiceEvaluator(_Evaluator):
         _retain_traces = False
 

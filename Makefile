@@ -49,11 +49,11 @@ help:
 		'Controller alignment targets:' \
 		'' \
 		'  make align-controllers     Capture PX4 probes, sweep Lab, fit, and publish' \
-		'  make alignment-capture-reference Capture task-neutral PX4 velocity probes' \
+		'  make alignment-prepare-reference Prepare PX4 response probes from flight parameters' \
 		'  make alignment-sweep-target Replay all declarative Isaac Lab candidates' \
 		'  make alignment-fit         Score candidates and update latest/best links' \
 		'  make test-integration-alignment-target Validate the selected target envelope' \
-		'  make measure-flight-envelope Capture and publish task-neutral hover parameters' \
+		'  make measure-flight-parameters Capture and publish task-neutral flight parameters' \
 		'' \
 		'RL, Isaac Lab, and press workflow targets:' \
 		'' \

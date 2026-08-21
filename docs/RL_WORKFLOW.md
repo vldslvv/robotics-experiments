@@ -20,12 +20,12 @@ lazy `robotics_experiments.workflows.isaac_lab` package.
 RL never imports alignment. Before Isaac Lab is constructed, training loads a
 quality-passing schema-1 controller artifact and validates its vehicle, airframe,
 cadence, certified control mode, and four-dimensional action contract. It also
-loads the task-neutral schema-1 flight envelope, validates its complete bundle,
+loads the task-neutral schema-1 flight parameters, validates its complete bundle,
 vehicle and PX4 SITL source, and requires its fingerprint to match the
 controller's hover qualification. Policy metadata embeds the complete
-controller and flight-envelope records with their digests. Evaluation and
+controller and flight-parameters records with their digests. Evaluation and
 deployment reuse those embedded records; they never resolve newer alignment or
-flight-parameter publications implicitly. The collection and envelope contract
+flight-parameter publications implicitly. The collection and statistics contract
 is defined in `docs/FLIGHT_PARAMETERS.md`.
 
 The registered tasks are `Isaac-Drone-Hover-Direct-v1` and
@@ -298,12 +298,12 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 15 records every attempt, phase parent, raw
+`training_report.json` schema 16 records every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries, cache source,
 plateau state, phase termination, selection, final test, and gate-by-gate
 acceptance. The evaluator, cache, metric registry, and comparison fingerprint
-carry evaluator revision 18, metric-registry revision 12, comparison revision 17,
-and validation-cache v17; older metric/report shapes and cached evaluations are
+carry evaluator revision 19, metric-registry revision 13, comparison revision 18,
+and validation-cache v18; older metric/report shapes and cached evaluations are
 unsupported. Flight failure and timeout each cost 3.0 in checkpoint ranking, so
 the selector cannot improve merely by converting failed attempts into waits.
 
@@ -312,16 +312,21 @@ disjoint final workload: 100 episodes for each of seeds 404, 505, and 606. The
 resulting raw `PolicyEvaluation` is the sole input to
 `evaluate_press_acceptance`. Every gate is independently binding: finite traces,
 at least 0.95 success, zero collision, at least 0.40 m minimum closest
-range, and exactly zero other flight failures. Test data cannot affect training,
+range, exactly zero other flight failures, and the flight-parameters maximum,
+RMSE, p95, and p99 limit for every hover error signal. Hover statistics use the
+final 24 seconds of the successful 30-second stable hold; the first six seconds
+are the artifact-configured policy warmup. The evaluator records every raw
+statistic in the `PolicyEvaluation` and `training_report.json`; acceptance adds
+no consumer-owned tolerance. Test data cannot affect training,
 phase advancement, checkpoint selection, or retries. A test failure ends the
 command immediately and preserves evidence without publishing.
 
 A policy artifact is exactly `policy.pt` plus `policy_meta.json`. Metadata uses
 the strict schema-1 `robotics-experiments-policy` contract and records policy
 interface, observation/action contracts, cadence, controller artifact and
-digest, flight-envelope artifact and digest, comparison fingerprint, source
+digest, flight-parameters artifact and digest, comparison fingerprint, source
 commit, dirty state, and training phase provenance. Older policy schemas and
-policies without complete controller and flight-envelope provenance are
+policies without complete controller and flight-parameters provenance are
 unsupported.
 
 On acceptance, publication copies the already-tested actor bytes and verifies

@@ -13,7 +13,7 @@ import pytest
 
 from robotics_experiments.commanding import PolicyInput
 from robotics_experiments.controller import ControllerArtifact, ControllerSettings
-from robotics_experiments.flight_parameters import FlightEnvelope, load_flight_envelope
+from robotics_experiments.flight_parameters import FlightParameters, load_flight_parameters
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     METADATA_FILENAME,
@@ -98,8 +98,8 @@ def _controller_settings() -> ControllerSettings:
     )
 
 
-def _flight_envelope() -> FlightEnvelope:
-    return load_flight_envelope(REPO_ROOT / "tests/fixtures/flight_envelope")
+def _flight_parameters() -> FlightParameters:
+    return load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters")
 
 
 def _controller_artifact() -> ControllerArtifact:
@@ -123,7 +123,7 @@ def _controller_artifact() -> ControllerArtifact:
         command_rate_hz=20.0,
         certified_control_modes=("velocity", "ctbr"),
         probe_suite_fingerprint="probes",
-        flight_envelope_fingerprint=_flight_envelope().artifact_fingerprint,
+        flight_parameters_fingerprint=_flight_parameters().artifact_fingerprint,
         selected_settings=settings,
         settings_fingerprint=hashlib.sha256(
             json.dumps(
@@ -154,8 +154,8 @@ def _metadata(
         action_cfg=action_cfg,
         controller_artifact=_controller_artifact(),
         controller_digest="digest",
-        flight_envelope=_flight_envelope(),
-        flight_envelope_digest="envelope-digest",
+        flight_parameters=_flight_parameters(),
+        flight_parameters_digest="flight-parameters-digest",
         obs_schema_version=1,
         obs_dim=obs_dim,
         policy_rate_hz=rate_hz,
@@ -233,9 +233,9 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
         load_policy_metadata(artifact_dir=tmp_path)
 
 
-def test_policy_rejects_flight_envelope_not_qualified_by_controller(tmp_path: Path) -> None:
+def test_policy_rejects_flight_parameters_not_qualified_by_controller(tmp_path: Path) -> None:
     metadata = _metadata()
-    metadata["controller"]["artifact"]["flight_envelope_fingerprint"] = "other-envelope"
+    metadata["controller"]["artifact"]["flight_parameters_fingerprint"] = "other-flight-parameters"
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
 
     with pytest.raises(ValueError, match="does not match its controller"):
@@ -311,9 +311,9 @@ def test_metadata_rejects_every_legacy_artifact(tmp_path: Path) -> None:
         load_policy_metadata(artifact_dir=tmp_path)
 
     legacy_envelope = _metadata()
-    legacy_envelope.pop("flight_envelope")
+    legacy_envelope.pop("flight_parameters")
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_envelope))
-    with pytest.raises(ValueError, match="flight_envelope"):
+    with pytest.raises(ValueError, match="flight_parameters"):
         load_policy_metadata(artifact_dir=tmp_path)
 
 
@@ -446,8 +446,8 @@ def test_hover_adapter_requires_hold_duration() -> None:
             controller_run_id="test-run",
             controller_digest="digest",
             controller_comparison_fingerprint="comparison",
-            flight_envelope=_flight_envelope(),
-            flight_envelope_digest="envelope-digest",
+            flight_parameters=_flight_parameters(),
+            flight_parameters_digest="flight-parameters-digest",
             values={},
         ),
         inference=lambda observation: np.zeros(4),
@@ -483,8 +483,8 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
             controller_run_id="test-run",
             controller_digest="digest",
             controller_comparison_fingerprint="comparison",
-            flight_envelope=_flight_envelope(),
-            flight_envelope_digest="envelope-digest",
+            flight_parameters=_flight_parameters(),
+            flight_parameters_digest="flight-parameters-digest",
             values={},
         ),
         inference=lambda observation: inference_calls.append(observation) or np.ones(4),  # type: ignore[func-returns-value]  # concise call recording
@@ -536,8 +536,8 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
             controller_run_id="test-run",
             controller_digest="digest",
             controller_comparison_fingerprint="comparison",
-            flight_envelope=_flight_envelope(),
-            flight_envelope_digest="envelope-digest",
+            flight_parameters=_flight_parameters(),
+            flight_parameters_digest="flight-parameters-digest",
             values={},
         ),
         inference=lambda _observation: np.array([1.2, -0.5, 0.25, -0.1]),
@@ -612,8 +612,8 @@ def test_current_press_artifact_preflights_when_available() -> None:
             validate_policy_artifact(artifact_dir=artifact)
         return
     controller = metadata.get("controller", {}).get("artifact", {})
-    if "flight_envelope_fingerprint" not in controller or "flight_envelope" not in metadata:
-        with pytest.raises(ValueError, match="flight_envelope|fields mismatch"):
+    if "flight_parameters_fingerprint" not in controller or "flight_parameters" not in metadata:
+        with pytest.raises(ValueError, match="flight_parameters|fields mismatch"):
             validate_policy_artifact(artifact_dir=artifact)
         return
     validated = _preflight_policy_artifacts(

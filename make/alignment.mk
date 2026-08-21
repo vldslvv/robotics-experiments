@@ -5,6 +5,7 @@
 ALIGNMENT_ID ?= x500-px4-v1
 ALIGNMENT_TARGET ?= configs/alignment/controllers/isaac_lab_x500_velocity.yaml
 ALIGNMENT_REFERENCE ?= configs/alignment/controllers/px4_sitl_x500_velocity.yaml
+FLIGHT_PARAMETERS_ARTIFACT ?= .build/flight-parameters/holybro-x500-v2-hover-v1/latest
 ALIGNMENT_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 ALIGNMENT_RUN_ID := $(ALIGNMENT_RUN_ID)
 ALIGNMENT_RUN_DIR = .build/alignment/$(ALIGNMENT_ID)/$(ALIGNMENT_RUN_ID)
@@ -12,31 +13,18 @@ ALIGNMENT_RUN_DIR_CONTAINER = $(ISAAC_PROJECT_DIR)/$(ALIGNMENT_RUN_DIR)
 ALIGNMENT_CAPACITY_BENCHMARK ?= 0
 ALIGNMENT_TARGET_CONTAINER = $(ISAAC_PROJECT_DIR)/$(ALIGNMENT_TARGET)
 ALIGNMENT_REFERENCE_CONTAINER = $(ISAAC_PROJECT_DIR)/$(ALIGNMENT_REFERENCE)
-ALIGNMENT_CAPTURE_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/alignment_capture_reference.py
 ALIGNMENT_SWEEP_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/alignment_sweep_target.py
 ALIGNMENT_FIT_SCRIPT = isaac/runtime/standalone/alignment_fit.py
 ALIGNMENT_AUDIT_SCRIPT = flight_analysis/tools/controller_state_replay.py
+ALIGNMENT_PREPARE_SCRIPT = make/scripts/prepare_alignment_reference.py
 
-.PHONY: alignment-capture-reference
-alignment-capture-reference: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-alignment-capture-reference: HYDRA_CONFIG = configs/alignment_px4_x500_velocity.yaml
-alignment-capture-reference: SCENE = @config
-alignment-capture-reference: generate-drone-usd
+.PHONY: alignment-prepare-reference
+alignment-prepare-reference:
 	@mkdir -p '$(ALIGNMENT_RUN_DIR)'
-	@TEST_TARGET='alignment-capture-reference' \
-	    ALIGNMENT_CAPTURE_RUN_DIR='$(ALIGNMENT_RUN_DIR)' \
-	    HOST_ISAAC_LOG_BASENAME='alignment_capture_reference.log' \
-	    HOST_PX4_LOG_BASENAME='alignment_capture_reference_px4.log' \
-	    ISAAC_TEST_LOG='/isaac-sim/.nvidia-omniverse/logs/alignment_capture_reference.log' \
-	    ISAAC_TEST_SCRIPT='$(ALIGNMENT_CAPTURE_SCRIPT)' \
-	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).alignment-capture-reference' \
-	    STRICT='1' \
-	    $(PX4_INTEGRATION_COMMON_ENV) \
-	    bash "$(PX4_INTEGRATION_RUNNER)"
-	@PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
-	    --config configs/alignment_px4_x500_velocity.yaml \
-	    --ulog '$(ALIGNMENT_RUN_DIR)/reference.ulg' \
-	    --augment-reference '$(ALIGNMENT_RUN_DIR)/reference.json'
+	@PYTHONPATH=src uv run python '$(ALIGNMENT_PREPARE_SCRIPT)' \
+	    --flight-parameters '$(FLIGHT_PARAMETERS_ARTIFACT)' \
+	    --definition '$(ALIGNMENT_REFERENCE)' \
+	    --run-dir '$(ALIGNMENT_RUN_DIR)'
 
 .PHONY: alignment-audit-actuators
 alignment-audit-actuators:
@@ -98,7 +86,7 @@ alignment-replay-controller:
 
 .PHONY: align-controllers
 align-controllers:
-	@$(MAKE) alignment-capture-reference ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \
+	@$(MAKE) alignment-prepare-reference ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \
 	    ALIGNMENT_TARGET='$(ALIGNMENT_TARGET)' ALIGNMENT_REFERENCE='$(ALIGNMENT_REFERENCE)'
 	@$(MAKE) alignment-audit-actuators ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)'
 	@$(MAKE) alignment-sweep-target ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \

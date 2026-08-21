@@ -31,10 +31,10 @@ from robotics_experiments.px4_bridge import (
     world_enu_to_body_flu,
 )
 
-_REFERENCE_ENV = "ALIGNMENT_REFERENCE"
-_RUN_DIR_ENV = "ROBOTICS_ALIGNMENT_RUN_DIR"
+_REFERENCE_ENV = "FLIGHT_PARAMETERS_RESPONSE_DEFINITION"
+_RUN_DIR_ENV = "FLIGHT_PARAMETERS_RESPONSE_DIR_CONTAINER"
 _DEFAULT_REFERENCE = "configs/alignment/controllers/px4_sitl_x500_velocity.yaml"
-_TEST_NAME = "alignment_capture_reference"
+_TEST_NAME = "flight_parameters_capture_response"
 
 
 @dataclass(frozen=True)
@@ -324,7 +324,9 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
 def _policy_factory(*, definition: ControllerDefinition, config: ExperimentConfig):
     def factory(*, artifact: str, hold_s: float | None) -> PolicyAdapter:
         if artifact != "alignment-probe" or hold_s is not None:
-            raise ValueError("alignment capture requires its injected alignment-probe step")
+            raise ValueError(
+                "flight-parameters response capture requires its injected alignment-probe step"
+            )
         return PolicyAdapter(
             policy_rate_hz=definition.command_rate_hz,
             initial_state=_ProbeState(
@@ -456,7 +458,7 @@ def _write_capture(
             }
         )
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "reference.json").write_text(
+    (run_dir / "flight_parameters_response.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
@@ -473,27 +475,7 @@ def _write_capture(
         )
         + "\n"
     )
-    shutil.copy2(bridge_log_path, run_dir / "bridge.log")
-    (run_dir / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "artifacts": {
-                    "reference_trace": "reference.json",
-                    "px4_ulog": "reference.ulg",
-                    "bridge_log": "bridge.log",
-                    "actuator_audit": "actuator_audit.json",
-                    "target_candidates": "target_candidates.json",
-                    "gpu_telemetry": "gpu_utilization.json",
-                    "controller_artifact": "controller.json",
-                    "controller_boundary_replay": "controller_boundary_replay.json",
-                },
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
+    shutil.copy2(bridge_log_path, run_dir / "flight_parameters_bridge.log")
 
 
 def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir: Path) -> None:
@@ -507,10 +489,10 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
 
         host = fleet.flying[0].spawned.host
         if host is None:
-            raise AssertionError("alignment capture retained no bridge host")
+            raise AssertionError("flight-parameters response capture retained no bridge host")
         debug_log_path = read_bridge_host_status(host=host).debug_log_path
         if debug_log_path is None:
-            raise AssertionError("alignment capture has no bridge debug log")
+            raise AssertionError("flight-parameters response capture has no bridge debug log")
         _write_capture(
             bridge_log_path=Path(debug_log_path),
             definition=definition,
@@ -522,11 +504,11 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
         context,
         Px4TakeoffScenarioOptions(
             test_name=_TEST_NAME,
-            px4_container_log_name="alignment_capture_reference_px4.log",
+            px4_container_log_name="flight_parameters_capture_response_px4.log",
             post_takeoff_hook=_deploy_pusher,
             post_routine_hook=post_routine,
             policy_factory=_policy_factory(definition=definition, config=context.config),
-            success_label="PX4 controller alignment probes",
+            success_label="PX4 flight-parameter response probes",
         ),
     )
 

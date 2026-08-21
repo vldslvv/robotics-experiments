@@ -36,7 +36,7 @@ fit/publication, and the alignment target-envelope gate.
 
 ## Targets
 
-`make measure-flight-envelope` is an owning campaign rather than part of the
+`make measure-flight-parameters` is an owning campaign rather than part of the
 aggregate integration suite. It invokes the internal
 `test-integration-flight-parameters-sample` target once per configured trial.
 Each invocation uses the ordinary strict PX4/Isaac harness with isolated
@@ -156,7 +156,7 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   along-track progress after that sample. The
   second leg remains speedless and protects OFFBOARD setpoint continuity across
   `goto` -> `hover`. The target passes only when **both** drones complete
-  without breaching their position, cross-track, or flight-envelope gates. It
+  without breaching their position, cross-track, or flight-parameters gates. It
   reuses the generic multi-PX4 launch path
   (`run_px4_integration_test.sh` over the enabled vehicles returned by
   `load_config(path)`, like

@@ -255,7 +255,7 @@ class PressResetConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachTerminationConfig(_FreezableConfig):
-    """Contact and flight-envelope failure conditions for approach."""
+    """Contact and flight-parameters failure conditions for approach."""
 
     crash_tilt_cos: float
     min_altitude_m: float
@@ -354,7 +354,7 @@ class RlTrainingConfig(_FreezableConfig):
             ``latest`` symlink.
         controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
-        flight_envelope_artifact: Flight-envelope bundle or publication link
+        flight_parameters_artifact: Flight-parameters bundle or publication link
             resolved and matched to the controller artifact before training.
         phases: Ordered curriculum phases executed by each fresh attempt.
         telemetry_sample_interval_s: Diagnostic hardware sampling cadence.
@@ -375,7 +375,7 @@ class RlTrainingConfig(_FreezableConfig):
     vehicle_id: int
     policy_name: str
     controller_artifact: str
-    flight_envelope_artifact: str
+    flight_parameters_artifact: str
     phases: List[RlTrainingPhaseConfig]
     plateau: RlPlateauCriteriaConfig
     evaluation_worker_timeout_s: float

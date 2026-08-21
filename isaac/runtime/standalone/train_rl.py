@@ -51,8 +51,8 @@ from robotics_experiments.controller import (
     resolve_controller_path,
 )
 from robotics_experiments.flight_parameters import (
-    FlightEnvelope,
-    load_flight_envelope_bundle,
+    FlightParameters,
+    load_flight_parameters_bundle,
 )
 from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
 from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
@@ -83,9 +83,9 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 15
-_CACHE_SCHEMA_VERSION = 17
-_EVALUATOR_REVISION = 18
+_REPORT_SCHEMA_VERSION = 16
+_CACHE_SCHEMA_VERSION = 18
+_EVALUATOR_REVISION = 19
 
 
 def _report(message: str) -> None:
@@ -166,7 +166,7 @@ def _build_env(
     num_envs: int | None,
     experiment_config: ExperimentConfig,
     controller_settings,
-    flight_envelope: FlightEnvelope,
+    flight_parameters: FlightParameters,
     policy_contract=None,
 ):
     # AppLauncher must start before the Isaac Lab workflow import.
@@ -179,7 +179,7 @@ def _build_env(
         seed=seed,
         num_envs=num_envs,
         policy_contract=policy_contract,
-        flight_envelope=flight_envelope,
+        flight_parameters=flight_parameters,
     )
 
 
@@ -191,15 +191,15 @@ def _artifact_metadata(
     artifact_run_id: str,
     controller_artifact: ControllerArtifact,
     controller_digest: str,
-    flight_envelope: FlightEnvelope,
-    flight_envelope_digest: str,
+    flight_parameters: FlightParameters,
+    flight_parameters_digest: str,
 ) -> dict[str, Any]:
     metadata = rl.policy_metadata(
         action_cfg=config.rl.action,
         controller_artifact=controller_artifact,
         controller_digest=controller_digest,
-        flight_envelope=flight_envelope,
-        flight_envelope_digest=flight_envelope_digest,
+        flight_parameters=flight_parameters,
+        flight_parameters_digest=flight_parameters_digest,
         obs_schema_version=int(env_cfg.observation_schema_version),
         obs_dim=int(env_cfg.observation_space),
         policy_rate_hz=config.rl.policy_rate_hz,
@@ -343,17 +343,17 @@ def _load_training_controller(
     return artifact, _file_sha256(controller_path)
 
 
-def _load_training_flight_envelope(
+def _load_training_flight_parameters(
     *,
     config: ExperimentConfig,
     controller_artifact: ControllerArtifact,
     repo_root: Path,
-) -> tuple[FlightEnvelope, str]:
-    artifact_path = Path(config.rl.training.flight_envelope_artifact)
+) -> tuple[FlightParameters, str]:
+    artifact_path = Path(config.rl.training.flight_parameters_artifact)
     if not artifact_path.is_absolute():
         artifact_path = repo_root / artifact_path
-    bundle = load_flight_envelope_bundle(path=artifact_path)
-    envelope = bundle.envelope
+    bundle = load_flight_parameters_bundle(path=artifact_path)
+    flight_parameters = bundle.flight_parameters
     try:
         vehicle_label = next(
             label
@@ -365,15 +365,15 @@ def _load_training_flight_envelope(
             f"rl.training.vehicle_id={config.rl.training.vehicle_id} is not in the experiment"
         ) from exc
     mismatches = []
-    if envelope.vehicle != vehicle_label:
-        mismatches.append(f"vehicle {envelope.vehicle!r} != {vehicle_label!r}")
-    if envelope.source_backend != "px4-sitl":
-        mismatches.append(f"source backend {envelope.source_backend!r} != 'px4-sitl'")
-    if envelope.artifact_fingerprint != controller_artifact.flight_envelope_fingerprint:
+    if flight_parameters.vehicle != vehicle_label:
+        mismatches.append(f"vehicle {flight_parameters.vehicle!r} != {vehicle_label!r}")
+    if flight_parameters.source_backend != "px4-sitl":
+        mismatches.append(f"source backend {flight_parameters.source_backend!r} != 'px4-sitl'")
+    if flight_parameters.artifact_fingerprint != controller_artifact.flight_parameters_fingerprint:
         mismatches.append("artifact fingerprint does not match the controller qualification")
     if mismatches:
-        raise ValueError("flight envelope is incompatible: " + "; ".join(mismatches))
-    return envelope, bundle.envelope_digest
+        raise ValueError("flight parameters are incompatible: " + "; ".join(mismatches))
+    return flight_parameters, bundle.flight_parameters_digest
 
 
 def _previous_stage_checkpoint(
@@ -382,7 +382,7 @@ def _previous_stage_checkpoint(
     repo_root: Path,
     contract: rl.PolicyContract,
     controller_digest: str,
-    flight_envelope_digest: str,
+    flight_parameters_digest: str,
 ) -> tuple[Path, dict[str, Any]] | None:
     stages = tuple(config.rl.press.curriculum.stages)
     active_index = next(
@@ -404,8 +404,8 @@ def _previous_stage_checkpoint(
         raise ValueError("previous press stage artifact does not match curriculum order")
     if metadata.controller_digest != controller_digest:
         raise ValueError("previous press stage uses a different controller artifact")
-    if metadata.flight_envelope_digest != flight_envelope_digest:
-        raise ValueError("previous press stage uses a different flight envelope")
+    if metadata.flight_parameters_digest != flight_parameters_digest:
+        raise ValueError("previous press stage uses a different flight parameters")
 
     report = json.loads((run_dir / _REPORT_FILENAME).read_text(encoding="utf-8"))
     acceptance = report.get("acceptance")
@@ -592,7 +592,7 @@ def _evaluation_worker_main(
             num_envs=evaluation_config.episodes_per_seed,
             experiment_config=config,
             controller_settings=metadata.controller_settings,
-            flight_envelope=metadata.flight_envelope,
+            flight_parameters=metadata.flight_parameters,
             policy_contract=metadata.contract,
         )
         telemetry = TelemetrySampler(
@@ -631,6 +631,7 @@ def _evaluation_worker_main(
                         hold_steps=round(
                             config.rl.press.selected_stage().hold_s * config.rl.policy_rate_hz
                         ),
+                        flight_parameters=candidate_metadata.flight_parameters,
                         report=_report,
                         trace_worst_episode=False,
                     )
@@ -1203,6 +1204,9 @@ def _finalize_campaign(
         evaluation=test_evaluation,
         evaluation_config=config.rl.press.evaluation,
         minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+        flight_parameters=rl.validate_policy_artifact(
+            artifact_dir=selection.artifact_dir
+        ).flight_parameters,
     )
     write_evaluation_scalars(
         writer=writer,
@@ -1277,8 +1281,8 @@ def _run_new_training(
     device: str,
     controller_artifact: ControllerArtifact,
     controller_digest: str,
-    flight_envelope: FlightEnvelope,
-    flight_envelope_digest: str,
+    flight_parameters: FlightParameters,
+    flight_parameters_digest: str,
     run_dir: Path,
     attempt_index_offset: int = 0,
 ) -> None:
@@ -1344,7 +1348,7 @@ def _run_new_training(
                 num_envs=args.num_envs,
                 experiment_config=config,
                 controller_settings=controller_artifact.selected_settings,
-                flight_envelope=flight_envelope,
+                flight_parameters=flight_parameters,
             )
             runner: Any = None
             evaluate_candidate: Any = None
@@ -1358,8 +1362,8 @@ def _run_new_training(
                         artifact_run_id=run_dir.name,
                         controller_artifact=controller_artifact,
                         controller_digest=controller_digest,
-                        flight_envelope=flight_envelope,
-                        flight_envelope_digest=flight_envelope_digest,
+                        flight_parameters=flight_parameters,
+                        flight_parameters_digest=flight_parameters_digest,
                     )
                     if metadata["policy_interface"] != rl.PolicyInterface.PRESS.value:
                         raise ValueError("campaign requires the press deterministic evaluator")
@@ -1370,7 +1374,7 @@ def _run_new_training(
                 attempt_fingerprint = _press_comparison_fingerprint(
                     config=config,
                     contract=contract,
-                    flight_envelope_fingerprint=flight_envelope.artifact_fingerprint,
+                    flight_parameters_fingerprint=flight_parameters.artifact_fingerprint,
                 )
                 if attempt_fingerprint is None:
                     raise ValueError("press campaign did not produce a comparison fingerprint")
@@ -1387,7 +1391,7 @@ def _run_new_training(
                     repo_root=repo_root,
                     contract=contract,
                     controller_digest=controller_digest,
-                    flight_envelope_digest=flight_envelope_digest,
+                    flight_parameters_digest=flight_parameters_digest,
                 )
                 metadata["initialization"] = (
                     {"method": env_cfg.policy_config.actor.output_initialization}
@@ -1560,6 +1564,7 @@ def _run_new_training(
                         evaluation=evaluation,
                         evaluation_config=config.rl.press.evaluation,
                         minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+                        flight_parameters=flight_parameters,
                     )
                     candidates.append(
                         _AttemptSelection(
@@ -2242,7 +2247,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             config=config,
             repo_root=repo_root,
         )
-        flight_envelope, flight_envelope_digest = _load_training_flight_envelope(
+        flight_parameters, flight_parameters_digest = _load_training_flight_parameters(
             config=config,
             controller_artifact=controller_artifact,
             repo_root=repo_root,
@@ -2257,8 +2262,8 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             device="cuda:0" if torch.cuda.is_available() else "cpu",
             controller_artifact=controller_artifact,
             controller_digest=controller_digest,
-            flight_envelope=flight_envelope,
-            flight_envelope_digest=flight_envelope_digest,
+            flight_parameters=flight_parameters,
+            flight_parameters_digest=flight_parameters_digest,
             run_dir=run_dir,
             attempt_index_offset=args.attempt_index,
         )

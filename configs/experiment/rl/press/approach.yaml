@@ -8,7 +8,7 @@ curriculum:
   stages:
     - name: hover
       reset_mix:
-        - source: pinned_flight_envelope
+        - source: pinned_flight_parameters
           weight: 1.0
       hold_s: 30.0
       training_hold_s: [5.0, 15.0, 30.0]
@@ -36,7 +36,7 @@ curriculum:
       reset_mix:
         - source: measured_navigation_handoff
           weight: 0.8
-        - source: pinned_flight_envelope
+        - source: pinned_flight_parameters
           weight: 0.2
       hold_s: 30.0
       training_hold_s: [30.0, 30.0, 30.0]
@@ -96,7 +96,7 @@ navigation_noise:
   relative_attitude_error_max_rad: 0.01633899543191001
 
 # The target is common to hover and approach. Acceptance replaces these legacy
-# pose tolerances with the pinned flight envelope; the center remains task-owned.
+# pose tolerances with the pinned flight parameters; the center remains task-owned.
 goal:
   range_min_m: 0.47
   range_max_m: 0.49

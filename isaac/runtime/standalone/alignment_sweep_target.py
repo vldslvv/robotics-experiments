@@ -679,7 +679,7 @@ def _initial_trace_actions(*, traces: list[dict[str, Any]], params, device) -> t
     return actions
 
 
-def _assert_flight_envelope(
+def _assert_flight_parameters(
     *,
     state: tuple[
         tuple[float, float, float],
@@ -722,7 +722,7 @@ def _assert_flight_envelope(
             f"{routine.max_angular_speed_rad_s:.2f}rad/s"
         )
     if failures:
-        raise RuntimeError("target flight-envelope failure: " + "; ".join(failures))
+        raise RuntimeError("target flight-parameters failure: " + "; ".join(failures))
 
 
 def _pad_family_traces(
@@ -872,7 +872,7 @@ def _candidate_trace_batch(
                         raise RuntimeError(
                             f"target probe {source['profile']!r} produced " "non-finite velocity"
                         )
-                    _assert_flight_envelope(
+                    _assert_flight_parameters(
                         state=flight_state,
                         initial_position=trace_initial_positions[trace_index],
                         routine=routine,

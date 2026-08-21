@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from robotics_experiments.config import RlTrainingPhaseConfig
-from robotics_experiments.flight_parameters import load_flight_envelope
+from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.training.progress import EvaluationMetric, PolicyEvaluation
 from tests.support.paths import REPO_ROOT
 
@@ -133,7 +133,7 @@ def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
         lambda **_kwargs: SimpleNamespace(
             contract=train_rl.replace(contract, curriculum_stage="hover"),
             controller_digest="controller-digest",
-            flight_envelope_digest="envelope-digest",
+            flight_parameters_digest="flight-parameters-digest",
             values={"selected_policy_digest": "policy-digest"},
         ),
     )
@@ -143,7 +143,7 @@ def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
         repo_root=tmp_path,
         contract=contract,
         controller_digest="controller-digest",
-        flight_envelope_digest="envelope-digest",
+        flight_parameters_digest="flight-parameters-digest",
     )
 
     assert selected is not None
@@ -223,7 +223,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance=None,
         status="training",
     )
-    assert report["schema_version"] == 15
+    assert report["schema_version"] == 16
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -409,7 +409,7 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         attempt_dir.mkdir()
         (attempt_dir / "attempt_report.json").write_text(
-            '{"schema_version": 15, "report_kind": "attempt", "status": "training"}\n'
+            '{"schema_version": 16, "report_kind": "attempt", "status": "training"}\n'
         )
         raise KeyboardInterrupt
 
@@ -567,34 +567,34 @@ def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path)
     assert metadata == {"source_commit": "abc123", "source_dirty": True}
 
 
-def test_training_flight_envelope_must_match_controller_qualification() -> None:
+def test_training_flight_parameters_must_match_controller_qualification() -> None:
     train_rl = _load_train_rl_module()
-    artifact_dir = REPO_ROOT / "tests/fixtures/flight_envelope"
-    envelope = load_flight_envelope(artifact_dir)
+    artifact_dir = REPO_ROOT / "tests/fixtures/flight_parameters"
+    flight_parameters = load_flight_parameters(artifact_dir)
     config = SimpleNamespace(
         rl=SimpleNamespace(
             training=SimpleNamespace(
-                flight_envelope_artifact=str(artifact_dir),
+                flight_parameters_artifact=str(artifact_dir),
                 vehicle_id=0,
             )
         ),
         vehicles={"x500_01": SimpleNamespace(id=0)},
     )
 
-    loaded, digest = train_rl._load_training_flight_envelope(  # noqa: SLF001
+    loaded, digest = train_rl._load_training_flight_parameters(  # noqa: SLF001
         config=config,
         controller_artifact=SimpleNamespace(
-            flight_envelope_fingerprint=envelope.artifact_fingerprint
+            flight_parameters_fingerprint=flight_parameters.artifact_fingerprint
         ),
         repo_root=REPO_ROOT,
     )
-    assert loaded == envelope
+    assert loaded == flight_parameters
     assert len(digest) == 64
 
     with pytest.raises(ValueError, match="does not match"):
-        train_rl._load_training_flight_envelope(  # noqa: SLF001
+        train_rl._load_training_flight_parameters(  # noqa: SLF001
             config=config,
-            controller_artifact=SimpleNamespace(flight_envelope_fingerprint="other"),
+            controller_artifact=SimpleNamespace(flight_parameters_fingerprint="other"),
             repo_root=REPO_ROOT,
         )
 

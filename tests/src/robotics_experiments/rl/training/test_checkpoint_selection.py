@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from robotics_experiments.config import RlPlateauCriteriaConfig
+from robotics_experiments.flight_parameters import SignalStatistics, load_flight_parameters
 from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.progress import (
     EvaluationMetric,
@@ -18,6 +19,10 @@ from robotics_experiments.rl.training.progress import (
 )
 from robotics_experiments.rl.training.selection import publish_policy_labels
 from tests.support.paths import REPO_ROOT
+
+_FLIGHT_PARAMETERS = load_flight_parameters(
+    REPO_ROOT / "tests/fixtures/flight_parameters/flight_parameters.json"
+)
 
 
 def _criteria(*, patience: int = 10) -> RlPlateauCriteriaConfig:
@@ -81,6 +86,19 @@ def _press_result(**overrides):
     return PressApproachEvaluationResult(
         summary=PressApproachEvaluationSummary(**values),
         reward_means=(),
+        hover_statistics=tuple(
+            SignalStatistics(
+                name=limit.name,
+                unit=limit.unit,
+                minimum=0.0,
+                maximum=0.0,
+                maximum_absolute=0.0,
+                rmse=0.0,
+                p95_absolute=0.0,
+                p99_absolute=0.0,
+            )
+            for limit in _FLIGHT_PARAMETERS.hover.acceptance_limits
+        ),
     )
 
 
@@ -120,22 +138,22 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
     fingerprint = _press_comparison_fingerprint(
         config=config,
         contract=contract,
-        flight_envelope_fingerprint="envelope-a",
+        flight_parameters_fingerprint="envelope-a",
     )
     assert fingerprint == _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, max_body_velocity_mps=3.0),
-        flight_envelope_fingerprint="envelope-a",
+        flight_parameters_fingerprint="envelope-a",
     )
     assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, obs_dim=35),
-        flight_envelope_fingerprint="envelope-a",
+        flight_parameters_fingerprint="envelope-a",
     )
     assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=contract,
-        flight_envelope_fingerprint="envelope-b",
+        flight_parameters_fingerprint="envelope-b",
     )
 
 
@@ -182,10 +200,11 @@ def test_acceptance_is_separate_from_evaluation_cost() -> None:
         evaluation=evaluation,
         evaluation_config=config.rl.press.evaluation,
         minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+        flight_parameters=_FLIGHT_PARAMETERS,
     )
     assert not acceptance.passed
     assert acceptance.reasons == ("minimum closest range",)
-    assert len(acceptance.gates) == 5
+    assert len(acceptance.gates) == 45
 
 
 def test_acceptance_includes_configured_range_safety_boundary() -> None:
@@ -202,6 +221,7 @@ def test_acceptance_includes_configured_range_safety_boundary() -> None:
         ),
         evaluation_config=config.rl.press.evaluation,
         minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+        flight_parameters=_FLIGHT_PARAMETERS,
     )
     assert acceptance.passed
 
@@ -225,10 +245,47 @@ def test_every_acceptance_gate_is_individually_binding(overrides, failed_gate: s
         evaluation=_scored(**overrides),
         evaluation_config=config.rl.press.evaluation,
         minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+        flight_parameters=_FLIGHT_PARAMETERS,
     )
     assert not acceptance.passed
     assert failed_gate in acceptance.reasons
     assert {gate.name for gate in acceptance.gates if not gate.passed} == set(acceptance.reasons)
+
+
+@pytest.mark.parametrize("metric_name", ["max", "rmse", "p95", "p99"])
+def test_every_flight_parameter_statistic_is_binding(metric_name: str) -> None:
+    from robotics_experiments.config import load_config
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    evaluation = _scored(
+        collision_rate=0.0,
+        body_collision_rate=0.0,
+        pusher_collision_rate=0.0,
+    )
+    registered_name = f"flight_parameters.position_error.{metric_name}"
+    limit = next(
+        item for item in _FLIGHT_PARAMETERS.hover.acceptance_limits if item.name == "position_error"
+    )
+    threshold = {
+        "max": limit.maximum_absolute,
+        "rmse": limit.rmse,
+        "p95": limit.p95_absolute,
+        "p99": limit.p99_absolute,
+    }[metric_name]
+    metrics = tuple(
+        EvaluationMetric(metric.name, threshold + 0.001)
+        if metric.name == registered_name
+        else metric
+        for metric in evaluation.metrics
+    )
+    acceptance = evaluate_press_acceptance(
+        evaluation=replace(evaluation, metrics=metrics),
+        evaluation_config=config.rl.press.evaluation,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+        flight_parameters=_FLIGHT_PARAMETERS,
+    )
+    assert f"flight parameters position_error {metric_name}" in acceptance.reasons
 
 
 def test_plateau_accumulates_small_improvements_against_material_reference() -> None:

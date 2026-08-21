@@ -108,7 +108,7 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
 
 def test_metric_registry_names_rates_units_and_unavailable_values() -> None:
     registry = metric_registry_payload()
-    assert registry["revision"] == 12
+    assert registry["revision"] == 13
     assert all(spec.suffix == spec.suffix.lower() for spec in EVALUATION_METRICS)
     assert all(not spec.suffix.endswith("_percent") for spec in EVALUATION_METRICS)
     rate_specs = tuple(spec for spec in EVALUATION_METRICS if spec.suffix.endswith("_rate"))

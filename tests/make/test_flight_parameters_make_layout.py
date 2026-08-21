@@ -12,8 +12,10 @@ def test_root_makefile_includes_isolated_flight_parameter_targets() -> None:
     makefile = (REPO_ROOT / "make/flight-parameters.mk").read_text()
 
     assert "include make/flight-parameters.mk" in root
-    assert "measure-flight-envelope:" in makefile
+    assert "measure-flight-parameters:" in makefile
     assert "test-integration-flight-parameters-sample:" in makefile
+    assert "test-integration-flight-parameters-response-sample:" in makefile
+    assert "FLIGHT_PARAMETERS_OUTPUT_ROOT ?= .build/flight-parameters" in makefile
 
 
 def test_hover_sample_routes_host_and_container_artifact_paths() -> None:
@@ -43,3 +45,12 @@ def test_hover_sample_routes_host_and_container_artifact_paths() -> None:
         "FLIGHT_PARAMETERS_TRIAL_DIR_CONTAINER=" "'/isaac-sim/proj/.build/test-flight-trial'"
     ) in result.stdout
     assert "configs/flight_parameters_x500_hover.yaml" in result.stdout
+
+
+def test_alignment_prepares_the_existing_reference_from_flight_parameters() -> None:
+    makefile = (REPO_ROOT / "make/alignment.mk").read_text()
+
+    assert "alignment-prepare-reference:" in makefile
+    assert "prepare_alignment_reference.py" in makefile
+    assert "alignment_capture_reference.py" not in makefile
+    assert "alignment-capture-reference:" not in makefile
