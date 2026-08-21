@@ -10,12 +10,21 @@ from tests.support.paths import REPO_ROOT
 def test_root_makefile_includes_isolated_flight_parameter_targets() -> None:
     root = (REPO_ROOT / "Makefile").read_text()
     makefile = (REPO_ROOT / "make/flight-parameters.mk").read_text()
+    runner = (REPO_ROOT / "make/scripts/run_px4_integration_test.sh").read_text()
 
     assert "include make/flight-parameters.mk" in root
     assert "measure-flight-parameters:" in makefile
     assert "test-integration-flight-parameters-sample:" in makefile
     assert "test-integration-flight-parameters-response-sample:" in makefile
     assert "FLIGHT_PARAMETERS_RESPONSE_DEFINITION_CONTAINER" in makefile
+    assert (
+        '-e "FLIGHT_PARAMETERS_RESPONSE_DEFINITION=${FLIGHT_PARAMETERS_RESPONSE_DEFINITION}"'
+        in runner
+    )
+    assert (
+        '-e "FLIGHT_PARAMETERS_RESPONSE_DIR_CONTAINER=${FLIGHT_PARAMETERS_RESPONSE_DIR_CONTAINER}"'
+        in runner
+    )
     assert "FLIGHT_PARAMETERS_OUTPUT_ROOT ?= .build/flight-parameters" in makefile
 
 
