@@ -307,6 +307,15 @@ def _manifest_entry(*, role: str, path: Path, run_dir: Path) -> dict[str, Any]:
     }
 
 
+def _relocate_payload(*, source: Path, destination: Path) -> None:
+    if not source.is_symlink():
+        source.rename(destination)
+        return
+    target = source.resolve(strict=True)
+    source.unlink()
+    destination.symlink_to(os.path.relpath(target, start=destination.parent))
+
+
 def finalize_alignment_bundle(
     *,
     run_dir: Path,
@@ -354,7 +363,7 @@ def finalize_alignment_bundle(
             if source_name in optional_moves:
                 continue
             raise FileNotFoundError(f"required alignment output is missing: {source}")
-        source.rename(destination)
+        _relocate_payload(source=source, destination=destination)
     target_source = run_dir / (
         "target_candidates.json.zst" if compressed_target_source else "target_candidates.json"
     )

@@ -18,13 +18,19 @@ and controller-response evidence described in `docs/FLIGHT_PARAMETERS.md`.
 Alignment no longer launches a private PX4 reference capture. Its preparation
 step resolves and pins one immutable flight-parameters run, validates that its
 lossless response evidence exactly covers the authored fit, validation, and
-stability profiles, then stages the same `reference.json`, ULog, and bridge-log
-bytes consumed by the existing alignment evaluator. The selected target
+stability profiles, then exposes its `reference.json`, ULog, and bridge log to
+the existing alignment evaluator through relative symlinks. The selected target
 settings are still replayed through the full 30-second
 `stability-hover-pose` profile and must keep position and attitude within the
 full-window hover bounds. No alignment metric, search, ranking, or acceptance
 logic changes at this boundary. The exact flight-parameters fingerprint enters
 the comparison fingerprint and strict controller artifact.
+
+Input validation completes before the alignment run directory is created. An
+invalid or incompatible flight-parameters selector therefore exits with one
+preflight error and leaves no empty or partially staged alignment run. The
+consumer never copies those producer-owned inputs; final alignment evidence
+retains relative references to the pinned timestamped bundle.
 
 The dependency direction is:
 

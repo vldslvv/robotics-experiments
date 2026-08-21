@@ -8,11 +8,13 @@ import math
 import shutil
 from dataclasses import asdict, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 import robotics_experiments.alignment._artifact as artifact_module
+import robotics_experiments.alignment._flight_parameters as flight_parameters_module
 from robotics_experiments.alignment import (
     ControllerDefinition,
     align,
@@ -656,6 +658,63 @@ def test_flight_parameters_response_rejects_reduced_alignment_input(
             definition=definition,
             expected_profile_count=len(definition.profiles),
         )
+
+
+def test_alignment_references_immutable_flight_parameter_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    bundle_dir = tmp_path / "flight-parameters" / "timestamped-run"
+    response_dir = bundle_dir / "response" / "repetition-001"
+    response_dir.mkdir(parents=True)
+    evidence = SimpleNamespace(
+        repetition=1,
+        profile_count=len(definition.profiles),
+        reference_path="response/repetition-001/flight_parameters_response.json",
+        ulog_path="response/repetition-001/flight_parameters.ulg",
+        bridge_log_path="response/repetition-001/flight_parameters_bridge.log",
+    )
+    for relative, payload in (
+        (evidence.reference_path, "reference"),
+        (evidence.ulog_path, "ulog"),
+        (evidence.bridge_log_path, "bridge"),
+    ):
+        (bundle_dir / relative).write_text(payload)
+    monkeypatch.setattr(
+        flight_parameters_module,
+        "load_flight_parameters_bundle",
+        lambda **_kwargs: SimpleNamespace(
+            run_dir=bundle_dir,
+            flight_parameters=SimpleNamespace(
+                artifact_fingerprint="fingerprint",
+                response=SimpleNamespace(repetitions=1, traces=(evidence,)),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        flight_parameters_module,
+        "_validated_payload",
+        lambda **_kwargs: {},
+    )
+    run_dir = tmp_path / "alignment" / "timestamped-run"
+
+    flight_parameters_module.prepare_alignment_reference(
+        flight_parameters_artifact=bundle_dir,
+        definition=definition,
+        run_dir=run_dir,
+    )
+
+    assert (run_dir / "flight_parameters").is_symlink()
+    for name, source in (
+        ("reference.json", bundle_dir / evidence.reference_path),
+        ("reference.ulg", bundle_dir / evidence.ulog_path),
+        ("bridge.log", bundle_dir / evidence.bridge_log_path),
+    ):
+        reference = run_dir / name
+        assert reference.is_symlink()
+        assert not reference.readlink().is_absolute()
+        assert reference.resolve() == source
 
 
 def test_ctbr_family_has_independent_roll_pitch_yaw_and_collective_gates() -> None:
@@ -1622,10 +1681,16 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
     )
     run_dir = tmp_path / "run"
     write_alignment_result(result=result, run_dir=run_dir)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
     for name, payload in {
         "reference.json": "{}\n",
         "reference.ulg": "ulog",
         "bridge.log": "bridge",
+    }.items():
+        (inputs / name).write_text(payload)
+        (run_dir / name).symlink_to(Path("..") / "inputs" / name)
+    for name, payload in {
         "target_candidates.json": "{}\n",
         "actuator_audit.json": '{"schema_version":1,"passed":true}\n',
         "controller_boundary_replay.json": '{"schema_version":1,"passed":true}\n',
@@ -1662,6 +1727,10 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
     assert "selection.json.zst" in paths
     assert "evidence/target_traces.json.zst" in paths
     assert "diagnostics/stages/search_realization.json" in paths
+    for name in ("reference_traces.json", "reference.ulg", "bridge.log"):
+        reference = run_dir / "evidence" / name
+        assert reference.is_symlink()
+        assert not reference.readlink().is_absolute()
     assert not (run_dir / "target_candidates.json").exists()
     assert compression_arguments_seen == [("-8", "--long=27", "-T0")]
 

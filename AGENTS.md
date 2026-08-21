@@ -386,6 +386,12 @@ the current contents and the intended home for that kind of code.
   so no argument can be specified by name.
 - Do NOT regenerate assets unless explicitly asked.
 - Do NOT hardcode absolute paths.
+- Input artifacts are immutable, producer-owned evidence. Consumers must
+  resolve and pin exact validated paths, pin content digests when work crosses
+  process boundaries, and reference the producer files directly. When an
+  existing consumer filename is required, use a relative symlink; never copy,
+  rewrite, migrate, or otherwise mutate input artifact bytes into a consumer
+  run.
 - A refactor that adds no new functionality must reduce implementation bloat or,
   at minimum, leave it unchanged. Prefer deleting or merging redundant code,
   abstractions, tests, and documentation while preserving behavior and coverage;

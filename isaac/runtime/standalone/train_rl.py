@@ -303,7 +303,7 @@ def _load_training_controller(
     args: argparse.Namespace,
     config: ExperimentConfig,
     repo_root: Path,
-) -> tuple[ControllerArtifact, str]:
+) -> tuple[ControllerArtifact, str, Path]:
     authored = (
         args.controller_artifact
         or os.environ.get(_CONTROLLER_ARTIFACT_ENV)
@@ -312,7 +312,8 @@ def _load_training_controller(
     artifact_path = Path(authored)
     if not artifact_path.is_absolute():
         artifact_path = repo_root / artifact_path
-    artifact = load_controller_artifact(artifact_path)
+    controller_path = resolve_controller_path(artifact_path).resolve(strict=True)
+    artifact = load_controller_artifact(controller_path)
     vehicle_id = config.rl.training.vehicle_id
     try:
         vehicle_label, vehicle = next(
@@ -339,20 +340,21 @@ def _load_training_controller(
             "controller artifact failed its quality gates: "
             + "; ".join(artifact.advisory_quality_reasons)
         )
-    controller_path = resolve_controller_path(artifact_path)
-    return artifact, _file_sha256(controller_path)
+    return artifact, _file_sha256(controller_path), controller_path
 
 
 def _load_training_flight_parameters(
     *,
+    artifact_path: str | Path | None,
     config: ExperimentConfig,
     controller_artifact: ControllerArtifact,
     repo_root: Path,
-) -> tuple[FlightParameters, str]:
-    artifact_path = Path(config.rl.training.flight_parameters_artifact)
-    if not artifact_path.is_absolute():
-        artifact_path = repo_root / artifact_path
-    bundle = load_flight_parameters_bundle(path=artifact_path)
+) -> tuple[FlightParameters, str, Path]:
+    authored = artifact_path or config.rl.training.flight_parameters_artifact
+    resolved_path = Path(authored)
+    if not resolved_path.is_absolute():
+        resolved_path = repo_root / resolved_path
+    bundle = load_flight_parameters_bundle(path=resolved_path)
     flight_parameters = bundle.flight_parameters
     try:
         vehicle_label = next(
@@ -373,7 +375,7 @@ def _load_training_flight_parameters(
         mismatches.append("artifact fingerprint does not match the controller qualification")
     if mismatches:
         raise ValueError("flight parameters are incompatible: " + "; ".join(mismatches))
-    return flight_parameters, bundle.flight_parameters_digest
+    return flight_parameters, bundle.flight_parameters_digest, bundle.run_dir
 
 
 def _previous_stage_checkpoint(
@@ -1927,6 +1929,10 @@ def _attempt_worker_command(
     *,
     args: argparse.Namespace,
     attempt_index: int,
+    controller_artifact_digest: str,
+    controller_artifact_path: Path,
+    flight_parameters_artifact_digest: str,
+    flight_parameters_artifact_path: Path,
     seed: int,
 ) -> list[str]:
     command = [
@@ -1937,6 +1943,14 @@ def _attempt_worker_command(
         str(attempt_index),
         "--seed",
         str(seed),
+        "--controller-artifact",
+        str(controller_artifact_path),
+        "--controller-artifact-digest",
+        controller_artifact_digest,
+        "--flight-parameters-artifact",
+        str(flight_parameters_artifact_path),
+        "--flight-parameters-artifact-digest",
+        flight_parameters_artifact_digest,
     ]
     if args.procedural_smoke:
         command.append("--procedural-smoke")
@@ -1944,8 +1958,6 @@ def _attempt_worker_command(
         command.extend(("--max-iterations", str(args.max_iterations)))
     if args.num_envs is not None:
         command.extend(("--num-envs", str(args.num_envs)))
-    if args.controller_artifact is not None:
-        command.extend(("--controller-artifact", str(args.controller_artifact)))
     if args.scene is not None:
         command.extend(("--scene", str(args.scene)))
     if args.strict:
@@ -1958,6 +1970,10 @@ def _run_isolated_campaign(
     args: argparse.Namespace,
     config: ExperimentConfig,
     config_path: Path,
+    controller_artifact_digest: str,
+    controller_artifact_path: Path,
+    flight_parameters_artifact_digest: str,
+    flight_parameters_artifact_path: Path,
     attempt_seeds: tuple[int, ...],
     policy_root: Path,
     repo_root: Path,
@@ -2052,7 +2068,15 @@ def _run_isolated_campaign(
         )
         try:
             subprocess.run(
-                _attempt_worker_command(args=args, attempt_index=attempt_index, seed=seed),
+                _attempt_worker_command(
+                    args=args,
+                    attempt_index=attempt_index,
+                    controller_artifact_digest=controller_artifact_digest,
+                    controller_artifact_path=controller_artifact_path,
+                    flight_parameters_artifact_digest=(flight_parameters_artifact_digest),
+                    flight_parameters_artifact_path=flight_parameters_artifact_path,
+                    seed=seed,
+                ),
                 cwd=repo_root,
                 env=worker_environment,
                 check=True,
@@ -2067,6 +2091,22 @@ def _run_isolated_campaign(
             failed["status"] = "attempt_failed"
             _write_json(path=run_dir / _REPORT_FILENAME, payload=failed)
             raise
+        if not attempt_report_path.is_file():
+            _write_json(
+                path=attempt_report_path,
+                payload={
+                    "schema_version": _REPORT_SCHEMA_VERSION,
+                    "report_kind": "attempt",
+                    "status": "failed",
+                    "artifact_run_id": run_dir.name,
+                    "attempt_index": attempt_index,
+                    "training_seed": seed,
+                },
+            )
+            failed = json.loads((run_dir / _REPORT_FILENAME).read_text())
+            failed["status"] = "attempt_failed"
+            _write_json(path=run_dir / _REPORT_FILENAME, payload=failed)
+            raise RuntimeError("attempt worker exited without an attempt report")
         payload = json.loads(attempt_report_path.read_text())
         if (
             not isinstance(payload, dict)
@@ -2233,6 +2273,35 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
     policy_root = (
         repo_root / ".build" / "training" / _validate_policy_name(training_config.policy_name)
     )
+    try:
+        controller_artifact, controller_digest, controller_artifact_path = (
+            _load_training_controller(
+                args=args,
+                config=config,
+                repo_root=repo_root,
+            )
+        )
+        flight_parameters, flight_parameters_digest, flight_parameters_artifact_path = (
+            _load_training_flight_parameters(
+                artifact_path=args.flight_parameters_artifact,
+                config=config,
+                controller_artifact=controller_artifact,
+                repo_root=repo_root,
+            )
+        )
+        if (
+            args.controller_artifact_digest is not None
+            and args.controller_artifact_digest != controller_digest
+        ):
+            raise ValueError("controller artifact changed after campaign preflight")
+        if (
+            args.flight_parameters_artifact_digest is not None
+            and args.flight_parameters_artifact_digest != flight_parameters_digest
+        ):
+            raise ValueError("flight parameters changed after campaign preflight")
+    except (OSError, ValueError) as exc:
+        _report(f"input artifact validation FAILED: {exc}")
+        raise SystemExit(2) from None
     if args.attempt_worker:
         if args.attempt_index is None:
             raise ValueError("attempt worker has no attempt index")
@@ -2242,16 +2311,6 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
         run_dir = Path(run_dir_value)
         if not run_dir.is_absolute():
             raise ValueError(f"{_CAMPAIGN_RUN_DIR_ENV} must be an absolute path")
-        controller_artifact, controller_digest = _load_training_controller(
-            args=args,
-            config=config,
-            repo_root=repo_root,
-        )
-        flight_parameters, flight_parameters_digest = _load_training_flight_parameters(
-            config=config,
-            controller_artifact=controller_artifact,
-            repo_root=repo_root,
-        )
         _run_new_training(
             args=args,
             config=config,
@@ -2268,10 +2327,19 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             attempt_index_offset=args.attempt_index,
         )
         return
+    _report(
+        "input artifact validation PASSED: "
+        f"controller={controller_artifact_path} "
+        f"flight_parameters={flight_parameters_artifact_path}"
+    )
     _run_isolated_campaign(
         args=args,
         config=config,
         config_path=config_path,
+        controller_artifact_digest=controller_digest,
+        controller_artifact_path=controller_artifact_path,
+        flight_parameters_artifact_digest=flight_parameters_digest,
+        flight_parameters_artifact_path=flight_parameters_artifact_path,
         attempt_seeds=attempt_seeds,
         policy_root=policy_root,
         repo_root=repo_root,
@@ -2306,6 +2374,9 @@ def main() -> None:
         default=None,
         help="override rl.training.controller_artifact for training",
     )
+    parser.add_argument("--controller-artifact-digest", help=argparse.SUPPRESS)
+    parser.add_argument("--flight-parameters-artifact", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--flight-parameters-artifact-digest", help=argparse.SUPPRESS)
     parser.add_argument("--attempt-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--attempt-index", type=int, default=None, help=argparse.SUPPRESS)
     args, _unknown = parser.parse_known_args()
@@ -2315,8 +2386,18 @@ def main() -> None:
         raise SystemExit("--procedural-smoke cannot be combined with --max-iterations")
     if args.num_envs is not None and args.num_envs < 1:
         raise SystemExit("--num-envs must be >= 1")
-    if args.attempt_worker and (args.seed is None or args.attempt_index is None):
-        raise SystemExit("--attempt-worker requires --seed and --attempt-index")
+    if args.attempt_worker and (
+        args.seed is None
+        or args.attempt_index is None
+        or args.controller_artifact is None
+        or args.controller_artifact_digest is None
+        or args.flight_parameters_artifact is None
+        or args.flight_parameters_artifact_digest is None
+    ):
+        raise SystemExit(
+            "--attempt-worker requires --seed, --attempt-index, exact controller and "
+            "flight-parameters artifacts, and their digests"
+        )
     if args.attempt_index is not None and args.attempt_index < 0:
         raise SystemExit("--attempt-index must be >= 0")
 

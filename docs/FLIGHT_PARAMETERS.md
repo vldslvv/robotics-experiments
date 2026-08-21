@@ -83,10 +83,12 @@ alternating adjacent-tick schedule while rejecting accumulated drift or an
 incorrect command sequence. The timestamps and response samples are not
 resampled or reduced.
 
-It then copies the reference JSON, ULog, and bridge log byte-for-byte into the
-filenames expected by the existing alignment workflow. Alignment search,
-metrics, ranking, fit/validation behavior, actuator audit, controller-boundary
-replay, and publication gates are unchanged.
+It then exposes the reference JSON, ULog, and bridge log through relative
+symlinks with the filenames expected by the existing alignment workflow. The
+immutable producer files remain in their timestamped flight-parameters bundle;
+alignment neither copies nor mutates them. Alignment search, metrics, ranking,
+fit/validation behavior, actuator audit, controller-boundary replay, and
+publication gates are unchanged.
 
 ## Artifact publication
 

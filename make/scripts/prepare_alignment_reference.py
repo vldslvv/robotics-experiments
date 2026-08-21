@@ -17,11 +17,14 @@ def main() -> None:
     parser.add_argument("--definition", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
-    prepare_alignment_reference(
-        flight_parameters_artifact=args.flight_parameters,
-        definition=load_controller_definition(args.definition),
-        run_dir=args.run_dir,
-    )
+    try:
+        prepare_alignment_reference(
+            flight_parameters_artifact=args.flight_parameters,
+            definition=load_controller_definition(args.definition),
+            run_dir=args.run_dir,
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"alignment input artifact validation failed: {exc}") from None
 
 
 if __name__ == "__main__":

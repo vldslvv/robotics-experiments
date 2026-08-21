@@ -20,7 +20,6 @@ ALIGNMENT_PREPARE_SCRIPT = make/scripts/prepare_alignment_reference.py
 
 .PHONY: alignment-prepare-reference
 alignment-prepare-reference:
-	@mkdir -p '$(ALIGNMENT_RUN_DIR)'
 	@PYTHONPATH=src uv run python '$(ALIGNMENT_PREPARE_SCRIPT)' \
 	    --flight-parameters '$(FLIGHT_PARAMETERS_ARTIFACT)' \
 	    --definition '$(ALIGNMENT_REFERENCE)' \

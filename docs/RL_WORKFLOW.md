@@ -28,6 +28,16 @@ deployment reuse those embedded records; they never resolve newer alignment or
 flight-parameter publications implicitly. The collection and statistics contract
 is defined in `docs/FLIGHT_PARAMETERS.md`.
 
+The campaign parent performs this input preflight before creating a run
+directory or launching an attempt. It resolves both selectors once and passes
+their immutable paths and content digests to every isolated worker; each worker
+revalidates those exact references before constructing Isaac Lab. Training
+reads the producer-owned artifacts in place and never copies or mutates them.
+Invalid input produces one preflight failure, no active campaign report, and no
+attempt process. If a worker exits without its report after a successful
+preflight, the parent records a failed attempt stub and finalizes the campaign
+status instead of masking the worker failure with a missing-file exception.
+
 The registered tasks are `Isaac-Drone-Hover-Direct-v1` and
 `Isaac-Switch-Press-Direct-v1`. Both use the normalized controller seam. The
 Torch implementation is required to match the NumPy controller sequentially.

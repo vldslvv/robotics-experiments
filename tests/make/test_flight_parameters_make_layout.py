@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
+from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
 
@@ -62,5 +65,32 @@ def test_alignment_prepares_the_existing_reference_from_flight_parameters() -> N
 
     assert "alignment-prepare-reference:" in makefile
     assert "prepare_alignment_reference.py" in makefile
+    assert "mkdir -p '$(ALIGNMENT_RUN_DIR)'" not in makefile
     assert "alignment_capture_reference.py" not in makefile
     assert "alignment-capture-reference:" not in makefile
+
+
+def test_alignment_input_failure_is_clean_and_creates_no_run(tmp_path: Path) -> None:
+    run_dir = tmp_path / "alignment-run"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "make/scripts/prepare_alignment_reference.py",
+            "--flight-parameters",
+            str(tmp_path / "missing-flight-parameters"),
+            "--definition",
+            "configs/alignment/controllers/px4_sitl_x500_velocity.yaml",
+            "--run-dir",
+            str(run_dir),
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": "src"},
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("alignment input artifact validation failed:")
+    assert "Traceback" not in result.stderr
+    assert not run_dir.exists()

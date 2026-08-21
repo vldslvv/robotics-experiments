@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import shutil
 from bisect import bisect_right
 from itertools import accumulate
 from pathlib import Path
@@ -129,12 +128,12 @@ def prepare_alignment_reference(
         os.path.relpath(bundle.run_dir, start=run_dir),
         target_is_directory=True,
     )
-    for source, destination in (
-        (source_reference, run_dir / "reference.json"),
-        (bundle.run_dir / evidence.ulog_path, run_dir / "reference.ulg"),
-        (bundle.run_dir / evidence.bridge_log_path, run_dir / "bridge.log"),
+    for source_relative, destination in (
+        (evidence.reference_path, run_dir / "reference.json"),
+        (evidence.ulog_path, run_dir / "reference.ulg"),
+        (evidence.bridge_log_path, run_dir / "bridge.log"),
     ):
-        shutil.copy2(source, destination)
+        destination.symlink_to(Path("flight_parameters") / source_relative)
     (run_dir / "manifest.json").write_text(
         json.dumps(
             {
