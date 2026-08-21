@@ -75,6 +75,12 @@ inside the alignment run, and validates before fitting that the response has:
 - complete samples and valid controller-boundary state;
 - the configured response repetitions and matching definition fingerprint.
 
+Cadence validation compares every retained timestamp with the ideal command
+schedule while allowing up to half a command period for bridge-tick
+quantization. This admits the runtime's alternating adjacent-tick schedule but
+rejects accumulated drift; the timestamps and response samples are not
+resampled or reduced.
+
 It then copies the reference JSON, ULog, and bridge log byte-for-byte into the
 filenames expected by the existing alignment workflow. Alignment search,
 metrics, ranking, fit/validation behavior, actuator audit, controller-boundary

@@ -61,9 +61,11 @@ def _validate_commands(*, definition: ControllerDefinition, trace: ProbeTrace) -
             f"flight parameters profile {trace.profile!r} does not contain the exact commands"
         )
     period = 1.0 / definition.command_rate_hz
+    # Runtime policy ticks are quantized to the bridge tick. Validate against
+    # the ideal schedule so alternating ticks cannot accumulate cadence drift.
     if any(
-        not math.isclose(later - earlier, period, rel_tol=0.0, abs_tol=1.0e-6)
-        for earlier, later in zip(trace.time_s, trace.time_s[1:], strict=False)
+        not math.isclose(actual, index * period, rel_tol=0.0, abs_tol=period / 2.0)
+        for index, actual in enumerate(trace.time_s)
     ):
         raise ValueError(
             f"flight parameters profile {trace.profile!r} does not match alignment cadence"

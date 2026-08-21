@@ -553,6 +553,42 @@ def test_flight_parameters_response_preserves_complete_alignment_input(
     assert payload["traces"] == json.loads(json.dumps([asdict(trace) for trace in traces]))
 
 
+def test_flight_parameters_response_accepts_bridge_quantized_cadence(
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    traces = tuple(
+        replace(
+            trace,
+            initial_controller_state_valid=True,
+            time_s=tuple(
+                time_s + (0.01 if index % 2 else 0.0) for index, time_s in enumerate(trace.time_s)
+            ),
+        )
+        for trace in _response_traces(
+            profiles=definition.profiles,
+            settings=definition.base_settings,
+        )
+    )
+    path = tmp_path / "flight_parameters_response.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "controller_id": definition.controller_id,
+                "definition_fingerprint": definition.definition_fingerprint,
+                "traces": [asdict(trace) for trace in traces],
+            }
+        )
+    )
+
+    _validated_payload(
+        path=path,
+        definition=definition,
+        expected_profile_count=len(definition.profiles),
+    )
+
+
 def test_flight_parameters_response_rejects_reduced_alignment_input(
     tmp_path: Path,
 ) -> None:
