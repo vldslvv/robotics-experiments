@@ -15,6 +15,7 @@ def test_root_makefile_includes_isolated_flight_parameter_targets() -> None:
     assert "measure-flight-parameters:" in makefile
     assert "test-integration-flight-parameters-sample:" in makefile
     assert "test-integration-flight-parameters-response-sample:" in makefile
+    assert "FLIGHT_PARAMETERS_RESPONSE_DEFINITION_CONTAINER" in makefile
     assert "FLIGHT_PARAMETERS_OUTPUT_ROOT ?= .build/flight-parameters" in makefile
 
 

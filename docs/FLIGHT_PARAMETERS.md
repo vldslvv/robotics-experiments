@@ -106,6 +106,10 @@ Each run is immutable and timestamped:
   manifest.json
 ```
 
+An explicit `FLIGHT_PARAMETERS_RUN_ID` may continue an unpublished partial run;
+complete verified hover trials are retained. A finalized run cannot be resumed
+or modified.
+
 `flight_parameters.json` has artifact kind
 `robotics-experiments-flight-parameters`, schema version 1, `created_at_utc`,
 the complete hover and response records, source/configuration fingerprints, an

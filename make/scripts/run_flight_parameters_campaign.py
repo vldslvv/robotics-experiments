@@ -89,6 +89,19 @@ def _run_trial(
     )
 
 
+def _trial_is_complete(trial_dir: Path, /) -> bool:
+    return all(
+        (trial_dir / name).is_file()
+        for name in (
+            "raw_trace.json",
+            "flight.ulg",
+            "bridge.log",
+            "hover_verification.json",
+            "trace.json",
+        )
+    )
+
+
 def _run_response_repetition(
     *,
     repo_root: Path,
@@ -159,13 +172,19 @@ def main() -> None:
     created_at = datetime.now(timezone.utc)
     run_id = _run_id(args.run_id or created_at.strftime("%Y%m%dT%H%M%SZ"))
     run_dir = (args.output_root / config.flight_parameters_id / run_id).resolve()
-    run_dir.mkdir(parents=True, exist_ok=False)
+    resume = args.run_id is not None and run_dir.exists()
+    if resume and (run_dir / "manifest.json").exists():
+        raise ValueError(f"cannot resume completed flight-parameters run {run_dir}")
+    run_dir.mkdir(parents=True, exist_ok=resume)
     evidence_dir = run_dir / "evidence"
-    evidence_dir.mkdir()
+    evidence_dir.mkdir(exist_ok=resume)
 
     trials = tuple(range(1, config.hover.repetitions + 1))
+    pending_trials = tuple(
+        index for index in trials if not _trial_is_complete(evidence_dir / f"trial-{index:03d}")
+    )
     if config.execution.worker_count == 1:
-        for index in trials:
+        for index in pending_trials:
             _run_trial(
                 repo_root=repo_root,
                 config_path=config_path,
@@ -176,7 +195,7 @@ def main() -> None:
             )
     else:
         with ThreadPoolExecutor(max_workers=config.execution.worker_count) as executor:
-            for offset in range(0, len(trials), config.execution.worker_count):
+            for offset in range(0, len(pending_trials), config.execution.worker_count):
                 futures = [
                     executor.submit(
                         _run_trial,
@@ -187,7 +206,7 @@ def main() -> None:
                         trial_index=index,
                         trial_dir=evidence_dir / f"trial-{index:03d}",
                     )
-                    for index in trials[offset : offset + config.execution.worker_count]
+                    for index in pending_trials[offset : offset + config.execution.worker_count]
                 ]
                 for future in futures:
                     future.result()
