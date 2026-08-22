@@ -36,7 +36,7 @@ class GateResult:
 
     name: str
     passed: bool
-    actual: float
+    actual: float | None
     comparison: str
     threshold: float
 

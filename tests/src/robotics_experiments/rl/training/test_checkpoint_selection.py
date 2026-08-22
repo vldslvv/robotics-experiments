@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+import json
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -286,6 +287,30 @@ def test_every_flight_parameter_statistic_is_binding(metric_name: str) -> None:
         flight_parameters=_FLIGHT_PARAMETERS,
     )
     assert f"flight parameters position_error {metric_name}" in acceptance.reasons
+
+
+def test_missing_flight_parameter_statistic_is_a_json_null_gate_failure() -> None:
+    from robotics_experiments.config import load_config
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    evaluation = _scored()
+    missing_name = "flight_parameters.position_error.max"
+    acceptance = evaluate_press_acceptance(
+        evaluation=replace(
+            evaluation,
+            metrics=tuple(metric for metric in evaluation.metrics if metric.name != missing_name),
+        ),
+        evaluation_config=config.rl.press.evaluation,
+        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
+        flight_parameters=_FLIGHT_PARAMETERS,
+    )
+    gate = next(
+        item for item in acceptance.gates if item.name == "flight parameters position_error max"
+    )
+    assert not gate.passed
+    assert gate.actual is None
+    assert json.loads(json.dumps(asdict(gate), allow_nan=False))["actual"] is None
 
 
 def test_plateau_accumulates_small_improvements_against_material_reference() -> None:

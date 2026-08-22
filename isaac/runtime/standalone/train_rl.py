@@ -833,7 +833,7 @@ def _acceptance_from_payload(*, payload: dict[str, Any]) -> AcceptanceResult:
             GateResult(
                 name=str(gate["name"]),
                 passed=bool(gate["passed"]),
-                actual=float(gate["actual"]),
+                actual=None if gate["actual"] is None else float(gate["actual"]),
                 comparison=str(gate["comparison"]),
                 threshold=float(gate["threshold"]),
             )

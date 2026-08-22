@@ -883,7 +883,7 @@ def evaluate_press_acceptance(
                     and metric.value is not None
                     and np.isfinite(metric.value)
                 ),
-                float("inf"),
+                None,
             ),
             "<=",
             float(getattr(limit, field_name)),
@@ -895,11 +895,14 @@ def evaluate_press_acceptance(
         GateResult(
             name=name,
             passed=(
-                actual == threshold
-                if comparison == "=="
-                else actual >= threshold
-                if comparison == ">="
-                else actual <= threshold
+                actual is not None
+                and (
+                    actual == threshold
+                    if comparison == "=="
+                    else actual >= threshold
+                    if comparison == ">="
+                    else actual <= threshold
+                )
             ),
             actual=actual,
             comparison=comparison,
