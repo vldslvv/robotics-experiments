@@ -58,11 +58,15 @@ visible plunger, forward-facing collidable pad, fully deployed joint, enabled
 arm and swept-propeller colliders, and the static wall collider. It then
 commands a slow press, verifies pad contact plus pusher and button displacement,
 advances the production N-step latch, requires exactly one lamp transition, and
-retreats within the stability envelope. A test-local `SwitchPressEnv` subclass
-returns no dones and no approach reward, so Stage 1's privileged collision
-termination cannot reset this physical measurement path. Its test-local
-press/retreat speed derives from the stable-flight speed limit rather than the
-approach reward's dense velocity reference.
+retreats within the stability envelope for the complete configured deployment
+hold. Before constructing the environment it resolves the production config's
+controller and flight-parameters selectors to immutable run paths, validates
+their shared qualification lineage, and reports those canonical inputs. A
+test-local `SwitchPressEnv` subclass returns no dones and no approach reward, so
+Stage 1's privileged collision termination cannot reset this physical
+measurement path. Its test-local press/retreat speed derives from the
+stable-flight speed limit rather than the approach reward's dense velocity
+reference.
 
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current

@@ -75,10 +75,15 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   full initial pusher deployment. It then drives a slow press, requires real
   forward-pad contact and pusher/button displacement, advances the production
   N-step latch, verifies exactly one lamp transition, and retreats within the
-  stability envelope. A test-local no-dones environment keeps these physical
-  measurements independent of Stage 1's contact-failure termination. The gate
+  stability envelope for the complete deployment hold. Its time budget combines
+  the selected curriculum stage's interaction duration with that configured
+  hold; a test-local no-dones environment keeps these physical measurements
+  independent of Stage 1's contact-failure termination. The gate
   selects the production press experiment config so its scripted post-contact
   ramp retains the authority required to cross the real latch threshold; it
+  resolves the config's accepted controller and complete flight-parameters
+  bundle to immutable run paths, validates their shared qualification lineage,
+  and reports those canonical inputs before constructing the environment. It
   does not load or execute the policy named by that config. It is part of
   `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
