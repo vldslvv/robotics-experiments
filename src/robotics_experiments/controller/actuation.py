@@ -164,10 +164,12 @@ class ActuationParams:
     ki_vel: np.ndarray
     kd_vel: np.ndarray
     velocity_observation_scale: np.ndarray
+    velocity_observation_hold_scale: np.ndarray
     velocity_observation_bias_mps: np.ndarray
     velocity_observation_bias_command_start_mps: float
     velocity_observation_bias_command_full_mps: float
     velocity_estimator_bias_decay_hz: float
+    velocity_estimator_bias_hold_decay_hz: np.ndarray
     velocity_filter_hz: np.ndarray
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: np.ndarray
@@ -502,7 +504,7 @@ def _effective_velocity_proportional_gain(
     return gain
 
 
-def _velocity_observation_bias(
+def _velocity_command_blend(
     params: ActuationParams, velocity_setpoint: np.ndarray, /
 ) -> np.ndarray:
     transition = np.clip(
@@ -514,8 +516,22 @@ def _velocity_observation_bias(
         0.0,
         1.0,
     )
-    blend = transition * transition * (3.0 - 2.0 * transition)
-    return params.velocity_observation_bias_mps * blend
+    return transition * transition * (3.0 - 2.0 * transition)
+
+
+def _velocity_observation_bias(
+    params: ActuationParams, velocity_setpoint: np.ndarray, /
+) -> np.ndarray:
+    return params.velocity_observation_bias_mps * _velocity_command_blend(params, velocity_setpoint)
+
+
+def _effective_velocity_observation_scale(
+    params: ActuationParams, velocity_setpoint: np.ndarray, /
+) -> np.ndarray:
+    blend = _velocity_command_blend(params, velocity_setpoint)
+    return params.velocity_observation_hold_scale + blend * (
+        params.velocity_observation_scale - params.velocity_observation_hold_scale
+    )
 
 
 def _rate_to_omega(
@@ -669,7 +685,9 @@ def _velocity_command_to_omega(
     rotation = _rotation_from_wxyz(state.attitude_flu_enu_wxyz)
     yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
     velocity_setpoint_world = command[:3]
-    physical_velocity = params.velocity_observation_scale * np.asarray(
+    physical_velocity = _effective_velocity_observation_scale(
+        params, velocity_setpoint_world
+    ) * np.asarray(
         state.linear_velocity_enu,
         dtype=np.float64,
     ) + _velocity_observation_bias(params, velocity_setpoint_world)
@@ -690,7 +708,11 @@ def _velocity_command_to_omega(
         acceleration = controller_state.acceleration_enu + derivative_alpha * (
             raw_acceleration - controller_state.acceleration_enu
         )
-        bias_decay = math.exp(-2.0 * math.pi * params.velocity_estimator_bias_decay_hz * outer_dt_s)
+        command_blend = _velocity_command_blend(params, velocity_setpoint_world)
+        bias_decay_hz = params.velocity_estimator_bias_hold_decay_hz + command_blend * (
+            params.velocity_estimator_bias_decay_hz - params.velocity_estimator_bias_hold_decay_hz
+        )
+        bias_decay = np.exp(-2.0 * math.pi * bias_decay_hz * outer_dt_s)
         velocity_estimator_bias = controller_state.velocity_estimator_bias_enu * bias_decay
     else:
         filtered_velocity = measured_velocity
@@ -921,6 +943,9 @@ def build_actuation_params(
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),
         velocity_observation_scale=_readonly_copy(controller_settings.velocity_observation_scale),
+        velocity_observation_hold_scale=_readonly_copy(
+            controller_settings.velocity_observation_hold_scale
+        ),
         velocity_observation_bias_mps=_readonly_copy(
             controller_settings.velocity_observation_bias_mps
         ),
@@ -932,6 +957,9 @@ def build_actuation_params(
         ),
         velocity_estimator_bias_decay_hz=float(
             controller_settings.velocity_estimator_bias_decay_hz
+        ),
+        velocity_estimator_bias_hold_decay_hz=_readonly_copy(
+            controller_settings.velocity_estimator_bias_hold_decay_hz
         ),
         velocity_filter_hz=_readonly_copy(controller_settings.velocity_filter_hz),
         velocity_derivative_filter_hz=float(controller_settings.velocity_derivative_filter_hz),
@@ -1022,7 +1050,7 @@ def seed_actuation_controller_state(
         "filtered_linear_velocity_enu",
     )
     velocity_setpoint = vector(velocity_setpoint_enu_mps, "velocity_setpoint_enu_mps")
-    physical_velocity = params.velocity_observation_scale * vector(
+    physical_velocity = _effective_velocity_observation_scale(params, velocity_setpoint) * vector(
         physical_linear_velocity_enu,
         "physical_linear_velocity_enu",
     ) + _velocity_observation_bias(params, velocity_setpoint)

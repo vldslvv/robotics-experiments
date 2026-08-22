@@ -230,17 +230,23 @@ scans that upstream vertical setpoint over zero through three physics ticks so
 outer-loop phase error remains separate from controller gains. A
 zero-through-three-tick delay scan compares the target attitude-loop output to
 PX4's downstream rates setpoint so asynchronous module handoff error remains
-separate from controller gains. The
-target-only `velocity_observation_scale`,
+separate from controller gains. The target-only motion-rate
+`velocity_observation_scale`, low-command `velocity_observation_hold_scale`,
 steady world-ENU `velocity_observation_bias_mps`,
 the componentwise command-magnitude transition
 `velocity_observation_bias_command_start_mps` /
-`velocity_observation_bias_command_full_mps`, `velocity_estimator_bias_decay_hz`,
+`velocity_observation_bias_command_full_mps`, the motion-rate
+`velocity_estimator_bias_decay_hz`, the componentwise low-command
+`velocity_estimator_bias_hold_decay_hz`,
 per-axis `velocity_filter_hz`, and
 `angular_velocity_filter_hz` model the evidenced physical-to-estimated state
 boundary without changing the pinned PX4 controller gains. The smooth command
-transition suppresses steady correction during exact zero-command ringdown and
-reaches the authored bias outside that band uniformly for X/Y/Z. The core replay
+transition suppresses steady correction during exact zero-command ringdown,
+blends observation scale from its hold mapping to its motion mapping, and
+reaches the authored bias outside that band uniformly for X/Y/Z. It also blends
+estimator-bias persistence from each axis's low-command hold rate to the motion
+rate.
+The core replay
 bypasses these target-only adapters because its inputs are already
 PX4-estimated state; the physical-state replay retains them and therefore
 audits the deployment boundary.

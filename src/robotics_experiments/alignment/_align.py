@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 import subprocess
@@ -18,7 +17,12 @@ import numpy as np
 
 import robotics_experiments.alignment._metrics as metrics_module
 import robotics_experiments.controller.actuation as controller_actuation
-from robotics_experiments.alignment._io import _settings as _validated_settings
+from robotics_experiments.alignment._io import (
+    _fingerprint,
+)
+from robotics_experiments.alignment._io import (
+    _settings as _validated_settings,
+)
 from robotics_experiments.alignment._metrics import _finite_metric_result, metric
 from robotics_experiments.alignment._models import (
     AlignmentResult,
@@ -39,16 +43,6 @@ from robotics_experiments.flight_parameters import (
 )
 
 __all__: list[str] = []
-
-
-def _fingerprint(value: object, /) -> str:
-    encoded = json.dumps(
-        value,
-        allow_nan=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _module_fingerprint(module_file: str | None, /) -> str:
@@ -415,9 +409,6 @@ def _staged_beam_search(
             record_alias(settings=value, index=index, source_settings=source)
         return [scores_by_settings[value] for value in settings]
 
-    def evaluate(settings: ControllerSettings, /) -> CandidateScore:
-        return evaluate_many((settings,))[0]
-
     initial_settings = _deduplicate_settings(
         [target.base_settings, *target.search.initial_settings]
     )
@@ -431,17 +422,15 @@ def _staged_beam_search(
         )
         return "; ".join(reasons[:3])
 
-    def retain(
-        scores: list[CandidateScore],
-        /,
-    ) -> tuple[ControllerSettings, ...]:
+    def ordered_scores_and_champions(
+        scores: list[CandidateScore], /
+    ) -> tuple[list[CandidateScore], tuple[CandidateScore, ...]]:
         ordered = sorted(scores, key=lambda score: (score.ranking_values, score.index))
-        retained_scores: list[CandidateScore] = []
-        beam_width = target.search.beam_width
         objective_count = max(
             (len(results_by_index[score.index].beam_values) for score in ordered),
             default=0,
         )
+        champions: list[CandidateScore] = []
         for objective_index in range(objective_count):
             candidates = [
                 score
@@ -456,8 +445,19 @@ def _staged_beam_search(
                     score.index,
                 ),
             )
-            if champion not in retained_scores:
-                retained_scores.append(champion)
+            if champion not in champions:
+                champions.append(champion)
+        return ordered, tuple(champions)
+
+    def retain(
+        scores: list[CandidateScore],
+        /,
+    ) -> tuple[ControllerSettings, ...]:
+        ordered, champions = ordered_scores_and_champions(scores)
+        retained_scores: list[CandidateScore] = []
+        beam_width = target.search.beam_width
+        for champion in champions:
+            retained_scores.append(champion)
             if len(retained_scores) == beam_width:
                 break
         for score in ordered:
@@ -471,29 +471,8 @@ def _staged_beam_search(
         scores: list[CandidateScore],
         /,
     ) -> tuple[ControllerSettings, ...]:
-        ordered = sorted(scores, key=lambda score: (score.ranking_values, score.index))
-        objective_count = max(
-            (len(results_by_index[score.index].beam_values) for score in ordered),
-            default=0,
-        )
-        champions = []
-        for objective_index in range(objective_count):
-            eligible = [
-                score
-                for score in ordered
-                if len(results_by_index[score.index].beam_values) > objective_index
-            ]
-            champion = min(
-                eligible,
-                key=lambda score: (
-                    results_by_index[score.index].beam_values[objective_index],
-                    score.ranking_values,
-                    score.index,
-                ),
-            )
-            if champion.settings not in champions:
-                champions.append(champion.settings)
-        return tuple(champions)
+        _ordered, champions = ordered_scores_and_champions(scores)
+        return tuple(champion.settings for champion in champions)
 
     def effective_beam(
         settings: tuple[ControllerSettings, ...],

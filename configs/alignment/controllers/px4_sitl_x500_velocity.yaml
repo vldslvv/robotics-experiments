@@ -29,11 +29,13 @@ settings:
   ki_vel: [0.4, 0.4, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [1.0, 1.0, 1.0]
+  velocity_observation_hold_scale: [1.0, 1.0, 1.0]
   velocity_observation_bias_mps: [0.0, 0.0, 0.0]
   velocity_observation_bias_command_start_mps: 0.0
   velocity_observation_bias_command_full_mps: 0.01
   # PX4 supplies the estimator signal directly; these target-side adapters are inactive.
   velocity_estimator_bias_decay_hz: 0.0
+  velocity_estimator_bias_hold_decay_hz: [0.0, 0.0, 0.0]
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
   velocity_filter_hz: [0.0, 0.0, 0.0]
   velocity_derivative_filter_hz: 5.0

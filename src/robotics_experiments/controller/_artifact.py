@@ -140,6 +140,10 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             payload["velocity_observation_scale"],
             f"{name}.velocity_observation_scale",
         ),
+        velocity_observation_hold_scale=_vector(
+            payload["velocity_observation_hold_scale"],
+            f"{name}.velocity_observation_hold_scale",
+        ),
         velocity_observation_bias_mps=_vector(
             payload["velocity_observation_bias_mps"],
             f"{name}.velocity_observation_bias_mps",
@@ -159,6 +163,10 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             value=payload["velocity_estimator_bias_decay_hz"],
             name=f"{name}.velocity_estimator_bias_decay_hz",
             nonnegative=True,
+        ),
+        velocity_estimator_bias_hold_decay_hz=_vector(
+            payload["velocity_estimator_bias_hold_decay_hz"],
+            f"{name}.velocity_estimator_bias_hold_decay_hz",
         ),
         velocity_filter_hz=_vector(payload["velocity_filter_hz"], f"{name}.velocity_filter_hz"),
         velocity_derivative_filter_hz=_finite(

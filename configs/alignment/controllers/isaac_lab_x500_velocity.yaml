@@ -24,12 +24,14 @@ settings:
   horizontal_velocity_braking_gain_end_mps: 0.085
   ki_vel: [0.4, 0.20, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
-  velocity_observation_scale: [0.94, 1.0, 1.0]
+  velocity_observation_scale: [1.00, 1.06, 1.0]
+  velocity_observation_hold_scale: [1.10, 1.06, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [0.008, 0.0, 0.0]
-  velocity_observation_bias_command_start_mps: 0.002
-  velocity_observation_bias_command_full_mps: 0.030
+  velocity_observation_bias_mps: [-0.010, -0.014, 0.0]
+  velocity_observation_bias_command_start_mps: 0.040
+  velocity_observation_bias_command_full_mps: 0.060
   velocity_estimator_bias_decay_hz: 0.075
+  velocity_estimator_bias_hold_decay_hz: [0.014, 0.075, 0.04]
   velocity_filter_hz: [0.0, 1.5, 0.0]
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [0.35, 0.35, 4.0]
@@ -43,7 +45,7 @@ settings:
   ki_rate: [0.20, 0.20, 0.10]
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.0]
-  angular_velocity_filter_hz: 24.0
+  angular_velocity_filter_hz: 40.0
   rate_derivative_filter_hz: 20.0
   yaw_torque_filter_hz: 2.0
   rate_integral_limit: [0.30, 0.30, 0.30]
@@ -69,41 +71,44 @@ parameters:
   - field: attitude_controller_rate_hz
     stage: 1
     candidates: [204.0]
-  # Pin the live-stable estimator settling rate.
+  # Preserve the response-passing decay rate once a motion command is active.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.075]
-  # Fit the signed X/Y endpoint correction exposed by the fresh combined probe;
-  # Z remains pinned because its endpoint and isolated gates pass.
+  # Fit persistence of the same captured boundary state inside the evidenced
+  # hover-command band.
+  - field: velocity_estimator_bias_hold_decay_hz
+    stage: 4
+    candidates:
+      - [0.014, 0.075, 0.04]
+  # Fit signed X/Y response authority above the measured hover-command band;
+  # Z remains pinned because its isolated and endpoint errors already pass.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.008, -0.006, 0.0]
-      - [0.008, -0.003, 0.0]
-      - [0.008, 0.0, 0.0]
-      - [0.008, 0.003, 0.0]
-      - [0.008, 0.006, 0.0]
-      - [0.011, -0.006, 0.0]
-      - [0.011, -0.003, 0.0]
-      - [0.011, 0.0, 0.0]
-      - [0.011, 0.003, 0.0]
-      - [0.011, 0.006, 0.0]
-      - [0.014, -0.006, 0.0]
-      - [0.014, -0.003, 0.0]
-      - [0.014, 0.0, 0.0]
-      - [0.014, 0.003, 0.0]
-      - [0.014, 0.006, 0.0]
+      - [-0.010, -0.0140, 0.0]
   # Preserve the unfiltered X branch and existing Y filter.
   - field: velocity_filter_hz
     stage: 4
     candidates:
       - [0.0, 1.5, 0.0]
-  # Pin the replay-safe per-axis observation mapping.
+  # Retain only the response-passing scale frontier and the independently
+  # passing Z observation mapping.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.94, 1.0, 1.0]
+      - [1.00, 1.04, 1.0]
+      - [1.00, 1.05, 1.0]
+      - [1.00, 1.06, 1.0]
+      - [1.00, 1.07, 1.0]
+      - [1.00, 1.08, 1.0]
+  # Fit the low-command physical-to-estimator mapping independently of the
+  # response-passing motion mapping using the same evidenced command band.
+  - field: velocity_observation_hold_scale
+    stage: 5
+    candidates:
+      - [1.10, 1.06, 1.0]
   # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
   # physical-state correction and core replay must remain exact.
   - field: ki_vel
@@ -135,10 +140,10 @@ parameters:
   - field: horizontal_velocity_braking_gain_end_mps
     stage: 13
     candidates: [0.085]
-  # Retain the best motor-replay side of the angular-filter diagnostic.
+  # Fit the motor-replay-passing angular-filter frontier.
   - field: angular_velocity_filter_hz
     stage: 14
-    candidates: [24.0]
+    candidates: [40.0]
   # Preserve the pinned PX4 proportional gains.
   - field: kp_vel
     stage: 15
@@ -161,10 +166,10 @@ parameters:
   # zero-command ringdown, with one smooth componentwise transition for XYZ.
   - field: velocity_observation_bias_command_start_mps
     stage: 18
-    candidates: [0.0, 0.002, 0.005]
+    candidates: [0.040]
   - field: velocity_observation_bias_command_full_mps
     stage: 19
-    candidates: [0.020, 0.030, 0.040]
+    candidates: [0.060]
 
 selection_metric: controller-quality
 publication_metrics:

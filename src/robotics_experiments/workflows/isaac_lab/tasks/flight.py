@@ -131,10 +131,12 @@ class _FlightActuationParams:
     ki_vel: torch.Tensor
     kd_vel: torch.Tensor
     velocity_observation_scale: torch.Tensor
+    velocity_observation_hold_scale: torch.Tensor
     velocity_observation_bias_mps: torch.Tensor
     velocity_observation_bias_command_start_mps: float | torch.Tensor
     velocity_observation_bias_command_full_mps: float | torch.Tensor
     velocity_estimator_bias_decay_hz: float | torch.Tensor
+    velocity_estimator_bias_hold_decay_hz: torch.Tensor
     velocity_filter_hz: torch.Tensor
     velocity_derivative_filter_hz: float | torch.Tensor
     velocity_integral_limit_mps2: torch.Tensor
@@ -565,7 +567,7 @@ def _effective_velocity_proportional_gain(
     return params.kp_vel * xyz_scale
 
 
-def _velocity_observation_bias(
+def _velocity_command_blend(
     params: _FlightActuationParams, velocity_setpoint: torch.Tensor, /
 ) -> torch.Tensor:
     start = _environment_values(
@@ -577,8 +579,22 @@ def _velocity_observation_bias(
         velocity_setpoint[:, 0],
     ).unsqueeze(-1)
     transition = torch.clamp((velocity_setpoint.abs() - start) / (full - start), 0.0, 1.0)
-    blend = transition.square() * (3.0 - 2.0 * transition)
-    return params.velocity_observation_bias_mps * blend
+    return transition.square() * (3.0 - 2.0 * transition)
+
+
+def _velocity_observation_bias(
+    params: _FlightActuationParams, velocity_setpoint: torch.Tensor, /
+) -> torch.Tensor:
+    return params.velocity_observation_bias_mps * _velocity_command_blend(params, velocity_setpoint)
+
+
+def _effective_velocity_observation_scale(
+    params: _FlightActuationParams, velocity_setpoint: torch.Tensor, /
+) -> torch.Tensor:
+    blend = _velocity_command_blend(params, velocity_setpoint)
+    return params.velocity_observation_hold_scale + blend * (
+        params.velocity_observation_scale - params.velocity_observation_hold_scale
+    )
 
 
 def _rate_to_omega(
@@ -768,7 +784,8 @@ def _velocity(
         dt_s=outer_loop_period_s,
     )
     observed_velocity_world = (
-        params.velocity_observation_scale * linear_velocity_world
+        _effective_velocity_observation_scale(params, velocity_setpoint_world)
+        * linear_velocity_world
         + _velocity_observation_bias(params, velocity_setpoint_world)
         + controller_state.velocity_estimator_bias_world
     )
@@ -797,11 +814,14 @@ def _velocity(
         candidate_acceleration,
         torch.zeros_like(candidate_acceleration),
     )
-    bias_decay_hz = _environment_values(
+    motion_decay_hz = _environment_values(
         params.velocity_estimator_bias_decay_hz,
         outer_loop_elapsed_s,
-    )
-    bias_decay = torch.exp(-2.0 * math.pi * bias_decay_hz * outer_loop_period_s).unsqueeze(-1)
+    ).unsqueeze(-1)
+    hold_decay_hz = params.velocity_estimator_bias_hold_decay_hz
+    command_blend = _velocity_command_blend(params, velocity_setpoint_world)
+    bias_decay_hz = hold_decay_hz + command_blend * (motion_decay_hz - hold_decay_hz)
+    bias_decay = torch.exp(-2.0 * math.pi * bias_decay_hz * outer_loop_period_s)
     velocity_estimator_bias = controller_state.velocity_estimator_bias_world * bias_decay
     velocity_error = velocity_setpoint_world - filtered_velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
@@ -1073,6 +1093,9 @@ def build_flight_actuation_params(
         ki_vel=_tensor(controller_settings.ki_vel),
         kd_vel=_tensor(controller_settings.kd_vel),
         velocity_observation_scale=_tensor(controller_settings.velocity_observation_scale),
+        velocity_observation_hold_scale=_tensor(
+            controller_settings.velocity_observation_hold_scale
+        ),
         velocity_observation_bias_mps=_tensor(controller_settings.velocity_observation_bias_mps),
         velocity_observation_bias_command_start_mps=float(
             controller_settings.velocity_observation_bias_command_start_mps
@@ -1082,6 +1105,9 @@ def build_flight_actuation_params(
         ),
         velocity_estimator_bias_decay_hz=float(
             controller_settings.velocity_estimator_bias_decay_hz
+        ),
+        velocity_estimator_bias_hold_decay_hz=_tensor(
+            controller_settings.velocity_estimator_bias_hold_decay_hz
         ),
         velocity_filter_hz=_tensor(controller_settings.velocity_filter_hz),
         velocity_derivative_filter_hz=float(controller_settings.velocity_derivative_filter_hz),
@@ -1164,6 +1190,7 @@ def _replace_controller_settings_batch(
         ki_vel=_vectors("ki_vel"),
         kd_vel=_vectors("kd_vel"),
         velocity_observation_scale=_vectors("velocity_observation_scale"),
+        velocity_observation_hold_scale=_vectors("velocity_observation_hold_scale"),
         velocity_observation_bias_mps=_vectors("velocity_observation_bias_mps"),
         velocity_observation_bias_command_start_mps=_scalars(
             "velocity_observation_bias_command_start_mps"
@@ -1172,6 +1199,7 @@ def _replace_controller_settings_batch(
             "velocity_observation_bias_command_full_mps"
         ),
         velocity_estimator_bias_decay_hz=_scalars("velocity_estimator_bias_decay_hz"),
+        velocity_estimator_bias_hold_decay_hz=_vectors("velocity_estimator_bias_hold_decay_hz"),
         velocity_filter_hz=_vectors("velocity_filter_hz"),
         velocity_derivative_filter_hz=_scalars("velocity_derivative_filter_hz"),
         velocity_integral_limit_mps2=_vectors("velocity_integral_limit_mps2"),
@@ -1390,7 +1418,8 @@ def seed_flight_controller_state(
         velocity_estimator_bias_world=torch.where(
             selected,
             filtered_linear_velocity_world
-            - params.velocity_observation_scale * physical_linear_velocity_world
+            - _effective_velocity_observation_scale(params, velocity_setpoint_world)
+            * physical_linear_velocity_world
             - _velocity_observation_bias(params, velocity_setpoint_world),
             state.velocity_estimator_bias_world,
         ),
