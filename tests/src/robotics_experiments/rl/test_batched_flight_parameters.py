@@ -33,6 +33,8 @@ def test_batched_evaluation_matches_flight_parameter_contract(backend: str) -> N
         )
         for position, attitude in zip(positions, attitudes, strict=True)
     )
+    position_input: np.ndarray | torch.Tensor
+    attitude_input: np.ndarray | torch.Tensor
     if backend == "torch":
         position_input = torch.as_tensor(positions)
         attitude_input = torch.as_tensor(attitudes)

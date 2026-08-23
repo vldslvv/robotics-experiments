@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import fields, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -10,6 +11,7 @@ from robotics_experiments.config import (
     PressApproachGoalConfig,
     PressApproachVelocityReferenceConfig,
 )
+from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.press import (
     HandoffGate,
     PressApproachExecutionParams,
@@ -53,6 +55,9 @@ _GATE = HandoffGate(
     relative_attitude_error_max_rad=np.deg2rad(5.0),
     body_z_alignment_min=0.965926,
     estimator_health_min=0.80,
+)
+_ENVELOPE = load_flight_parameters(
+    Path(__file__).parents[4] / "fixtures/flight_parameters/flight_parameters.json"
 )
 
 
@@ -100,6 +105,7 @@ def _params(*, inference=lambda _obs: np.array([0.2, 0.0, 0.0, 0.0])):
         action_dim=4,
         handoff_gate=_GATE,
         goal=_GOAL,
+        flight_parameters=_ENVELOPE,
     )
 
 
@@ -117,6 +123,7 @@ def test_public_records_are_approach_specific() -> None:
         "action_dim",
         "handoff_gate",
         "goal",
+        "flight_parameters",
     ]
     assert [field.name for field in fields(PressApproachExecutionResult)] == [
         "state",
@@ -225,13 +232,13 @@ def test_unstable_sample_resets_stable_counter() -> None:
     )
     result = _advance(
         state=state,
-        observation=_observation(range_m=0.41, lateral_m=0.011),
+        observation=_observation(range_m=0.41, lateral_m=0.101),
     )
     assert result.state.stable_goal_steps == 0
     assert not result.complete
 
 
-def test_deployment_uses_the_same_full_attitude_goal_boundary() -> None:
+def test_deployment_uses_the_embedded_flight_parameter_attitude_boundary() -> None:
     state = replace(
         initial_press_approach_execution_state(action_dim=4),
         handoff_latched=True,
@@ -239,12 +246,12 @@ def test_deployment_uses_the_same_full_attitude_goal_boundary() -> None:
     )
     accepted = _advance(
         state=state,
-        observation=_observation(range_m=0.41, attitude_error_rad=np.deg2rad(0.999)),
+        observation=_observation(range_m=0.41, attitude_error_rad=0.099),
     )
     assert accepted.complete
     rejected = _advance(
         state=state,
-        observation=_observation(range_m=0.41, attitude_error_rad=np.deg2rad(1.001)),
+        observation=_observation(range_m=0.41, attitude_error_rad=0.101),
     )
     assert rejected.state.stable_goal_steps == 0
     assert not rejected.complete

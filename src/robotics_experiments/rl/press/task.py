@@ -484,17 +484,26 @@ def step_press_approach(
         * (state.normalized_position_error - normalized_position_error),
     )
     if not approach_enabled:
-        position_progress = _zeros_like(value=normalized_position_error)
+        position_progress = reward_cfg.position_progress_weight * (
+            state.normalized_pose_error - normalized_pose_error
+        )
+    stabilization = _where(
+        position_ready,
+        reward_cfg.stabilization_weight / (1.0 + normalized_pose_error),
+        _zeros_like(value=normalized_position_error),
+    )
+    predictive_barrier = -reward_cfg.predictive_barrier_weight * _square(
+        normalized_predicted_undershoot
+    )
+    if not approach_enabled:
+        stabilization = (
+            -reward_cfg.stabilization_weight * normalized_pose_error / (1.0 + normalized_pose_error)
+        )
+        predictive_barrier = _zeros_like(value=normalized_position_error)
     rewards = PressApproachRewardTerms(
         position_progress=position_progress,
-        stabilization=_where(
-            position_ready,
-            reward_cfg.stabilization_weight / (1.0 + normalized_pose_error),
-            _zeros_like(value=normalized_position_error),
-        ),
-        predictive_barrier=(
-            -reward_cfg.predictive_barrier_weight * _square(normalized_predicted_undershoot)
-        ),
+        stabilization=stabilization,
+        predictive_barrier=predictive_barrier,
         strict_hold=reward_cfg.strict_hold_weight * stable_goal,
         terminal_outcome=(
             reward_cfg.terminal_success_weight * success

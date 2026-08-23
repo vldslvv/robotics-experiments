@@ -166,11 +166,14 @@ the entire fleet cycle.
   `press-approach` consumes the injected exact 34-value `PressObservation`;
   `curriculum_stage` selects the stage-specific adapter. The implemented
   `approach` adapter waits for the configured handoff gate, fails on contact or
-  invalid observation, and completes after 100 continuous strict-goal samples
-  (five seconds at 20 Hz) with a zero terminal setpoint. The shared predicate
-  requires 0.40-0.42 m range, at most 0.01 m combined lateral/vertical error,
-  at most 1 degree full relative-attitude error, at most 0.03 m/s linear speed,
-  at most 0.05 rad/s angular speed, and no contact. It does not require
+  invalid observation, and completes with a zero terminal setpoint after the
+  configured 600 continuous samples inside the complete hover envelope embedded
+  in the policy artifact from its pinned flight-parameters run. The adapter
+  reconstructs world-ENU position error and contact-frame attitude error from
+  each live observation and evaluates the same measured bounds as training and
+  held-out evaluation. Task-owned range and velocity-reference fields still
+  define the target and control diagnostics, but cannot replace or relax the
+  embedded completion envelope. Contact remains a failure. It does not require
   `hold_s`.
   Stage-less and unknown-stage press artifacts fail preflight. Policy
   completion never advances before PX4 accepts OFFBOARD. A policy timeout

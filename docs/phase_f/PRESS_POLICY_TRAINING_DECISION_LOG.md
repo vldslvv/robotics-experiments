@@ -1,7 +1,7 @@
 # Press policy training decision log
 
-Status: STRICT-DWELL CAMPAIGNS STOPPED EARLY; RANGE-RECOVERY CURRICULUM
-IMPLEMENTED; DIAGNOSTIC GPU RUN PENDING (2026-08-13).
+Status: PRESS-HOVER OBJECTIVE SIMPLIFIED; METRIC CONTRACT REPAIRED; CLEAN
+CAMPAIGN PENDING (2026-08-23).
 
 This is the chronological record for press-policy scratch training, checkpoint
 selection, acceptance, and deployment decisions. Controller fitting and its
@@ -2206,3 +2206,79 @@ success, or acceptance predicates. Preserve both reward formulas, every reward
 weight, schedule, reset, PPO setting, workload, and acceptance gate. Advance
 report schema 15, evaluator revision 18, metric-registry revision 12,
 comparison revision 17, and cache schema 17. Start a fresh campaign.
+
+### 70. Train hover directly against the measured pose envelope
+
+Date: 2026-08-23.
+
+Campaign `20260822T100450Z` used the newly qualified controller and exact
+flight-parameters run but retained the staged approach reward during the hover
+stage. All three scratch seeds selected zero-success checkpoints. Seeds 42, 43,
+and 44 had other-flight-failure rates 0.2667, 0.2733, and 0.2067, and minimum
+closest ranges 0.39782, 0.39774, and 0.39822 m. The predictive undershoot term
+dominated the hover reward even though hover starts from the pinned measured
+envelope and does not need to learn an approach. No actor passed validation and
+no test workload or publication followed.
+
+Keep the 5/15/30-second training holds and strict 30-second acceptance hold.
+For hover only, remove position progress and the predictive barrier and use one
+bounded measured-pose cost, `-utilization / (1 + utilization)`, plus strict hold
+and terminal outcome. The first two hover phases recover at 0.38 and 0.39 m;
+the final phase and acceptance retain 0.40 m. Approach behavior remains
+unchanged. Remove the unused stabilization-capture configuration field. Advance
+report schema 17, evaluator revision 20, metric-registry revision 14,
+comparison revision 19, and validation-cache schema 19 so no prior reward
+diagnostic or evaluation can be reused.
+
+Deployment completion now evaluates the full flight-parameters envelope
+embedded in the policy artifact for the configured 600 continuous samples,
+matching training and held-out evaluation. The stage-neutral three-range
+transfer routine derives the artifact label from the active curriculum stage;
+the hover and approach top-level configs select their stage explicitly and give
+each policy 45 seconds to complete.
+
+### 71. Keep unavailable hover statistics explicit in every evaluation
+
+Date: 2026-08-23.
+
+Campaign `20260823T055548Z.36337` stopped during seed 42 at learner iteration
+35 because the first actor to exceed the six-second statistics warmup appended
+40 flight-parameter metrics that earlier zero-dwell evaluations had omitted.
+The strict TensorBoard registry contained only the 31 always-available metrics,
+so it rejected the expanded tuple. This is a reporting-contract defect, not a
+policy failure. The preserved checkpoint had improved mean normalized pose
+error from 5.232 at model zero to 2.960, maximum dwell fraction from 0.004 to
+0.24, zero collision, and 34% other flight failures. The attempt never reached
+validation selection or test.
+
+Make the evaluator return one fixed 71-metric tuple on every checkpoint. The 40
+flight-parameter maximum, RMSE, p95, and p99 fields are JSON null until a policy
+produces the required post-warmup samples, then become finite values in the same
+positions. Register all 40 fields for validation and test TensorBoard output.
+Advance report schema 18, evaluator revision 21, metric-registry revision 15,
+comparison revision 20, and validation-cache schema 20 so the incomplete cached
+tuples cannot be reused. Preserve the objective, training schedule, seeds,
+thresholds, and scratch-only campaign contract for the clean rerun.
+
+### 72. Reward exact pose recovery during hover
+
+Date: 2026-08-23.
+
+Campaign `20260823T063936Z.51981` completed all three independent scratch seeds
+after the fixed 71-metric reporting contract. Seeds 42, 43, and 44 selected
+zero-success actors with normalized pose errors 2.9607, 3.2826, and 3.1158.
+Their mean maximum dwell fractions remained about 0.004 to 0.005, and none ran
+the held-out test workload. Seed 44 exhausted all 180 updates. The actors
+quickly learned collision-free survival, while intermittent pose improvements
+reset the plateau without producing sustained occupancy of the exact hover
+envelope.
+
+Pinned-flight-parameter hover resets already start around the exact target, so
+the missing signal is retention and recovery after the neutral actor leaves the
+envelope. For hover only, use the existing `position_progress` contribution for
+the per-step reduction in exact measured pose utilization. Keep the bounded
+pose cost, strict hold, terminal outcome, zero predictive barrier, reset
+distribution, curriculum, PPO settings, workloads, and every acceptance gate
+unchanged. Approach retains its target-position progress definition. Advance
+evaluator revision 22, comparison revision 21, and validation-cache schema 21;
+the report schema and fixed metric registry do not change.

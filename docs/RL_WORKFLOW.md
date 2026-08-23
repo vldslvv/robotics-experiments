@@ -170,9 +170,9 @@ Hover training uses a 40-second episode horizon; approach uses 45 seconds. Both
 press stages run:
 
 1. 50 iterations at `1e-4`, fixed schedule and zero entropy, with recovery
-   with the 0.40 m safety boundary;
+   at 0.38 m for hover and 0.40 m for approach;
 2. 30 iterations at `3e-5`, fixed schedule and zero entropy, with recovery
-   with the 0.40 m safety boundary;
+   at 0.39 m for hover and 0.40 m for approach;
 3. 100 iterations at `1e-5`, fixed schedule and zero entropy, with the strict
    0.40 m undershoot boundary.
 
@@ -252,12 +252,16 @@ sampler failure terminates at the interval boundary with evidence preserved.
 The configured `0.95` GPU-utilization target is diagnostic: a miss is recorded
 as the measured bottleneck and never changes policy qualification.
 
-The press PPO reward has five signed contributions. In the approach stage,
-`position_progress` rewards reduction in target error until the measured
-position envelope is reached; the hover stage disables this term.
-`stabilization` is `1 / (1 + utilization)` inside the measured position bounds,
-where utilization is the larger of exact position and attitude envelope
-utilization. `strict_hold` is one on every complete envelope-passing sample.
+The press PPO reward has five signed contributions. Hover `position_progress`
+rewards each reduction in measured pose utilization and the bounded
+stabilization cost is `-utilization / (1 + utilization)`, alongside the strict
+hold and terminal outcome. Utilization is the larger of exact position and
+attitude envelope utilization from the pinned flight parameters. Hover sets
+only `predictive_barrier` to zero. In the approach stage, `position_progress`
+rewards reduction in target error until the measured position envelope is
+reached, `stabilization` is `1 / (1 + utilization)` inside that position
+envelope, and the predictive range barrier remains active.
+`strict_hold` is one on every complete envelope-passing sample.
 `terminal_outcome` is +150 on the selected stage's hold success and -300 on every unsuccessful
 termination, including timeout. The first monitored scratch campaign showed
 range undershoot as the dominant early flight failure, so the one added factor,
@@ -310,12 +314,12 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 16 records every attempt, phase parent, raw
+`training_report.json` schema 18 records every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries, cache source,
 plateau state, phase termination, selection, final test, and gate-by-gate
 acceptance. The evaluator, cache, metric registry, and comparison fingerprint
-carry evaluator revision 19, metric-registry revision 13, comparison revision 18,
-and validation-cache v18; older metric/report shapes and cached evaluations are
+carry evaluator revision 22, metric-registry revision 15, comparison revision 21,
+and validation-cache v21; older metric/report shapes and cached evaluations are
 unsupported. Flight failure and timeout each cost 3.0 in checkpoint ranking, so
 the selector cannot improve merely by converting failed attempts into waits.
 
@@ -389,7 +393,9 @@ runs the actor at its embedded cadence. The controller artifact embedded during
 training supplies Lab actuation behavior; PX4 deployment receives the actor's
 normalized velocity intent through the OFFBOARD adapter.
 
-For the approach policy, correct behavior is a controlled, contact-free move to
-the 0.40-0.42 m range followed by a stable hover. It should not touch the switch,
-climb away, or perform a learned retreat. The routine's later `goto` step owns
-any return motion.
+For a press policy, correct behavior is a controlled, contact-free move to the
+task-owned range center followed by a stable hover inside the complete envelope
+embedded from the pinned flight-parameters artifact. Deploy-time completion
+uses that exact envelope for the configured 600 continuous samples, matching
+training and evaluation. It should not touch the switch, climb away, or perform
+a learned retreat. The routine's later `goto` step owns any return motion.

@@ -64,6 +64,13 @@ def _evaluation(*, undefined_completion_time: bool = False) -> PolicyEvaluation:
         "mean_action_delta_cost": 0.5,
         "mean_completion_time_fraction": 0.6,
     }
+    values.update(
+        {
+            spec.raw_name: 0.01
+            for spec in EVALUATION_METRICS
+            if spec.raw_name is not None and spec.raw_name.startswith("flight_parameters.")
+        }
+    )
     return PolicyEvaluation(
         iteration=10,
         checkpoint_path=Path("model_10.pt"),
@@ -108,7 +115,7 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
 
 def test_metric_registry_names_rates_units_and_unavailable_values() -> None:
     registry = metric_registry_payload()
-    assert registry["revision"] == 13
+    assert registry["revision"] == 15
     assert all(spec.suffix == spec.suffix.lower() for spec in EVALUATION_METRICS)
     assert all(not spec.suffix.endswith("_percent") for spec in EVALUATION_METRICS)
     rate_specs = tuple(spec for spec in EVALUATION_METRICS if spec.suffix.endswith("_rate"))

@@ -772,6 +772,7 @@ def press_policy_evaluation(
     traces_finite = all(np.isfinite(value) for value in finite_values) and (
         summary.median_completion_time_s is None or np.isfinite(summary.median_completion_time_s)
     )
+    hover_statistics = {statistics.name: statistics for statistics in result.hover_statistics}
     return PolicyEvaluation(
         iteration=iteration,
         checkpoint_path=checkpoint_path,
@@ -822,11 +823,12 @@ def press_policy_evaluation(
         )
         + tuple(
             EvaluationMetric(
-                f"flight_parameters.{statistics.name}.{metric_name}",
-                getattr(statistics, field_name),
+                f"flight_parameters.{signal_name}.{metric_name}",
+                getattr(statistics, field_name) if statistics is not None else None,
             )
-            for statistics in result.hover_statistics
+            for signal_name in _HOVER_SIGNAL_UNITS
             for metric_name, field_name in _BINDING_STATISTICS
+            for statistics in (hover_statistics.get(signal_name),)
         ),
         reward_means=result.reward_means,
         source=source,

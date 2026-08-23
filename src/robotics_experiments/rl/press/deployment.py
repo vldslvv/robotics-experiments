@@ -9,7 +9,13 @@ from typing import Callable, Optional
 import numpy as np
 
 from robotics_experiments.config import PressApproachGoalConfig
-from robotics_experiments.px4_bridge import rotate_vector_wxyz
+from robotics_experiments.flight_parameters import FlightParameters
+from robotics_experiments.px4_bridge import (
+    quat_conjugate_wxyz,
+    quat_multiply_wxyz,
+    rotate_vector_wxyz,
+)
+from robotics_experiments.rl import evaluate_flight_parameters
 from robotics_experiments.rl.press.handoff import HandoffGate, handoff_ready
 from robotics_experiments.rl.press.observation import (
     PRESS_OBSERVATION_DIM,
@@ -17,7 +23,6 @@ from robotics_experiments.rl.press.observation import (
     PressObservationMask,
     to_vector,
 )
-from robotics_experiments.rl.press.task import press_approach_goal_satisfied
 
 __all__ = [
     "PressApproachExecutionParams",
@@ -36,6 +41,7 @@ class PressApproachExecutionParams:
     action_dim: int
     handoff_gate: HandoffGate
     goal: PressApproachGoalConfig
+    flight_parameters: FlightParameters
 
 
 @dataclass(frozen=True)
@@ -152,19 +158,25 @@ def advance_press_approach_execution(
             )
         action = np.clip(action, -1.0, 1.0)
 
-    stable_goal = handoff_latched and bool(
-        press_approach_goal_satisfied(
-            relative_switch_pos_m=np.asarray(observation.relative_switch_pos_m)[None, :],
-            relative_switch_quat_xyzw=np.asarray(observation.relative_switch_quat_xyzw)[None, :],
-            linear_velocity_mps=rotate_vector_wxyz(
-                np.asarray(observation.relative_switch_quat_xyzw)[[3, 0, 1, 2]],
-                np.asarray(observation.body_lin_vel_mps),
-            )[None, :],
-            angular_velocity_radps=np.asarray(observation.body_ang_vel_radps)[None, :],
-            contact_flag=np.asarray([observation.contact_flag]),
-            goal_cfg=params.goal,
-        )[0]
+    body_to_world_wxyz = np.asarray(observation.attitude_quat_xyzw)[[3, 0, 1, 2]]
+    body_to_contact_wxyz = np.asarray(observation.relative_switch_quat_xyzw)[[3, 0, 1, 2]]
+    contact_to_world_wxyz = quat_multiply_wxyz(
+        body_to_world_wxyz,
+        quat_conjugate_wxyz(body_to_contact_wxyz),
     )
+    position_error_contact_m = np.array(
+        [params.goal.velocity_reference.range_center_m, 0.0, 0.0],
+        dtype=np.float64,
+    ) - np.asarray(observation.relative_switch_pos_m, dtype=np.float64)
+    envelope = evaluate_flight_parameters(
+        flight_parameters=params.flight_parameters,
+        position_error_enu_m=rotate_vector_wxyz(
+            contact_to_world_wxyz,
+            position_error_contact_m,
+        )[None, :],
+        attitude_error_flu_enu_wxyz=body_to_contact_wxyz[None, :],
+    )
+    stable_goal = handoff_latched and bool(envelope.inside[0])
     stable_goal_steps = state.stable_goal_steps + 1 if stable_goal else 0
     complete = stable_goal_steps >= params.goal.stable_steps
     successor = PressApproachExecutionState(

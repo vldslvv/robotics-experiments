@@ -275,7 +275,6 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert policy.actor.hidden_dims == (256, 256, 128)
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
-    assert reward.stabilization_capture_radius_m == 0.03
     assert reward.position_progress_weight == 10.0
     assert reward.stabilization_weight == 1.0
     assert reward.predictive_barrier_weight == 10.0
@@ -469,6 +468,26 @@ def test_policy_transfer_config_uses_distinct_entry_targets():
         17.476,
     )
     assert all(steps[index]["position_tol_m"] == 0.05 for index in (5, 10, 15))
+    assert all(steps[index]["timeout_s"] == 45.0 for index in (7, 12, 17))
+    assert all(
+        steps[index]["artifact"] == ".build/training/press-approach/latest" for index in (7, 12, 17)
+    )
+
+    hover = load_config(_ROOT / "policy_transfer_press_hover_quad.yaml")
+    hover_steps = hover.vehicles["x500_01"].routine.steps
+    assert hover.rl.press.selected_stage().name == "hover"
+    hover_boundaries = tuple(
+        phase.range_undershoot_min_m for phase in hover.rl.press.selected_stage().phases
+    )
+    assert hover_boundaries == (
+        0.38,
+        0.39,
+        0.40,
+    )
+    assert all(
+        hover_steps[index]["artifact"] == ".build/training/press-hover/latest"
+        for index in (7, 12, 17)
+    )
 
 
 @pytest.mark.parametrize(
@@ -649,10 +668,6 @@ def test_active_stage_phase_validation(tmp_path):
         (
             {"rl": {"press": {"reward": {"position_progress_weight": -0.1}}}},
             "finite and non-negative",
-        ),
-        (
-            {"rl": {"press": {"reward": {"stabilization_capture_radius_m": 0.0}}}},
-            "stabilization_capture_radius_m must be positive",
         ),
         (
             {

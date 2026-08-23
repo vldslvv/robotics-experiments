@@ -1,11 +1,9 @@
 defaults:
   - base
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - override experiment/routine@vehicles.x500_01.routine: policy_press_transfer
   - _self_
 
-# Post-training PX4 policy-transfer acceptance at three entry ranges. Use the
-# production warehouse geometry and keep physical contact enabled so each
-# approach must stop without touching the wall or switch.
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 switches:
@@ -23,74 +21,8 @@ vehicles:
     spawn:
       position_xy: [0.0, 14.0]
       yaw_rad: 0.0
-    routine:
-      steps:
-        - kind: arm
-        - kind: takeoff
-          climb_m: 2.5
-          min_climb_m: 1.5
-        - kind: hover
-          hold_s: 2.0
-        - kind: goto
-          x: 0.0
-          y: 17.40
-          z: 2.5
-          position_tol_m: 0.05
-          timeout_s: 20.0
-        - kind: hover
-          hold_s: 2.0
-        - kind: goto
-          x: 0.0
-          y: 17.563
-          z: 2.5
-          position_tol_m: 0.05
-          timeout_s: 20.0
-        - kind: hover
-          hold_s: 1.0
-        - kind: policy
-          label: policy-transfer-0.460
-          artifact: .build/training/press-approach/latest
-          switch_index: 0
-          timeout_s: 20.0
-        - kind: goto
-          x: 0.0
-          y: 17.40
-          z: 2.5
-          position_tol_m: 0.05
-          timeout_s: 20.0
-        - kind: hover
-          hold_s: 2.0
-        - kind: goto
-          x: 0.0
-          y: 17.507
-          z: 2.5
-          position_tol_m: 0.05
-          timeout_s: 20.0
-        - kind: hover
-          hold_s: 1.0
-        - kind: policy
-          label: policy-transfer-0.475
-          artifact: .build/training/press-approach/latest
-          switch_index: 0
-          timeout_s: 20.0
-        - kind: goto
-          x: 0.0
-          y: 17.40
-          z: 2.5
-          position_tol_m: 0.05
-          timeout_s: 20.0
-        - kind: hover
-          hold_s: 2.0
-        - kind: goto
-          x: 0.0
-          y: 17.476
-          z: 2.5
-          position_tol_m: 0.05
-          timeout_s: 20.0
-        - kind: hover
-          hold_s: 1.0
-        - kind: policy
-          label: policy-transfer-0.490
-          artifact: .build/training/press-approach/latest
-          switch_index: 0
-          timeout_s: 20.0
+
+rl:
+  press:
+    curriculum:
+      active_stage: approach

@@ -132,7 +132,16 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   warehouse. Physical wall and switch contact remain enabled, and the gate
   requires no body contact, pusher contact, or lamp transition. This is a
   downstream transfer gate and never fits or publishes controller settings. It
-  is artifact-dependent and excluded from `test-integration-all`.
+  is artifact-dependent and excluded from `test-integration-all`. The shared
+  transfer routine derives its artifact from the active curriculum stage and
+  gives each policy step 45 seconds, enough for the 30-second/600-sample
+  completion hold. The approach config remains the target default; qualify the
+  first press stage with:
+
+  ```bash
+  make test-integration-press-policy-transfer \
+    HYDRA_CONFIG=configs/policy_transfer_press_hover_quad.yaml
+  ```
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.

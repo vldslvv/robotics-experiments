@@ -18,7 +18,21 @@ __all__ = [
     "write_system_scalars",
 ]
 
-METRIC_REGISTRY_REVISION = 13
+METRIC_REGISTRY_REVISION = 15
+
+_HOVER_SIGNAL_UNITS = {
+    "position_error_enu_x": "m",
+    "position_error_enu_y": "m",
+    "position_error_enu_z": "m",
+    "horizontal_position_error": "m",
+    "position_error": "m",
+    "attitude_error_roll": "rad",
+    "attitude_error_pitch": "rad",
+    "attitude_error_yaw": "rad",
+    "tilt_error": "rad",
+    "orientation_error": "rad",
+}
+_BINDING_STATISTICS = ("max", "rmse", "p95", "p99")
 
 
 class _ScalarWriter(Protocol):
@@ -222,6 +236,16 @@ EVALUATION_METRICS = (
         "Completion-time fraction.",
         "minimize",
     ),
+) + tuple(
+    MetricSpec(
+        f"flight_parameters.{signal_name}.{statistic}",
+        f"flight_parameters/{signal_name}/{statistic}",
+        unit,
+        f"Measured hover {signal_name} {statistic}.",
+        "minimize",
+    )
+    for signal_name, unit in _HOVER_SIGNAL_UNITS.items()
+    for statistic in _BINDING_STATISTICS
 )
 
 

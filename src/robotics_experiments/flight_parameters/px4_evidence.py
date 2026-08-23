@@ -418,12 +418,11 @@ def verify_px4_hover_evidence(
         float(command_data["param6"][takeoff_index]),
         float(command_data["param7"][takeoff_index]),
     )
-    if not np.allclose(
-        (goal.latitude_deg, goal.longitude_deg, goal.altitude_m),
-        commanded_goal,
-        rtol=0.0,
-        atol=(1.0e-8, 1.0e-8, 1.0e-3),
-    ):
+    goal_error = abs(
+        np.asarray((goal.latitude_deg, goal.longitude_deg, goal.altitude_m))
+        - np.asarray(commanded_goal)
+    )
+    if not np.all(goal_error <= np.asarray((1.0e-8, 1.0e-8, 1.0e-3))):
         raise ValueError("PX4 active position goal does not match the accepted takeoff command")
     effective_position = _effective_position_target(raw=raw, goal=goal)
     yaw_target_ned, effective_attitude = _verified_yaw_target(

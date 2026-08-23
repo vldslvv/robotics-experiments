@@ -292,6 +292,12 @@ the current contents and the intended home for that kind of code.
   zero smoothing for every metric namespace so raw validation, acceptance, and
   training values remain visible; `training_report.json` is the exact
   validation-value audit source.
+- When operating an RL training run for the user, actively inspect validation
+  and acceptance progress while it runs. Do not merely wait for the configured
+  budget to expire. Interrupt a campaign once its validation checkpoints and
+  independent attempts show no credible path toward acceptance, preserve its
+  artifacts, report the evidence, and diagnose it before launching a fresh
+  campaign.
 - PX4 bridge invariants: read
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` before
   touching bridge code. Keep the interface contract, frame conversions, motor

@@ -22,3 +22,8 @@ vehicles:
     spawn:
       position_xy: [0.0, 14.0]
       yaw_rad: 0.0
+
+rl:
+  press:
+    curriculum:
+      active_stage: approach

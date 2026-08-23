@@ -158,6 +158,7 @@ def _press_approach_adapter(
         action_dim=contract.action_dim,
         handoff_gate=HandoffGate.from_config(config.rl.press.handoff),
         goal=config.rl.press.goal,
+        flight_parameters=loaded.metadata.flight_parameters,
     )
 
     def advance(*, policy_input: PolicyInput, state: object) -> PolicyResult:

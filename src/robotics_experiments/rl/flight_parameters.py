@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 import numpy as np
 import torch
@@ -36,6 +36,10 @@ def _as_array(*, values: tuple[float, ...], reference: ArrayT) -> ArrayT:
     return np.asarray(values, dtype=reference.dtype)
 
 
+def _as_same_array_type(*, value: object, reference: ArrayT) -> ArrayT:
+    return cast(ArrayT, value)
+
+
 def _norm(*, value: ArrayT) -> ArrayT:
     if isinstance(value, torch.Tensor):
         return torch.linalg.vector_norm(value, dim=-1)
@@ -55,32 +59,48 @@ def _component_max(*, value: ArrayT) -> ArrayT:
 
 
 def _relative_attitude(*, quaternion_wxyz: ArrayT) -> tuple[ArrayT, ArrayT, ArrayT]:
-    quaternion = quaternion_wxyz / _norm(value=quaternion_wxyz)[..., None]
-    w, x, y, z = (quaternion[..., index] for index in range(4))
-    if isinstance(quaternion, torch.Tensor):
+    if isinstance(quaternion_wxyz, torch.Tensor):
+        quaternion = quaternion_wxyz / torch.linalg.vector_norm(quaternion_wxyz, dim=-1)[..., None]
+        w, x, y, z = (quaternion[..., index] for index in range(4))
         roll = torch.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x.square() + y.square()))
         pitch = torch.asin((2.0 * (w * y - z * x)).clamp(-1.0, 1.0))
         yaw = torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y.square() + z.square()))
-        rpy = torch.stack((roll, pitch, yaw), dim=-1)
+        attitude_rpy = torch.stack((roll, pitch, yaw), dim=-1)
         tilt = torch.acos((1.0 - 2.0 * (x.square() + y.square())).clamp(-1.0, 1.0))
         orientation = 2.0 * torch.acos(w.abs().clamp(0.0, 1.0))
-        return rpy, tilt, orientation
+        return (
+            _as_same_array_type(value=attitude_rpy, reference=quaternion_wxyz),
+            _as_same_array_type(value=tilt, reference=quaternion_wxyz),
+            _as_same_array_type(value=orientation, reference=quaternion_wxyz),
+        )
+    quaternion = quaternion_wxyz / np.linalg.norm(quaternion_wxyz, axis=-1)[..., None]
+    w, x, y, z = (quaternion[..., index] for index in range(4))
     roll = np.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x**2 + y**2))
     pitch = np.arcsin(np.clip(2.0 * (w * y - z * x), -1.0, 1.0))
     yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y**2 + z**2))
-    rpy = np.stack((roll, pitch, yaw), axis=-1)
-    tilt = np.arccos(np.clip(1.0 - 2.0 * (x**2 + y**2), -1.0, 1.0))
-    orientation = 2.0 * np.arccos(np.clip(abs(w), 0.0, 1.0))
-    return rpy, tilt, orientation
-
-
-def _component_utilization(*, value: ArrayT, lower: ArrayT, upper: ArrayT) -> ArrayT:
-    scale = (
-        torch.where(value >= 0.0, upper, -lower)
-        if isinstance(value, torch.Tensor)
-        else np.where(value >= 0.0, upper, -lower)
+    attitude_rpy_numpy = np.stack((roll, pitch, yaw), axis=-1)
+    tilt_numpy = np.arccos(np.clip(1.0 - 2.0 * (x**2 + y**2), -1.0, 1.0))
+    orientation_numpy = 2.0 * np.arccos(np.clip(abs(w), 0.0, 1.0))
+    return (
+        _as_same_array_type(value=attitude_rpy_numpy, reference=quaternion_wxyz),
+        _as_same_array_type(value=tilt_numpy, reference=quaternion_wxyz),
+        _as_same_array_type(value=orientation_numpy, reference=quaternion_wxyz),
     )
-    return abs(value) / scale
+
+
+def _component_utilization(
+    *,
+    value: ArrayT,
+    lower: ArrayT,
+    upper: ArrayT,
+) -> ArrayT:
+    if isinstance(value, torch.Tensor):
+        assert isinstance(lower, torch.Tensor) and isinstance(upper, torch.Tensor)
+        utilization = abs(value) / torch.where(value >= 0.0, upper, -lower)
+        return _as_same_array_type(value=utilization, reference=value)
+    assert isinstance(lower, np.ndarray) and isinstance(upper, np.ndarray)
+    utilization_numpy = abs(value) / np.where(value >= 0.0, upper, -lower)
+    return _as_same_array_type(value=utilization_numpy, reference=value)
 
 
 def evaluate_flight_parameters(

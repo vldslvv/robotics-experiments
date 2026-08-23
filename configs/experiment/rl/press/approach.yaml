@@ -19,13 +19,13 @@ curriculum:
           learning_rate: 1.0e-4
           schedule: fixed
           entropy_coef: 0.0
-          range_undershoot_min_m: 0.40
+          range_undershoot_min_m: 0.38
         - max_iterations: 30
           evaluation_interval: 5
           learning_rate: 3.0e-5
           schedule: fixed
           entropy_coef: 0.0
-          range_undershoot_min_m: 0.40
+          range_undershoot_min_m: 0.39
         - max_iterations: 100
           evaluation_interval: 5
           learning_rate: 1.0e-5
@@ -117,7 +117,6 @@ goal:
     tangential_speed_max_mps: 0.10
 
 reward:
-  stabilization_capture_radius_m: 0.03
   position_progress_weight: 10.0
   stabilization_weight: 1.0
   predictive_barrier_weight: 10.0

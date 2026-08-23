@@ -223,7 +223,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance=None,
         status="training",
     )
-    assert report["schema_version"] == 16
+    assert report["schema_version"] == 18
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -520,7 +520,7 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         attempt_dir.mkdir()
         (attempt_dir / "attempt_report.json").write_text(
-            '{"schema_version": 16, "report_kind": "attempt", "status": "training"}\n'
+            '{"schema_version": 18, "report_kind": "attempt", "status": "training"}\n'
         )
         raise KeyboardInterrupt
 
@@ -612,7 +612,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 16,
+        "schema_version": 18,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",

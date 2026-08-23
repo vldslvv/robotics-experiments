@@ -118,6 +118,26 @@ def _scored(**overrides) -> PolicyEvaluation:
     )
 
 
+def test_unavailable_hover_statistics_keep_the_complete_null_metric_contract() -> None:
+    from robotics_experiments.config import load_config
+    from robotics_experiments.workflows.isaac_lab import press_policy_evaluation
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_hover_quad.yaml")
+    evaluation = press_policy_evaluation(
+        iteration=10,
+        checkpoint_path=Path("logs/model_10.pt"),
+        policy_digest="digest",
+        result=replace(_press_result(), hover_statistics=()),
+        evaluation_config=config.rl.press.evaluation,
+        source="fresh",
+    )
+    hover_metrics = tuple(
+        metric for metric in evaluation.metrics if metric.name.startswith("flight_parameters.")
+    )
+    assert len(hover_metrics) == 40
+    assert all(metric.value is None for metric in hover_metrics)
+
+
 def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None:
     from robotics_experiments.config import load_config
     from robotics_experiments.rl import PolicyContract, PolicyInterface

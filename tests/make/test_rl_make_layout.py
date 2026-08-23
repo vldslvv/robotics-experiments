@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 
@@ -133,12 +134,18 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
     integration_makefile = (REPO_ROOT / "make" / "integration-tests.mk").read_text()
     assert "test-integration-press-hover-goto" in integration_makefile
     assert "test-integration-press-contact-chain" in integration_makefile
+    make_environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in {"MAKEFLAGS", "MAKEOVERRIDES"}
+    }
 
     result = subprocess.run(
         ["make", "-n", "-o", "generate-drone-usd", "test-integration-press-hover-goto"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
+        env=make_environment,
         text=True,
     )
 
@@ -156,6 +163,7 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
+        env=make_environment,
         text=True,
     )
     assert contact_result.returncode == 0, contact_result.stderr

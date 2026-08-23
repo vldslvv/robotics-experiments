@@ -50,7 +50,6 @@ _GOAL = PressApproachGoalConfig(
     ),
 )
 _REWARD = PressApproachRewardConfig(
-    stabilization_capture_radius_m=0.03,
     position_progress_weight=10.0,
     stabilization_weight=1.0,
     predictive_barrier_weight=10.0,
@@ -216,6 +215,36 @@ def test_predictive_barrier_penalizes_only_projected_range_undershoot() -> None:
     unsafe = _step(sample=_sample(range_m=0.41, closing_speed_mps=0.05))
     assert safe.rewards.predictive_barrier[0] == 0.0
     assert unsafe.rewards.predictive_barrier[0] == pytest.approx(-2.5)
+
+
+def test_hover_reward_tracks_strict_pose_progress_without_predictive_barrier() -> None:
+    state = _state(range_m=0.50)
+    recovered = step_press_approach(
+        state=state,
+        sample=_sample(range_m=0.41),
+        goal_cfg=_GOAL,
+        reward_cfg=_REWARD,
+        termination_cfg=_TERMINATION,
+        flight_parameters=_ENVELOPE,
+        hold_steps=100,
+        approach_enabled=False,
+    )
+    degraded = step_press_approach(
+        state=state,
+        sample=_sample(range_m=0.60, attitude_error_rad=np.deg2rad(20.0)),
+        goal_cfg=_GOAL,
+        reward_cfg=_REWARD,
+        termination_cfg=_TERMINATION,
+        flight_parameters=_ENVELOPE,
+        hold_steps=100,
+        approach_enabled=False,
+    )
+    assert recovered.rewards.position_progress[0] > 0.0
+    assert degraded.rewards.position_progress[0] < 0.0
+    assert recovered.rewards.predictive_barrier[0] == 0.0
+    assert degraded.rewards.predictive_barrier[0] == 0.0
+    assert recovered.rewards.stabilization[0] == 0.0
+    assert -_REWARD.stabilization_weight < degraded.rewards.stabilization[0] < 0.0
 
 
 def test_strict_hold_and_success_terminal_reward() -> None:

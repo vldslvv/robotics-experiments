@@ -513,8 +513,6 @@ def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
             raise ValueError(
                 f"rl.press.reward.{name} must be finite and non-negative, got {value!r}"
             )
-    if press.reward.stabilization_capture_radius_m <= 0.0:
-        raise ValueError("rl.press.reward.stabilization_capture_radius_m must be positive")
     evaluation = press.evaluation
     validation_seeds = tuple(evaluation.validation_seeds)
     test_seeds = tuple(evaluation.test_seeds)

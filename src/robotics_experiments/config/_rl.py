@@ -201,7 +201,6 @@ class PressNavigationNoiseConfig(_FreezableConfig):
 class PressApproachRewardConfig(_FreezableConfig):
     """Magnitudes for the signed approach-stage reward contributions."""
 
-    stabilization_capture_radius_m: float
     position_progress_weight: float
     stabilization_weight: float
     predictive_barrier_weight: float
