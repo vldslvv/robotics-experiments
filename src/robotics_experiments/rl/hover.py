@@ -1,4 +1,4 @@
-"""Batched NumPy/torch evaluation of measured hover parameters."""
+"""Batched NumPy/torch evaluation of a measured hover envelope."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ import torch
 
 from robotics_experiments.flight_parameters import FlightParameters
 
-__all__ = ["HoverEvaluation", "evaluate_flight_parameters"]
+__all__ = ["HoverEnvelopeEvaluation", "evaluate_hover_envelope"]
 
 ArrayT = TypeVar("ArrayT", np.ndarray, torch.Tensor)
 
 
 @dataclass(frozen=True)
-class HoverEvaluation(Generic[ArrayT]):
-    """Per-sample pose errors and maximum measured-parameter utilization."""
+class HoverEnvelopeEvaluation(Generic[ArrayT]):
+    """Per-sample pose errors and maximum measured-envelope utilization."""
 
     position_error_enu_m: ArrayT
     attitude_error_rpy_rad: ArrayT
@@ -88,12 +88,7 @@ def _relative_attitude(*, quaternion_wxyz: ArrayT) -> tuple[ArrayT, ArrayT, Arra
     )
 
 
-def _component_utilization(
-    *,
-    value: ArrayT,
-    lower: ArrayT,
-    upper: ArrayT,
-) -> ArrayT:
+def _component_utilization(*, value: ArrayT, lower: ArrayT, upper: ArrayT) -> ArrayT:
     if isinstance(value, torch.Tensor):
         assert isinstance(lower, torch.Tensor) and isinstance(upper, torch.Tensor)
         utilization = abs(value) / torch.where(value >= 0.0, upper, -lower)
@@ -103,13 +98,13 @@ def _component_utilization(
     return _as_same_array_type(value=utilization_numpy, reference=value)
 
 
-def evaluate_flight_parameters(
+def evaluate_hover_envelope(
     *,
     flight_parameters: FlightParameters,
     position_error_enu_m: ArrayT,
     attitude_error_flu_enu_wxyz: ArrayT,
-) -> HoverEvaluation[ArrayT]:
-    """Evaluate batched pose errors against immutable measured parameters."""
+) -> HoverEnvelopeEvaluation[ArrayT]:
+    """Evaluate batched pose errors against the pinned hover envelope."""
 
     hover = flight_parameters.hover
     position_bounds = hover.position_error_enu_m
@@ -141,7 +136,7 @@ def evaluate_flight_parameters(
             orientation / hover.orientation_error_rad.upper,
         )
     )
-    return HoverEvaluation(
+    return HoverEnvelopeEvaluation(
         position_error_enu_m=position_error_enu_m,
         attitude_error_rpy_rad=rpy,
         horizontal_position_error_m=horizontal,

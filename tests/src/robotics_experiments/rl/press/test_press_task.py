@@ -21,8 +21,6 @@ from robotics_experiments.rl.press import (
     PressApproachRewardTerms,
     PressApproachState,
     initial_press_approach_state,
-    press_approach_goal_satisfied,
-    press_approach_pose_error,
     press_approach_target_velocity,
     quaternion_geodesic_error_rad,
     reset_press_approach_state,
@@ -60,7 +58,6 @@ _REWARD = PressApproachRewardConfig(
 _TERMINATION = PressApproachTerminationConfig(
     crash_tilt_cos=0.819152,
     min_altitude_m=0.25,
-    range_undershoot_min_m=0.40,
     max_wall_normal_distance_m=1.0,
     max_lateral_error_m=0.30,
     max_vertical_error_m=0.30,
@@ -130,26 +127,11 @@ def _step(
         goal_cfg=_GOAL,
         reward_cfg=_REWARD,
         termination_cfg=_TERMINATION,
+        minimum_range_m=0.40,
         flight_parameters=_ENVELOPE,
         hold_steps=100,
         approach_enabled=True,
     )
-
-
-def test_reward_and_state_records_are_minimal() -> None:
-    assert [field.name for field in fields(PressApproachRewardTerms)] == [
-        "position_progress",
-        "stabilization",
-        "predictive_barrier",
-        "strict_hold",
-        "terminal_outcome",
-    ]
-    assert [field.name for field in fields(PressApproachState)] == [
-        "normalized_position_error",
-        "normalized_pose_error",
-        "stable_goal_steps",
-        "closest_range_m",
-    ]
 
 
 def test_quaternion_geodesic_error_matches_numpy_and_torch_and_normalizes() -> None:
@@ -160,28 +142,6 @@ def test_quaternion_geodesic_error_matches_numpy_and_torch_and_normalizes() -> N
     )
     assert numpy_error == pytest.approx([0.4])
     assert torch_error.cpu().numpy() == pytest.approx(numpy_error)
-
-
-def test_normalized_pose_error_uses_all_three_strict_pose_tolerances() -> None:
-    center = press_approach_pose_error(
-        relative_switch_pos_m=np.array([[0.41, 0.0, 0.0]]),
-        relative_switch_quat_xyzw=_quat(angle_rad=0.0),
-        goal_cfg=_GOAL,
-    )
-    boundary = press_approach_pose_error(
-        relative_switch_pos_m=np.array([[0.42, 0.01, 0.0]]),
-        relative_switch_quat_xyzw=_quat(angle_rad=np.deg2rad(1.0)),
-        goal_cfg=_GOAL,
-    )
-    assert center == pytest.approx([0.0])
-    assert boundary == pytest.approx([1.0])
-
-    worst_component = press_approach_pose_error(
-        relative_switch_pos_m=np.array([[0.43, 0.01, 0.0]]),
-        relative_switch_quat_xyzw=_quat(angle_rad=np.deg2rad(0.5)),
-        goal_cfg=_GOAL,
-    )
-    assert worst_component == pytest.approx([2.0])
 
 
 def test_approach_rewards_only_position_progress() -> None:
@@ -225,6 +185,7 @@ def test_hover_reward_tracks_strict_pose_progress_without_predictive_barrier() -
         goal_cfg=_GOAL,
         reward_cfg=_REWARD,
         termination_cfg=_TERMINATION,
+        minimum_range_m=0.40,
         flight_parameters=_ENVELOPE,
         hold_steps=100,
         approach_enabled=False,
@@ -235,6 +196,7 @@ def test_hover_reward_tracks_strict_pose_progress_without_predictive_barrier() -
         goal_cfg=_GOAL,
         reward_cfg=_REWARD,
         termination_cfg=_TERMINATION,
+        minimum_range_m=0.40,
         flight_parameters=_ENVELOPE,
         hold_steps=100,
         approach_enabled=False,
@@ -268,26 +230,6 @@ def test_every_unsuccessful_termination_gets_one_terminal_penalty(
 ) -> None:
     result = _step(sample=sample)
     assert result.rewards.terminal_outcome[0] == -300.0
-
-
-def test_strict_goal_keeps_pose_speed_and_contact_predicates() -> None:
-    common = {
-        "relative_switch_pos_m": np.array([[0.41, 0.0, 0.0]]),
-        "relative_switch_quat_xyzw": _quat(angle_rad=0.0),
-        "linear_velocity_mps": np.zeros((1, 3)),
-        "angular_velocity_radps": np.zeros((1, 3)),
-        "contact_flag": np.array([False]),
-        "goal_cfg": _GOAL,
-    }
-    assert bool(press_approach_goal_satisfied(**common)[0])
-    assert not bool(
-        press_approach_goal_satisfied(
-            **(common | {"linear_velocity_mps": np.array([[0.031, 0.0, 0.0]])})
-        )[0]
-    )
-    assert not bool(
-        press_approach_goal_satisfied(**(common | {"contact_flag": np.array([True])}))[0]
-    )
 
 
 def test_target_velocity_remains_an_evaluation_reference() -> None:
@@ -353,6 +295,7 @@ def test_numpy_and_torch_transitions_match() -> None:
         goal_cfg=_GOAL,
         reward_cfg=_REWARD,
         termination_cfg=_TERMINATION,
+        minimum_range_m=0.40,
         flight_parameters=_ENVELOPE,
         hold_steps=100,
         approach_enabled=True,

@@ -137,7 +137,6 @@ reset:
 termination:
   crash_tilt_cos: 0.819152
   min_altitude_m: 0.25
-  range_undershoot_min_m: 0.40
   max_wall_normal_distance_m: 1.0
   max_lateral_error_m: 0.30
   max_vertical_error_m: 0.30
@@ -147,8 +146,6 @@ evaluation:
   validation_seeds: [101, 202, 303]
   test_seeds: [404, 505, 606]
   episodes_per_seed: 100
-  success_rate_min: 0.95
-  collision_rate_max: 0.0
   collision_penalty: 4.0
   flight_failure_penalty: 3.0
   timeout_penalty: 3.0
@@ -162,3 +159,8 @@ evaluation:
   upright_error_weight: 0.10
   action_delta_weight: 0.10
   completion_time_weight: 0.15
+
+acceptance:
+  success_rate_min: 0.95
+  collision_rate_max: 0.0
+  minimum_range_m: 0.40

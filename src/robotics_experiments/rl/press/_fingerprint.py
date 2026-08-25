@@ -1,4 +1,4 @@
-"""Stable press-policy comparison fingerprint shared by training and selection."""
+"""Stable press-policy comparison identity."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 from dataclasses import asdict
 
 from robotics_experiments.config import ExperimentConfig
-from robotics_experiments.rl import PolicyContract, PolicyInterface
+from robotics_experiments.rl.policy import PolicyContract, PolicyInterface
 
 __all__: list[str] = []
 
@@ -26,7 +26,8 @@ def _press_comparison_fingerprint(
         if item.id == config.rl.training.vehicle_id
     )
     payload = {
-        "comparison_revision": 21,
+        "comparison_revision": 22,
+        "acceptance": asdict(config.rl.press.acceptance),
         "evaluation": asdict(config.rl.press.evaluation),
         "goal": asdict(config.rl.press.goal),
         "handoff": asdict(config.rl.press.handoff),

@@ -10,20 +10,30 @@ import pytest
 
 from robotics_experiments.config import RlPlateauCriteriaConfig
 from robotics_experiments.flight_parameters import SignalStatistics, load_flight_parameters
-from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
+from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
+from robotics_experiments.rl.press import (
+    create_press_acceptance_criteria,
+    evaluate_press_acceptance,
+)
+from robotics_experiments.rl.press._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.progress import (
-    EvaluationMetric,
     PlateauState,
-    PolicyEvaluation,
     advance_plateau,
     select_best_evaluation,
 )
-from robotics_experiments.rl.training.selection import publish_policy_labels
+from robotics_experiments.rl.training.publication import publish_policy_labels
 from tests.support.paths import REPO_ROOT
 
 _FLIGHT_PARAMETERS = load_flight_parameters(
     REPO_ROOT / "tests/fixtures/flight_parameters/flight_parameters.json"
 )
+
+
+def _acceptance_criteria(config):
+    return create_press_acceptance_criteria(
+        config=config.rl.press.acceptance,
+        flight_parameters=_FLIGHT_PARAMETERS,
+    )
 
 
 def _criteria(*, patience: int = 10) -> RlPlateauCriteriaConfig:
@@ -207,7 +217,6 @@ def test_raw_held_out_task_cost_preserves_every_configured_component(
 
 def test_acceptance_is_separate_from_evaluation_cost() -> None:
     from robotics_experiments.config import load_config
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     evaluation = _scored(
@@ -218,31 +227,26 @@ def test_acceptance_is_separate_from_evaluation_cost() -> None:
     )
     assert evaluation.metric("held_out_task_cost") >= 0.0
     acceptance = evaluate_press_acceptance(
+        criteria=_acceptance_criteria(config),
         evaluation=evaluation,
-        evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
-        flight_parameters=_FLIGHT_PARAMETERS,
     )
     assert not acceptance.passed
     assert acceptance.reasons == ("minimum closest range",)
-    assert len(acceptance.gates) == 45
+    assert len(acceptance.checks) == 45
 
 
 def test_acceptance_includes_configured_range_safety_boundary() -> None:
     from robotics_experiments.config import load_config
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     acceptance = evaluate_press_acceptance(
+        criteria=_acceptance_criteria(config),
         evaluation=_scored(
             collision_rate=0.0,
             body_collision_rate=0.0,
             pusher_collision_rate=0.0,
             min_closest_range_m=0.40,
         ),
-        evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
-        flight_parameters=_FLIGHT_PARAMETERS,
     )
     assert acceptance.passed
 
@@ -257,26 +261,24 @@ def test_acceptance_includes_configured_range_safety_boundary() -> None:
         ({"other_flight_failure_rate": 0.01}, "other flight-failure rate"),
     ],
 )
-def test_every_acceptance_gate_is_individually_binding(overrides, failed_gate: str) -> None:
+def test_every_acceptance_check_is_individually_binding(overrides, failed_gate: str) -> None:
     from robotics_experiments.config import load_config
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     acceptance = evaluate_press_acceptance(
+        criteria=_acceptance_criteria(config),
         evaluation=_scored(**overrides),
-        evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
-        flight_parameters=_FLIGHT_PARAMETERS,
     )
     assert not acceptance.passed
     assert failed_gate in acceptance.reasons
-    assert {gate.name for gate in acceptance.gates if not gate.passed} == set(acceptance.reasons)
+    assert {check.name for check in acceptance.checks if not check.passed} == set(
+        acceptance.reasons
+    )
 
 
 @pytest.mark.parametrize("metric_name", ["max", "rmse", "p95", "p99"])
 def test_every_flight_parameter_statistic_is_binding(metric_name: str) -> None:
     from robotics_experiments.config import load_config
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     evaluation = _scored(
@@ -301,36 +303,31 @@ def test_every_flight_parameter_statistic_is_binding(metric_name: str) -> None:
         for metric in evaluation.metrics
     )
     acceptance = evaluate_press_acceptance(
+        criteria=_acceptance_criteria(config),
         evaluation=replace(evaluation, metrics=metrics),
-        evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
-        flight_parameters=_FLIGHT_PARAMETERS,
     )
     assert f"flight parameters position_error {metric_name}" in acceptance.reasons
 
 
-def test_missing_flight_parameter_statistic_is_a_json_null_gate_failure() -> None:
+def test_missing_flight_parameter_statistic_is_a_json_null_failure() -> None:
     from robotics_experiments.config import load_config
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     evaluation = _scored()
     missing_name = "flight_parameters.position_error.max"
     acceptance = evaluate_press_acceptance(
+        criteria=_acceptance_criteria(config),
         evaluation=replace(
             evaluation,
             metrics=tuple(metric for metric in evaluation.metrics if metric.name != missing_name),
         ),
-        evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
-        flight_parameters=_FLIGHT_PARAMETERS,
     )
-    gate = next(
-        item for item in acceptance.gates if item.name == "flight parameters position_error max"
+    check = next(
+        item for item in acceptance.checks if item.name == "flight parameters position_error max"
     )
-    assert not gate.passed
-    assert gate.actual is None
-    assert json.loads(json.dumps(asdict(gate), allow_nan=False))["actual"] is None
+    assert not check.passed
+    assert check.actual is None
+    assert json.loads(json.dumps(asdict(check), allow_nan=False))["actual"] is None
 
 
 def test_plateau_accumulates_small_improvements_against_material_reference() -> None:

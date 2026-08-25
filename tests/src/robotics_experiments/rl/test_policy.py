@@ -612,27 +612,3 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
     assert diagnostic["stable_goal_count"] == 1
     assert diagnostic["contact"] is False
     assert diagnostic["complete"] is False
-
-
-def test_current_press_artifact_preflights_when_available() -> None:
-    from robotics_experiments.config import load_config
-
-    artifact = REPO_ROOT / ".build/training/press-approach/latest"
-    if not artifact.exists():
-        pytest.skip("current local press artifact is not available")
-    metadata = json.loads((artifact / METADATA_FILENAME).read_text())
-    if metadata.get("artifact_kind") != "robotics-experiments-policy":
-        with pytest.raises(ValueError, match="policy-v1"):
-            validate_policy_artifact(artifact_dir=artifact)
-        return
-    controller = metadata.get("controller", {}).get("artifact", {})
-    if "flight_parameters_fingerprint" not in controller or "flight_parameters" not in metadata:
-        with pytest.raises(ValueError, match="flight_parameters|fields mismatch"):
-            validate_policy_artifact(artifact_dir=artifact)
-        return
-    validated = _preflight_policy_artifacts(
-        config=load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml"),
-        repo_root=REPO_ROOT,
-    )
-
-    assert validated.policies[0].artifact.resolve() == artifact.resolve()

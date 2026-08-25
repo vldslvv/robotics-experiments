@@ -7,6 +7,8 @@ __all__ = [
     "HoverTaskConfig",
     "IsaacLabVehicleConfig",
     "RlActionConfig",
+    "RlInputsConfig",
+    "PressApproachAcceptanceConfig",
     "PressApproachEvaluationConfig",
     "PressApproachGoalConfig",
     "PressApproachRewardConfig",
@@ -75,6 +77,14 @@ class RlActionConfig(_FreezableConfig):
     max_body_velocity_mps: float
     max_yaw_rate_radps: float
     max_body_rate_radps: float
+
+
+@dataclass
+class RlInputsConfig(_FreezableConfig):
+    """Producer artifacts selected for controller-backed policy training."""
+
+    controller_artifact: str
+    flight_parameters_artifact: str
 
 
 @dataclass
@@ -258,7 +268,6 @@ class PressApproachTerminationConfig(_FreezableConfig):
 
     crash_tilt_cos: float
     min_altitude_m: float
-    range_undershoot_min_m: float
     max_wall_normal_distance_m: float
     max_lateral_error_m: float
     max_vertical_error_m: float
@@ -267,13 +276,11 @@ class PressApproachTerminationConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachEvaluationConfig(_FreezableConfig):
-    """Disjoint deterministic validation/test workloads, gates, and ranking."""
+    """Disjoint deterministic validation/test workloads and ranking costs."""
 
     validation_seeds: List[int]
     test_seeds: List[int]
     episodes_per_seed: int
-    success_rate_min: float
-    collision_rate_max: float
     collision_penalty: float
     flight_failure_penalty: float
     timeout_penalty: float
@@ -287,6 +294,15 @@ class PressApproachEvaluationConfig(_FreezableConfig):
     upright_error_weight: float
     action_delta_weight: float
     completion_time_weight: float
+
+
+@dataclass
+class PressApproachAcceptanceConfig(_FreezableConfig):
+    """Task-owned requirements applied to validation and the final test."""
+
+    success_rate_min: float
+    collision_rate_max: float
+    minimum_range_m: float
 
 
 @dataclass
@@ -351,10 +367,6 @@ class RlTrainingConfig(_FreezableConfig):
         policy_name: Required artifact namespace under ``.build/training``;
             completed runs publish their selected artifacts to that namespace's
             ``latest`` symlink.
-        controller_artifact: Controller artifact, run directory, or publication
-            link resolved before an environment is constructed.
-        flight_parameters_artifact: Flight-parameters bundle or publication link
-            resolved and matched to the controller artifact before training.
         phases: Ordered curriculum phases executed by each fresh attempt.
         telemetry_sample_interval_s: Diagnostic hardware sampling cadence.
         gpu_utilization_target_rate: Diagnostic GPU-utilization target in [0, 1].
@@ -373,8 +385,6 @@ class RlTrainingConfig(_FreezableConfig):
     task_id: str
     vehicle_id: int
     policy_name: str
-    controller_artifact: str
-    flight_parameters_artifact: str
     phases: List[RlTrainingPhaseConfig]
     plateau: RlPlateauCriteriaConfig
     evaluation_worker_timeout_s: float
@@ -406,7 +416,8 @@ class PressTaskConfig(_FreezableConfig):
         reward: Shared reward weights; the stage decides which terms apply.
         reset: Physical scene and initial-state ranges.
         termination: Shared safety termination conditions.
-        evaluation: Shared deterministic workload and acceptance thresholds.
+        evaluation: Shared deterministic validation/test workloads and costs.
+        acceptance: Requirements applied to validation and the final test.
     """
 
     curriculum: PressCurriculumConfig
@@ -418,6 +429,7 @@ class PressTaskConfig(_FreezableConfig):
     reset: PressResetConfig
     termination: PressApproachTerminationConfig
     evaluation: PressApproachEvaluationConfig
+    acceptance: PressApproachAcceptanceConfig
 
     def selected_stage(self) -> PressCurriculumStageConfig:
         """Return the configured stage after loader validation."""
@@ -453,6 +465,7 @@ class RlConfig(_FreezableConfig):
     """
 
     action: RlActionConfig
+    inputs: RlInputsConfig
     lab_vehicle: IsaacLabVehicleConfig
     training: RlTrainingConfig
     hover: HoverTaskConfig

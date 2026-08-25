@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from robotics_experiments.flight_parameters import load_flight_parameters
-from robotics_experiments.rl import evaluate_flight_parameters
+from robotics_experiments.rl import evaluate_hover_envelope
 from robotics_experiments.rl.press import HandoffGate, quaternion_geodesic_error_rad
 from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
     _hover_pose_from_unit_samples,
@@ -70,7 +70,7 @@ def test_hover_reset_samples_stay_inside_measured_envelope() -> None:
         unit_samples=unit_samples,
         flight_parameters=_ENVELOPE,
     )
-    evaluation = evaluate_flight_parameters(
+    evaluation = evaluate_hover_envelope(
         flight_parameters=_ENVELOPE,
         position_error_enu_m=position_error,
         attitude_error_flu_enu_wxyz=attitude_error,

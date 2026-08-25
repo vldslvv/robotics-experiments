@@ -6,7 +6,7 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
-from robotics_experiments.rl.training.progress import PolicyEvaluation
+from robotics_experiments.rl.evaluation import PolicyEvaluation
 
 __all__ = [
     "EVALUATION_METRICS",
@@ -18,7 +18,7 @@ __all__ = [
     "write_system_scalars",
 ]
 
-METRIC_REGISTRY_REVISION = 15
+METRIC_REGISTRY_REVISION = 16
 
 _HOVER_SIGNAL_UNITS = {
     "position_error_enu_x": "m",
@@ -52,7 +52,7 @@ class MetricSpec:
 
 
 EVALUATION_METRICS = (
-    MetricSpec(None, "acceptance/all_gates_passed", "boolean", "All gates passed.", "maximize"),
+    MetricSpec(None, "acceptance/all_checks_passed", "boolean", "All checks passed.", "maximize"),
     MetricSpec(
         "approach_success_rate",
         "outcome/success_rate",
@@ -267,7 +267,7 @@ def write_evaluation_scalars(
     writer: _ScalarWriter,
     role: str,
     evaluation: PolicyEvaluation,
-    all_gates_passed: bool,
+    all_checks_passed: bool,
     step: int,
 ) -> tuple[str, ...]:
     """Write one validation or test record through the shared registry."""
@@ -279,7 +279,7 @@ def write_evaluation_scalars(
     values = {metric.name: metric.value for metric in evaluation.metrics}
     emitted = []
     for spec in EVALUATION_METRICS:
-        value = float(all_gates_passed) if spec.raw_name is None else values[spec.raw_name]
+        value = float(all_checks_passed) if spec.raw_name is None else values[spec.raw_name]
         if value is None:
             continue
         numeric = float(value)

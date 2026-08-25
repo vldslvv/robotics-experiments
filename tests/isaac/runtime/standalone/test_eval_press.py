@@ -330,13 +330,15 @@ def _config():
             press=SimpleNamespace(
                 selected_stage=lambda: SimpleNamespace(name="approach", hold_s=5.0),
                 goal=_goal(),
-                termination=SimpleNamespace(range_undershoot_min_m=0.40),
+                acceptance=SimpleNamespace(
+                    success_rate_min=0.95,
+                    collision_rate_max=0.01,
+                    minimum_range_m=0.40,
+                ),
                 evaluation=SimpleNamespace(
                     validation_seeds=(101, 202, 303),
                     test_seeds=(404, 505, 606),
                     episodes_per_seed=1,
-                    success_rate_min=0.95,
-                    collision_rate_max=0.01,
                     collision_penalty=4.0,
                     flight_failure_penalty=3.0,
                     timeout_penalty=2.0,
@@ -358,8 +360,9 @@ def _config():
 
 def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: Path) -> None:
     evaluator = _load_eval_press_module()
+    monkeypatch.setattr(evaluator, "_press_comparison_fingerprint", lambda **_kwargs: "comparison")
     import robotics_experiments.workflows.isaac_lab as workflow
-    from robotics_experiments.rl.training.progress import RewardMean
+    from robotics_experiments.rl.evaluation import RewardMean
 
     class FakeEnv:
         device = "cpu"
@@ -460,6 +463,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
             controller_settings=_controller_settings(),
             flight_parameters=_FLIGHT_PARAMETERS,
             values={
+                "comparison_fingerprint": "comparison",
                 "selected_checkpoint_iteration": 10,
                 "selected_policy_digest": digest,
                 "test_evaluation": {
@@ -479,7 +483,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
     artifact_dir.mkdir()
     (artifact_dir / "policy.pt").write_bytes(policy_bytes)
 
-    observed = evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
+    observed = evaluator._run(  # noqa: SLF001 - standalone entrypoint
         config=_config(),
         artifact_dir=artifact_dir,
     )
@@ -493,6 +497,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
 
 def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     evaluator = _load_eval_press_module()
+    monkeypatch.setattr(evaluator, "_press_comparison_fingerprint", lambda **_kwargs: "comparison")
     import robotics_experiments.workflows.isaac_lab as workflow
 
     close_calls: list[bool] = []
@@ -515,8 +520,11 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
-            flight_parameters=object(),
-            values={"selected_checkpoint_iteration": 10},
+            flight_parameters=_FLIGHT_PARAMETERS,
+            values={
+                "comparison_fingerprint": "comparison",
+                "selected_checkpoint_iteration": 10,
+            },
         ),
     )
     monkeypatch.setattr(
@@ -530,7 +538,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("rollout failed")),
     )
     with pytest.raises(RuntimeError, match="rollout failed"):
-        evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
+        evaluator._run(  # noqa: SLF001 - standalone entrypoint
             config=_config(),
             artifact_dir=Path("artifact"),
         )
@@ -546,7 +554,7 @@ def test_evaluation_rejects_stage_mismatch(monkeypatch) -> None:
         lambda **_kwargs: SimpleNamespace(contract=contract),
     )
     with pytest.raises(ValueError, match="does not match"):
-        evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
+        evaluator._run(  # noqa: SLF001 - standalone entrypoint
             config=_config(),
             artifact_dir=Path("artifact"),
         )

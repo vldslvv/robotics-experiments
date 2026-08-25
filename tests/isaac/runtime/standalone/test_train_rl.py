@@ -13,7 +13,8 @@ import pytest
 
 from robotics_experiments.config import RlTrainingPhaseConfig
 from robotics_experiments.flight_parameters import load_flight_parameters
-from robotics_experiments.rl.training.progress import EvaluationMetric, PolicyEvaluation
+from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
+from robotics_experiments.rl.press import create_press_acceptance_criteria
 from tests.support.paths import REPO_ROOT
 
 
@@ -41,6 +42,24 @@ def _phase(
         schedule="fixed",
         entropy_coef=0.0,
         range_undershoot_min_m=range_undershoot_min_m,
+    )
+
+
+def _inputs(tmp_path: Path):
+    return SimpleNamespace(
+        controller=SimpleNamespace(selected_settings=SimpleNamespace(hover_thrust_normalized=0.5)),
+        controller_path=tmp_path / "resolved/controller.json",
+        controller_digest="controller-digest",
+        flight_parameters=load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters"),
+        flight_parameters_path=tmp_path / "resolved/flight-parameters",
+        flight_parameters_digest="flight-parameters-digest",
+    )
+
+
+def _acceptance_criteria(config):
+    return create_press_acceptance_criteria(
+        config=config.rl.press.acceptance,
+        flight_parameters=load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters"),
     )
 
 
@@ -210,6 +229,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
     from robotics_experiments.config import load_config
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    acceptance_criteria = _acceptance_criteria(config)
     report = train_rl._training_report(  # noqa: SLF001
         run_dir=tmp_path,
         config=config,
@@ -222,8 +242,9 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         test_evaluation=None,
         acceptance=None,
         status="training",
+        acceptance_criteria=acceptance_criteria,
     )
-    assert report["schema_version"] == 18
+    assert report["schema_version"] == 19
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -240,6 +261,8 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
             "episode_count": 300,
         },
     }
+    assert report["acceptance_criteria"]["minimum_range_m"] == 0.40
+    assert len(report["acceptance_criteria"]["hover_limits"]) == 10
 
 
 def test_attempt_worker_command_forwards_one_seed_and_campaign_overrides() -> None:
@@ -284,7 +307,7 @@ def test_attempt_worker_command_forwards_one_seed_and_campaign_overrides() -> No
     ]
 
 
-def test_campaign_parent_preflights_and_pins_input_artifacts(
+def test_campaign_parent_prepares_and_pins_input_artifacts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -293,29 +316,17 @@ def test_campaign_parent_preflights_and_pins_input_artifacts(
 
     config_path = REPO_ROOT / "configs" / "train_press_hover_quad.yaml"
     config = load_config(config_path)
-    controller = SimpleNamespace()
-    flight_parameters = SimpleNamespace()
-    controller_path = tmp_path / "alignment" / "run" / "controller.json"
-    flight_parameters_path = tmp_path / "flight-parameters" / "run"
+    inputs = _inputs(tmp_path)
     campaign: dict[str, object] = {}
     monkeypatch.setattr(train_rl, "_repo_root", lambda: tmp_path)
     monkeypatch.setattr(
-        train_rl,
-        "_load_training_controller",
-        lambda **_kwargs: (controller, "controller-digest", controller_path),
+        train_rl.rl,
+        "prepare_policy_inputs",
+        lambda **_kwargs: inputs,
     )
     monkeypatch.setattr(
         train_rl,
-        "_load_training_flight_parameters",
-        lambda **_kwargs: (
-            flight_parameters,
-            "flight-parameters-digest",
-            flight_parameters_path,
-        ),
-    )
-    monkeypatch.setattr(
-        train_rl,
-        "_run_isolated_campaign",
+        "_run_policy_workflow",
         lambda **kwargs: campaign.update(kwargs),
     )
 
@@ -332,10 +343,8 @@ def test_campaign_parent_preflights_and_pins_input_artifacts(
         config_path=config_path,
     )
 
-    assert campaign["controller_artifact_path"] == controller_path
-    assert campaign["controller_artifact_digest"] == "controller-digest"
-    assert campaign["flight_parameters_artifact_path"] == flight_parameters_path
-    assert campaign["flight_parameters_artifact_digest"] == "flight-parameters-digest"
+    assert campaign["inputs"] is inputs
+    assert campaign["acceptance_criteria"] == _acceptance_criteria(config)
 
 
 def test_invalid_campaign_input_fails_before_run_creation(
@@ -350,13 +359,13 @@ def test_invalid_campaign_input_fails_before_run_creation(
     config = load_config(config_path)
     monkeypatch.setattr(train_rl, "_repo_root", lambda: tmp_path)
     monkeypatch.setattr(
-        train_rl,
-        "_load_training_controller",
+        train_rl.rl,
+        "prepare_policy_inputs",
         lambda **_kwargs: (_ for _ in ()).throw(ValueError("unsupported controller artifact")),
     )
     monkeypatch.setattr(
         train_rl,
-        "_run_isolated_campaign",
+        "_run_policy_workflow",
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("campaign must not start")),
     )
 
@@ -420,7 +429,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
             reward_means=(),
             source="fresh-validation",
         )
-        validation = {"passed": passed, "gates": [], "reasons": []}
+        validation = {"passed": passed, "checks": [], "reasons": []}
         attempt = {
             "attempt_index": attempt_index,
             "training_seed": seed,
@@ -464,8 +473,23 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
     monkeypatch.setattr(train_rl.subprocess, "run", run_worker)
     monkeypatch.setattr(
         train_rl,
-        "_finalize_campaign",
-        lambda **kwargs: finalized.update(kwargs),
+        "_run_final_test",
+        lambda **kwargs: (kwargs["selection"].evaluation, {}),
+    )
+    monkeypatch.setattr(
+        train_rl,
+        "evaluate_press_acceptance",
+        lambda **_kwargs: train_rl.AcceptanceResult(passed=True, checks=(), reasons=()),
+    )
+    monkeypatch.setattr(
+        train_rl,
+        "_record_final_test",
+        lambda **kwargs: finalized.update(kwargs) or {},
+    )
+    monkeypatch.setattr(
+        train_rl,
+        "_publish_selected",
+        lambda **_kwargs: False,
     )
     monkeypatch.setitem(
         sys.modules,
@@ -473,7 +497,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
         SimpleNamespace(SummaryWriter=lambda **_kwargs: SimpleNamespace(close=lambda: None)),
     )
     monkeypatch.delenv("RL_RUN_ID", raising=False)
-    train_rl._run_isolated_campaign(  # noqa: SLF001
+    train_rl._run_policy_workflow(  # noqa: SLF001
         args=SimpleNamespace(
             procedural_smoke=False,
             max_iterations=1,
@@ -484,10 +508,9 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
         ),
         config=config,
         config_path=config_path,
-        controller_artifact_digest="controller-digest",
-        controller_artifact_path=Path("resolved/controller.json"),
-        flight_parameters_artifact_digest="flight-parameters-digest",
-        flight_parameters_artifact_path=Path("resolved/flight-parameters"),
+        inputs=_inputs(tmp_path),
+        acceptance_criteria=_acceptance_criteria(config),
+        comparison_fingerprint="fingerprint",
         attempt_seeds=(42, 43, 44),
         policy_root=policy_root,
         repo_root=tmp_path,
@@ -520,7 +543,7 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         attempt_dir.mkdir()
         (attempt_dir / "attempt_report.json").write_text(
-            '{"schema_version": 18, "report_kind": "attempt", "status": "training"}\n'
+            '{"schema_version": 19, "report_kind": "attempt", "status": "training"}\n'
         )
         raise KeyboardInterrupt
 
@@ -529,7 +552,7 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
     monkeypatch.setattr(train_rl.subprocess, "run", interrupt)
     monkeypatch.delenv("RL_RUN_ID", raising=False)
     with pytest.raises(KeyboardInterrupt):
-        train_rl._run_isolated_campaign(  # noqa: SLF001
+        train_rl._run_policy_workflow(  # noqa: SLF001
             args=SimpleNamespace(
                 procedural_smoke=False,
                 max_iterations=1,
@@ -540,10 +563,9 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
             ),
             config=config,
             config_path=config_path,
-            controller_artifact_digest="controller-digest",
-            controller_artifact_path=Path("resolved/controller.json"),
-            flight_parameters_artifact_digest="flight-parameters-digest",
-            flight_parameters_artifact_path=Path("resolved/flight-parameters"),
+            inputs=_inputs(tmp_path),
+            acceptance_criteria=_acceptance_criteria(config),
+            comparison_fingerprint="fingerprint",
             attempt_seeds=(42, 43, 44),
             policy_root=policy_root,
             repo_root=tmp_path,
@@ -587,7 +609,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     monkeypatch.delenv("RL_RUN_ID", raising=False)
 
     with pytest.raises(RuntimeError, match="exited without an attempt report"):
-        train_rl._run_isolated_campaign(  # noqa: SLF001
+        train_rl._run_policy_workflow(  # noqa: SLF001
             args=SimpleNamespace(
                 procedural_smoke=False,
                 max_iterations=1,
@@ -598,10 +620,9 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
             ),
             config=config,
             config_path=config_path,
-            controller_artifact_digest="controller-digest",
-            controller_artifact_path=Path("resolved/controller.json"),
-            flight_parameters_artifact_digest="flight-parameters-digest",
-            flight_parameters_artifact_path=Path("resolved/flight-parameters"),
+            inputs=_inputs(tmp_path),
+            acceptance_criteria=_acceptance_criteria(config),
+            comparison_fingerprint="fingerprint",
             attempt_seeds=(42,),
             policy_root=policy_root,
             repo_root=tmp_path,
@@ -612,7 +633,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 18,
+        "schema_version": 19,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -692,7 +713,7 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
         plateau_state=train_rl.PlateauState(reference_value=0.3, stale_evaluations=0),
         run_dir=tmp_path,
         artifact_dir=artifact_dir,
-        validation=SimpleNamespace(gates=(), passed=False),
+        validation=SimpleNamespace(checks=(), passed=False),
     )
     metrics_log = capsys.readouterr().err
     assert "cost=0.250000" in metrics_log
@@ -742,56 +763,6 @@ def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path)
     assert metadata == {"source_commit": "abc123", "source_dirty": True}
 
 
-def test_training_flight_parameters_must_match_controller_qualification() -> None:
-    train_rl = _load_train_rl_module()
-    artifact_dir = REPO_ROOT / "tests/fixtures/flight_parameters"
-    flight_parameters = load_flight_parameters(artifact_dir)
-    config = SimpleNamespace(
-        rl=SimpleNamespace(
-            training=SimpleNamespace(
-                flight_parameters_artifact=str(artifact_dir),
-                vehicle_id=0,
-            )
-        ),
-        vehicles={"x500_01": SimpleNamespace(id=0)},
-    )
-
-    loaded, digest, run_dir = train_rl._load_training_flight_parameters(  # noqa: SLF001
-        artifact_path=None,
-        config=config,
-        controller_artifact=SimpleNamespace(
-            flight_parameters_run_id=flight_parameters.run_id,
-            flight_parameters_fingerprint=flight_parameters.artifact_fingerprint,
-        ),
-        repo_root=REPO_ROOT,
-    )
-    assert loaded == flight_parameters
-    assert len(digest) == 64
-    assert run_dir == artifact_dir
-
-    with pytest.raises(ValueError, match="does not match"):
-        train_rl._load_training_flight_parameters(  # noqa: SLF001
-            artifact_path=None,
-            config=config,
-            controller_artifact=SimpleNamespace(
-                flight_parameters_run_id=flight_parameters.run_id,
-                flight_parameters_fingerprint="other",
-            ),
-            repo_root=REPO_ROOT,
-        )
-
-    with pytest.raises(ValueError, match="run ID does not match"):
-        train_rl._load_training_flight_parameters(  # noqa: SLF001
-            artifact_path=None,
-            config=config,
-            controller_artifact=SimpleNamespace(
-                flight_parameters_run_id="another-run",
-                flight_parameters_fingerprint=flight_parameters.artifact_fingerprint,
-            ),
-            repo_root=REPO_ROOT,
-        )
-
-
 def test_checkpoint_restore_loads_optimizer_and_iteration(tmp_path: Path) -> None:
     torch = pytest.importorskip("torch")
     from robotics_experiments.rl.training import rsl_rl
@@ -818,7 +789,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
 
     train_rl = _load_train_rl_module()
     from robotics_experiments.config import load_config
-    from robotics_experiments.rl.training.progress import AcceptanceResult
+    from robotics_experiments.rl.press import AcceptanceResult
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     run_dir = tmp_path / "campaign"
@@ -843,7 +814,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
         reward_means=(),
         source="fresh-test",
     )
-    acceptance = AcceptanceResult(passed=True, gates=(), reasons=())
+    acceptance = AcceptanceResult(passed=True, checks=(), reasons=())
     report = {
         "comparison_fingerprint": "fingerprint",
         "selected_policy_digest": digest,
@@ -880,7 +851,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
 def test_failed_test_cannot_publish_any_label(tmp_path: Path) -> None:
     train_rl = _load_train_rl_module()
     from robotics_experiments.config import load_config
-    from robotics_experiments.rl.training.progress import AcceptanceResult
+    from robotics_experiments.rl.press import AcceptanceResult
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     run_dir = tmp_path / "campaign"
@@ -904,7 +875,7 @@ def test_failed_test_cannot_publish_any_label(tmp_path: Path) -> None:
             selected=selected,
             selected_policy=policy,
             test_evaluation=selected,
-            acceptance=AcceptanceResult(passed=False, gates=(), reasons=("gate",)),
+            acceptance=AcceptanceResult(passed=False, checks=(), reasons=("failure",)),
             comparison_fingerprint="fingerprint",
             config=config,
         )

@@ -1,79 +1,19 @@
-"""Evaluation-result and phase-progress contracts for scratch policy training."""
+"""Plateau and checkpoint-selection behavior for policy training."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from pathlib import Path
 
 from robotics_experiments.config import RlPlateauCriteriaConfig
+from robotics_experiments.rl.evaluation import PolicyEvaluation
 
 __all__ = [
-    "AcceptanceResult",
-    "EvaluationMetric",
-    "GateResult",
-    "PolicyEvaluation",
     "PlateauState",
     "PlateauUpdate",
-    "RewardMean",
     "advance_plateau",
     "select_best_evaluation",
 ]
-
-
-@dataclass(frozen=True)
-class AcceptanceResult:
-    """Final acceptance decision made from one selected evaluation record."""
-
-    passed: bool
-    gates: tuple[GateResult, ...]
-    reasons: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class GateResult:
-    """One independently binding policy-acceptance predicate."""
-
-    name: str
-    passed: bool
-    actual: float | None
-    comparison: str
-    threshold: float
-
-
-@dataclass(frozen=True)
-class EvaluationMetric:
-    """One named scalar returned by a deterministic policy evaluator."""
-
-    name: str
-    value: float | None
-
-
-@dataclass(frozen=True)
-class RewardMean:
-    """One training-reward diagnostic averaged over held-out transitions."""
-
-    name: str
-    mean: float
-
-
-@dataclass(frozen=True)
-class PolicyEvaluation:
-    """Complete evaluator output with no plateau or acceptance decision."""
-
-    iteration: int
-    checkpoint_path: Path
-    policy_digest: str
-    metrics: tuple[EvaluationMetric, ...]
-    reward_means: tuple[RewardMean, ...]
-    source: str
-
-    def metric(self, name: str, /) -> float:
-        """Return one required finite scalar by its stable registered name."""
-        match = next((metric.value for metric in self.metrics if metric.name == name), None)
-        if match is None or not math.isfinite(match):
-            raise ValueError(f"policy evaluation has no finite metric {name!r}")
-        return match
 
 
 @dataclass(frozen=True)
@@ -145,7 +85,7 @@ def select_best_evaluation(
     evaluations: tuple[PolicyEvaluation, ...],
     eligible_policy_digests: frozenset[str],
 ) -> PolicyEvaluation:
-    """Rank gate-passing candidates first, then scalar, preserving exact ties."""
+    """Rank eligible candidates first, then scalar, preserving exact ties."""
     if not evaluations:
         raise ValueError("policy selection requires at least one evaluation")
     multiplier = -1.0 if criteria.direction == "minimize" else 1.0

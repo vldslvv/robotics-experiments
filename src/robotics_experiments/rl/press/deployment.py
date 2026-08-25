@@ -15,7 +15,7 @@ from robotics_experiments.px4_bridge import (
     quat_multiply_wxyz,
     rotate_vector_wxyz,
 )
-from robotics_experiments.rl import evaluate_flight_parameters
+from robotics_experiments.rl import evaluate_hover_envelope
 from robotics_experiments.rl.press.handoff import HandoffGate, handoff_ready
 from robotics_experiments.rl.press.observation import (
     PRESS_OBSERVATION_DIM,
@@ -168,7 +168,7 @@ def advance_press_approach_execution(
         [params.goal.velocity_reference.range_center_m, 0.0, 0.0],
         dtype=np.float64,
     ) - np.asarray(observation.relative_switch_pos_m, dtype=np.float64)
-    envelope = evaluate_flight_parameters(
+    envelope = evaluate_hover_envelope(
         flight_parameters=params.flight_parameters,
         position_error_enu_m=rotate_vector_wxyz(
             contact_to_world_wxyz,

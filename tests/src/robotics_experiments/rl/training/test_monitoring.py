@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
 from robotics_experiments.rl.training import rsl_rl
 from robotics_experiments.rl.training._monitoring import (
     EVALUATION_METRICS,
@@ -15,7 +16,6 @@ from robotics_experiments.rl.training._monitoring import (
     write_evaluation_scalars,
     write_system_scalars,
 )
-from robotics_experiments.rl.training.progress import EvaluationMetric, PolicyEvaluation
 
 
 class _Writer:
@@ -88,14 +88,14 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
         writer=writer,
         role="val",
         evaluation=evaluation,
-        all_gates_passed=True,
+        all_checks_passed=True,
         step=17,
     )
     test_tags = write_evaluation_scalars(
         writer=writer,
         role="test",
         evaluation=evaluation,
-        all_gates_passed=True,
+        all_checks_passed=True,
         step=17,
     )
     expected_suffixes = tuple(spec.suffix for spec in EVALUATION_METRICS)
@@ -115,7 +115,7 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
 
 def test_metric_registry_names_rates_units_and_unavailable_values() -> None:
     registry = metric_registry_payload()
-    assert registry["revision"] == 15
+    assert registry["revision"] == 16
     assert all(spec.suffix == spec.suffix.lower() for spec in EVALUATION_METRICS)
     assert all(not spec.suffix.endswith("_percent") for spec in EVALUATION_METRICS)
     rate_specs = tuple(spec for spec in EVALUATION_METRICS if spec.suffix.endswith("_rate"))
@@ -127,7 +127,7 @@ def test_metric_registry_names_rates_units_and_unavailable_values() -> None:
         writer=writer,
         role="val",
         evaluation=_evaluation(undefined_completion_time=True),
-        all_gates_passed=False,
+        all_checks_passed=False,
         step=0,
     )
     assert "val/outcome/median_successful_completion_time_s" not in tags
@@ -150,7 +150,7 @@ def test_rate_outside_fraction_range_is_rejected() -> None:
                 reward_means=(),
                 source=evaluation.source,
             ),
-            all_gates_passed=False,
+            all_checks_passed=False,
             step=0,
         )
 

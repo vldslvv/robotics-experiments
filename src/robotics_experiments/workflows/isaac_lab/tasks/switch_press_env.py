@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import MISSING, replace
+from dataclasses import MISSING
 from typing import cast
 
 import isaaclab.sim as sim_utils
@@ -239,7 +239,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
         self._task_result: PressApproachResult[torch.Tensor] | None = None
         self._task_sample: PressApproachInput[torch.Tensor] | None = None
-        self._training_termination_cfg = self._experiment_config.rl.press.termination
+        self._training_minimum_range_m = self._experiment_config.rl.press.acceptance.minimum_range_m
         self._training_hold_steps = round(self._stage.hold_s * self.cfg.policy_rate_hz)
         self._physics_substep_index = 0
         self._body_collision_latch = torch.zeros(
@@ -259,7 +259,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._timeout_episode_count = torch.zeros((), device=self.device)
 
     def configure_training_phase(self, phase: RlTrainingPhaseConfig, phase_number: int, /) -> None:
-        """Apply the one task-specific phase setting through a narrow seam."""
+        """Apply the one task-specific setting for a training phase."""
         range_min_m = phase.range_undershoot_min_m
         if range_min_m is None:
             raise ValueError("press training phases require range_undershoot_min_m")
@@ -268,10 +268,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             raise ValueError(
                 f"training range undershoot minimum must be positive and at most {strict_min} m"
             )
-        self._training_termination_cfg = replace(
-            self._experiment_config.rl.press.termination,
-            range_undershoot_min_m=range_min_m,
-        )
+        self._training_minimum_range_m = range_min_m
         self._training_hold_steps = round(
             self._stage.training_hold_s[phase_number - 1] * self.cfg.policy_rate_hz
         )
@@ -438,7 +435,8 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             sample=self._task_sample,
             goal_cfg=press.goal,
             reward_cfg=press.reward,
-            termination_cfg=self._training_termination_cfg,
+            termination_cfg=press.termination,
+            minimum_range_m=self._training_minimum_range_m,
             flight_parameters=self._flight_parameters,
             hold_steps=self._training_hold_steps,
             approach_enabled=self._stage.name == "approach",

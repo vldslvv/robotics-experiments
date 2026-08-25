@@ -13,6 +13,13 @@ from robotics_experiments.rl.press.deployment import (
     advance_press_approach_execution,
     initial_press_approach_execution_state,
 )
+from robotics_experiments.rl.press.evaluation import (
+    AcceptanceCheck,
+    AcceptanceResult,
+    PressAcceptanceCriteria,
+    create_press_acceptance_criteria,
+    evaluate_press_acceptance,
+)
 from robotics_experiments.rl.press.handoff import (
     HandoffGate,
     HandoffReason,
@@ -28,6 +35,7 @@ from robotics_experiments.rl.press.observation import (
     to_vector,
     world_switch_to_contact_frame,
 )
+from robotics_experiments.rl.press.policy import press_policy_contract
 from robotics_experiments.rl.press.provider import AbstractPoseProvider, PoseSample
 from robotics_experiments.rl.press.task import (
     PressApproachInput,
@@ -36,8 +44,6 @@ from robotics_experiments.rl.press.task import (
     PressApproachState,
     PressApproachTerminationFlags,
     initial_press_approach_state,
-    press_approach_goal_satisfied,
-    press_approach_pose_error,
     press_approach_target_velocity,
     quaternion_geodesic_error_rad,
     reset_press_approach_state,
@@ -46,6 +52,8 @@ from robotics_experiments.rl.press.task import (
 
 __all__ = [
     "AbstractPoseProvider",
+    "AcceptanceCheck",
+    "AcceptanceResult",
     "GroundTruthPoseProvider",
     "HandoffGate",
     "HandoffReason",
@@ -53,6 +61,7 @@ __all__ = [
     "OBSERVATION_SCHEMA_VERSION",
     "PRESS_OBSERVATION_DIM",
     "PoseSample",
+    "PressAcceptanceCriteria",
     "PressApproachExecutionParams",
     "PressApproachExecutionResult",
     "PressApproachExecutionState",
@@ -64,13 +73,14 @@ __all__ = [
     "PressObservation",
     "PressObservationMask",
     "advance_press_approach_execution",
+    "create_press_acceptance_criteria",
+    "evaluate_press_acceptance",
     "handoff_ready",
     "initial_press_approach_execution_state",
     "initial_press_approach_state",
     "pack_press_observation",
-    "press_approach_goal_satisfied",
-    "press_approach_pose_error",
     "press_approach_target_velocity",
+    "press_policy_contract",
     "quaternion_geodesic_error_rad",
     "reset_press_approach_state",
     "step_press_approach",

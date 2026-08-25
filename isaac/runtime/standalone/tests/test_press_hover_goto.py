@@ -745,7 +745,7 @@ def _validate_press_side_channel(*, start_obs, end_obs, handoff_config) -> None:
 def _controller_artifact_path(*, config: ExperimentConfig) -> tuple[Path, bool]:
     repo_root = Path(__file__).resolve().parents[4]
     explicit = os.environ.get(_CONTROLLER_ARTIFACT_ENV)
-    authored = explicit or config.rl.training.controller_artifact
+    authored = explicit or config.rl.inputs.controller_artifact
     artifact_path = Path(authored)
     if not artifact_path.is_absolute():
         artifact_path = repo_root / artifact_path
@@ -772,7 +772,7 @@ def _contact_chain_inputs(
 ) -> tuple[ControllerSettings, FlightParameters]:
     repo_root = Path(__file__).resolve().parents[4]
     controller, controller_path = _controller_artifact(config=config)
-    flight_parameters_path = Path(config.rl.training.flight_parameters_artifact)
+    flight_parameters_path = Path(config.rl.inputs.flight_parameters_artifact)
     if not flight_parameters_path.is_absolute():
         flight_parameters_path = repo_root / flight_parameters_path
     bundle = load_flight_parameters_bundle(path=flight_parameters_path)

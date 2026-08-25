@@ -281,10 +281,10 @@ def _validate_plateau(*, plateau, path: str) -> None:
 
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     training = experiment.rl.training
-    if not training.controller_artifact.strip():
-        raise ValueError("rl.training.controller_artifact must be non-empty")
-    if not training.flight_parameters_artifact.strip():
-        raise ValueError("rl.training.flight_parameters_artifact must be non-empty")
+    if not experiment.rl.inputs.controller_artifact.strip():
+        raise ValueError("rl.inputs.controller_artifact must be non-empty")
+    if not experiment.rl.inputs.flight_parameters_artifact.strip():
+        raise ValueError("rl.inputs.flight_parameters_artifact must be non-empty")
     attempt_seeds = tuple(training.attempt_seeds)
     if not attempt_seeds or len(set(attempt_seeds)) != len(attempt_seeds):
         raise ValueError("rl.training.attempt_seeds must be nonempty and unique")
@@ -465,12 +465,12 @@ def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
     goal = press.goal
     if not 0.0 < goal.range_min_m <= goal.range_max_m:
         raise ValueError("rl.press.goal range bounds must be positive and ordered")
-    if (
-        not math.isfinite(press.termination.range_undershoot_min_m)
-        or press.termination.range_undershoot_min_m >= goal.range_min_m
+    acceptance = press.acceptance
+    if not math.isfinite(acceptance.minimum_range_m) or not (
+        0.0 < acceptance.minimum_range_m <= goal.range_min_m
     ):
         raise ValueError(
-            "press stage termination.range_undershoot_min_m must be below goal.range_min_m"
+            "rl.press.acceptance.minimum_range_m must be positive and at most goal.range_min_m"
         )
     reference = goal.velocity_reference
     if not goal.range_min_m <= reference.range_center_m <= goal.range_max_m:
@@ -533,11 +533,11 @@ def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
     if evaluation.episodes_per_seed != 100:
         raise ValueError("rl.press.evaluation.episodes_per_seed must equal 100")
     for name, value in {
-        "success_rate_min": evaluation.success_rate_min,
-        "collision_rate_max": evaluation.collision_rate_max,
+        "success_rate_min": acceptance.success_rate_min,
+        "collision_rate_max": acceptance.collision_rate_max,
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
-            raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
+            raise ValueError(f"rl.press.acceptance.{name} must be between 0 and 1")
     for name in (
         "collision_penalty",
         "flight_failure_penalty",

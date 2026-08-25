@@ -7,7 +7,7 @@ import math
 import torch
 
 from robotics_experiments.flight_parameters import FlightParameters
-from robotics_experiments.rl.flight_parameters import evaluate_flight_parameters
+from robotics_experiments.rl.hover import evaluate_hover_envelope
 from robotics_experiments.rl.press import HandoffGate
 
 __all__: list[str] = []
@@ -91,7 +91,7 @@ def _hover_pose_from_unit_samples(
     rpy = attitude_lower + unit_samples[:, 3:] * (attitude_upper - attitude_lower)
     attitude = _quaternion_from_rpy(rpy_rad=rpy)
     for _ in range(2):
-        utilization = evaluate_flight_parameters(
+        utilization = evaluate_hover_envelope(
             flight_parameters=flight_parameters,
             position_error_enu_m=torch.zeros_like(position_error),
             attitude_error_flu_enu_wxyz=attitude,

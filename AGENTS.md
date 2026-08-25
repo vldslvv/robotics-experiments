@@ -357,7 +357,10 @@ the current contents and the intended home for that kind of code.
 ## Development workflow
 - Use `uv` for all host-side Python work. Do not call `pip`,
   `python -m venv`, or a system/global Python directly.
-- Use simple language when writing commit messages. Do not use words like seam, gate, robust -- avoid bullshit in general no matter how hard it can be.
+- Use simple, concrete language in code, comments, documentation, logs, and
+  commit messages. Avoid vague jargon such as `seam`, `preflight`, `gate`, or
+  `robust` when a direct description is available. When touching existing text,
+  make it easier to understand.
 - Run `uv run pre-commit run --all-files` after implementing a task and fix
   every reported issue before considering the task complete.
 - Development workflow details live in `docs/DEVELOPMENT_WORKFLOW.md`.

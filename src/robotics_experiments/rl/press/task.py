@@ -16,9 +16,9 @@ from robotics_experiments.config import (
     PressApproachVelocityReferenceConfig,
 )
 from robotics_experiments.flight_parameters import FlightParameters
-from robotics_experiments.rl.flight_parameters import (
-    HoverEvaluation,
-    evaluate_flight_parameters,
+from robotics_experiments.rl.hover import (
+    HoverEnvelopeEvaluation,
+    evaluate_hover_envelope,
 )
 
 __all__ = [
@@ -28,8 +28,6 @@ __all__ = [
     "PressApproachState",
     "PressApproachTerminationFlags",
     "initial_press_approach_state",
-    "press_approach_goal_satisfied",
-    "press_approach_pose_error",
     "press_approach_target_velocity",
     "quaternion_geodesic_error_rad",
     "reset_press_approach_state",
@@ -138,7 +136,7 @@ class PressApproachResult(Generic[ArrayT]):
     angular_speed_radps: ArrayT
     contact_clear: ArrayT
     strict_goal: ArrayT
-    hover_evaluation: HoverEvaluation[ArrayT]
+    hover_evaluation: HoverEnvelopeEvaluation[ArrayT]
 
 
 def _where(condition: ArrayT, yes: ArrayT | Scalar, no: ArrayT | Scalar) -> ArrayT:
@@ -169,12 +167,6 @@ def _sqrt(value: ArrayT) -> ArrayT:
     if isinstance(value, torch.Tensor):
         return torch.sqrt(value)
     return np.sqrt(value)
-
-
-def _clip(value: ArrayT, minimum: float, maximum: float) -> ArrayT:
-    if isinstance(value, torch.Tensor):
-        return value.clamp(minimum, maximum)
-    return np.clip(value, minimum, maximum)
 
 
 def _minimum(left: ArrayT, right: ArrayT) -> ArrayT:
@@ -218,7 +210,7 @@ def initial_press_approach_state(
         relative_switch_pos_m=relative_switch_pos_m,
         goal_cfg=goal_cfg,
     )
-    hover_evaluation = evaluate_flight_parameters(
+    hover_evaluation = evaluate_hover_envelope(
         flight_parameters=flight_parameters,
         position_error_enu_m=position_error_enu_m,
         attitude_error_flu_enu_wxyz=attitude_error_flu_enu_wxyz,
@@ -328,52 +320,6 @@ def press_approach_target_velocity(
     )
 
 
-def press_approach_goal_satisfied(
-    *,
-    relative_switch_pos_m: ArrayT,
-    relative_switch_quat_xyzw: ArrayT,
-    linear_velocity_mps: ArrayT,
-    angular_velocity_radps: ArrayT,
-    contact_flag: ArrayT,
-    goal_cfg: PressApproachGoalConfig,
-) -> ArrayT:
-    """Return the shared per-sample stable-approach predicate."""
-    current_range = relative_switch_pos_m[..., 0]
-    return (
-        (current_range >= goal_cfg.range_min_m)
-        & (current_range <= goal_cfg.range_max_m)
-        & (_norm(relative_switch_pos_m[..., 1:3]) <= goal_cfg.alignment_error_max_m)
-        & (
-            quaternion_geodesic_error_rad(quaternion_xyzw=relative_switch_quat_xyzw)
-            <= goal_cfg.relative_attitude_error_max_rad
-        )
-        & (_norm(linear_velocity_mps) <= goal_cfg.linear_speed_max_mps)
-        & (_norm(angular_velocity_radps) <= goal_cfg.angular_speed_max_radps)
-        & ~contact_flag
-    )
-
-
-def press_approach_pose_error(
-    *,
-    relative_switch_pos_m: ArrayT,
-    relative_switch_quat_xyzw: ArrayT,
-    goal_cfg: PressApproachGoalConfig,
-) -> ArrayT:
-    """Return the worst pose error normalized by its strict tolerance."""
-    normalized_range_error, normalized_alignment_error = _press_approach_position_components(
-        relative_switch_pos_m=relative_switch_pos_m,
-        goal_cfg=goal_cfg,
-    )
-    attitude_error = (
-        quaternion_geodesic_error_rad(quaternion_xyzw=relative_switch_quat_xyzw)
-        / goal_cfg.relative_attitude_error_max_rad
-    )
-    return _pairwise_maximum(
-        _pairwise_maximum(normalized_range_error, normalized_alignment_error),
-        attitude_error,
-    )
-
-
 def _press_approach_position_components(
     *,
     relative_switch_pos_m: ArrayT,
@@ -405,6 +351,7 @@ def step_press_approach(
     goal_cfg: PressApproachGoalConfig,
     reward_cfg: PressApproachRewardConfig,
     termination_cfg: PressApproachTerminationConfig,
+    minimum_range_m: float,
     flight_parameters: FlightParameters,
     hold_steps: int,
     approach_enabled: bool,
@@ -417,7 +364,7 @@ def step_press_approach(
     )
     linear_speed = _norm(sample.linear_velocity_mps)
     angular_speed = _norm(sample.angular_velocity_radps)
-    envelope_evaluation = evaluate_flight_parameters(
+    envelope_evaluation = evaluate_hover_envelope(
         flight_parameters=flight_parameters,
         position_error_enu_m=sample.position_error_enu_m,
         attitude_error_flu_enu_wxyz=sample.attitude_error_flu_enu_wxyz,
@@ -443,7 +390,7 @@ def step_press_approach(
 
     crash = sample.body_z_world_z < termination_cfg.crash_tilt_cos
     altitude = sample.altitude_m < termination_cfg.min_altitude_m
-    range_undershoot = current_range < termination_cfg.range_undershoot_min_m
+    range_undershoot = current_range < minimum_range_m
     relative_envelope = (
         (abs(current_range) > termination_cfg.max_wall_normal_distance_m)
         | (abs(sample.relative_switch_pos_m[..., 1]) > termination_cfg.max_lateral_error_m)

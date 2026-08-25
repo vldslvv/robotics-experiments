@@ -17,31 +17,40 @@ observation, handoff, reward, task, and progress contracts live under
 `robotics_experiments.rl.press`. Isaac-only vector environments live under the
 lazy `robotics_experiments.workflows.isaac_lab` package.
 
-RL never imports alignment. Before Isaac Lab is constructed, training loads a
-quality-passing schema-1 controller artifact and validates its vehicle, airframe,
-cadence, certified control mode, and four-dimensional action contract. It also
-loads the task-neutral schema-1 flight parameters, validates its complete bundle,
-vehicle and PX4 SITL source, and requires its fingerprint to match the
-controller's hover qualification. Policy metadata embeds the complete
-controller and flight-parameters records with their digests. Evaluation and
-deployment reuse those embedded records; they never resolve newer alignment or
-flight-parameter publications implicitly. Selectors such as `best` and `latest`
-are accepted as operator inputs, but persisted lineage uses the embedded
-producer `run_id` values and digests. The collection and statistics contract is
-defined in `docs/FLIGHT_PARAMETERS.md`.
+RL never imports alignment. It consumes the accepted schema-1 controller
+artifact produced by alignment and the independently published matching
+schema-1 flight parameters. It does not reopen raw alignment traces.
 
-The campaign parent performs this input preflight before creating a run
-directory or launching an attempt. It resolves both selectors once and passes
-their immutable paths and content digests to every isolated worker; each worker
-revalidates those exact references before constructing Isaac Lab. Training
-reads the producer-owned artifacts in place and never copies or mutates them.
-Invalid input produces one preflight failure, no active campaign report, and no
-attempt process. If a worker exits without its report after a successful
-preflight, the parent records a failed attempt stub and finalizes the campaign
-status instead of masking the worker failure with a missing-file exception.
+## Policy workflow
+
+`robotics_experiments.rl.workflow` defines the procedure used by every policy
+campaign:
+
+```text
+inputs = prepare_policy_inputs(...)
+criteria = create_press_acceptance_criteria(...)
+candidates = train_and_validate(inputs=inputs, ...)
+selected = select_candidate(candidates=candidates, ...)
+evaluation = run_final_test(inputs=inputs, policy=selected, ...)
+acceptance = evaluate_press_acceptance(criteria=criteria, evaluation=evaluation)
+if acceptance.passed:
+    publish_policy(policy=selected, evaluation=evaluation, ...)
+```
+
+Preparation validates each producer artifact once, confirms the controller was
+qualified with that exact flight-parameter run and fingerprint, and pins both
+resolved paths and digests. It also creates the press acceptance criteria once
+from `rl.press.acceptance` and the measured hover limits. The campaign report
+records those criteria before training starts.
+
+Workers receive the pinned paths and digests and confirm the files have not
+changed before constructing Isaac Lab. Training reads the producer files in
+place and never copies or mutates them. Invalid input creates no run directory
+or attempt process. A worker that exits without its report is recorded as a
+failed attempt.
 
 The registered tasks are `Isaac-Drone-Hover-Direct-v1` and
-`Isaac-Switch-Press-Direct-v1`. Both use the normalized controller seam. The
+`Isaac-Switch-Press-Direct-v1`. Both use the normalized controller interface. The
 Torch implementation is required to match the NumPy controller sequentially.
 The pinned Isaac Lab `Thruster` realizes per-rotor response while the project
 owns allocation, yaw reaction, drag, the pusher-equipped articulation, and the
@@ -160,7 +169,7 @@ regresses.
 The evaluator and phase driver have separate contracts. Validation receives an
 exact exported actor and returns raw named metrics plus `held_out_task_cost`.
 The plateau detector reads only the configured metric, direction, minimum delta,
-and patience. It never reads the PPO reward or any gate. The uniform rule
+and patience. It never reads the PPO reward or any acceptance check. The uniform rule
 minimizes held-out mean normalized pose error, requires a `0.003` reduction
 from the phase reference, and declares a plateau after 10 consecutive stale
 evaluations. Raw aggregate task cost remains diagnostic and cannot select a
@@ -189,7 +198,7 @@ Run training with:
 make train-rl HYDRA_CONFIG=configs/train_press_hover_quad.yaml
 ```
 
-The GPU procedural gate keeps every phase/restore boundary, performs one update
+The GPU procedural check keeps every phase/restore boundary, performs one update
 per phase on every configured attempt seed, and deliberately stops before
 reserved test seeds are used:
 
@@ -213,7 +222,7 @@ make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-hover/<run-id>/l
 
 and is served at `http://127.0.0.1:6006` by default. The training wrapper prints
 a run-scoped URL with `smoothing=0` and a filter for the primary learning and
-validation charts: training return, signed per-sample reward, all-gates pass,
+validation charts: training return, signed per-sample reward, all-checks pass,
 approach success, dwell progress, other flight failure, collision, minimum
 range, finite traces, and held-out task cost. Set
 `RL_TENSORBOARD_PORT=<port>` when that address is occupied. The Make target
@@ -227,7 +236,7 @@ first validation scalars; readiness is not bounded by a fixed wall-clock delay.
 All rate metrics end in `_rate` and are fractions in `[0, 1]`.
 
 TensorBoard uses only the lowercase `train/`, `val/`, `test/`, and `system/`
-namespaces. Validation and test share one ordered registry: gate status,
+namespaces. Validation and test share one ordered registry: acceptance-check status,
 success/failure/collision rates, minimum range, trace finiteness, maximum dwell
 progress, task cost,
 secondary terminal rates, every strict-predicate pass rate, mean and maximum
@@ -240,14 +249,14 @@ an earlier learner checkpoint; `train/schedule/checkpoint_update` records that
 learner position separately.
 
 `system/` is diagnostic-only and cannot influence PPO, plateau progress,
-selection, retry choice, validation/test gates, or acceptance. At the
+selection, retry choice, validation results, or acceptance. At the
 Hydra-configured one-second cadence, every training chunk and fresh validation
 or test evaluation samples NVIDIA utilization, memory, power, temperature, and
 the owning process's resident memory and CPU use. NVIDIA percentages are stored
 as fractional rates. Per-update rollout/PPO timing and Torch allocator peaks are
 also emitted during training. Raw samples live in each attempt's
 `telemetry.json`; interval summaries live in the strict campaign report. A
-preflight probe fails before rollout when telemetry is unavailable, and a
+startup probe fails before rollout when telemetry is unavailable, and a
 sampler failure terminates at the interval boundary with evidence preserved.
 The configured `0.95` GPU-utilization target is diagnostic: a miss is recorded
 as the measured bottleneck and never changes policy qualification.
@@ -314,19 +323,19 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 18 records every attempt, phase parent, raw
+`training_report.json` schema 19 records the prepared acceptance criteria and every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries, cache source,
-plateau state, phase termination, selection, final test, and gate-by-gate
+plateau state, phase termination, selection, final test, and individual
 acceptance. The evaluator, cache, metric registry, and comparison fingerprint
-carry evaluator revision 22, metric-registry revision 15, comparison revision 21,
-and validation-cache v21; older metric/report shapes and cached evaluations are
+carry evaluator revision 23, metric-registry revision 16, comparison revision 22,
+and validation-cache v22; older metric/report shapes and cached evaluations are
 unsupported. Flight failure and timeout each cost 3.0 in checkpoint ranking, so
 the selector cannot improve merely by converting failed attempts into waits.
 
 After selection, the exported actor is immutable. A new uncached worker runs the
 disjoint final workload: 100 episodes for each of seeds 404, 505, and 606. The
-resulting raw `PolicyEvaluation` is the sole input to
-`evaluate_press_acceptance`. Every gate is independently binding: finite traces,
+resulting raw `PolicyEvaluation` is the sole measured input to
+`evaluate_press_acceptance`. Every check is independently binding: finite traces,
 at least 0.95 success, zero collision, at least 0.40 m minimum closest
 range, exactly zero other flight failures, and the flight-parameters maximum,
 RMSE, p95, and p99 limit for every hover error signal. Hover statistics use the
@@ -347,7 +356,7 @@ unsupported.
 
 On acceptance, publication copies the already-tested actor bytes and verifies
 their digest. Metadata and the report record both workloads, selected and tested
-digests, raw metrics, gate thresholds, individual results, overall status, and
+digests, raw metrics, required values, individual results, overall status, and
 failure reasons. An accepted campaign automatically advances `latest`; `best`
 advances only for a strictly lower validation cost within the same comparison
 fingerprint.
@@ -365,13 +374,13 @@ make test-integration-press-policy-transfer
 make test-integration-press-approach-routine
 ```
 
-The transfer gate is downstream evidence. It must never mutate alignment,
+The transfer check is downstream evidence. It must never mutate alignment,
 controller settings, policy weights, or the held-out evaluator.
 The production-routine target is an invocation smoke test: it ends after the
-final waypoint and settle reach the policy step, the unchanged handoff gate
+final waypoint and settle reach the policy step, the unchanged handoff check
 latches, one valid real-artifact actor result is produced, and that result's
 first setpoint is transmitted. It intentionally does not claim task success;
-held-out evaluation and the transfer gate remain the policy-quality and
+held-out evaluation and the transfer check remain the policy-quality and
 physical-behavior evidence.
 
 ## Deployment
@@ -382,9 +391,9 @@ tested actor. An operator may explicitly assign it to another strict policy
 artifact, including a validation-selected diagnostic candidate. That assignment
 must preserve the campaign report and failed or unavailable validation/test
 evidence, must not advance `best`, and does not make downstream execution an
-acceptance or qualification result. Runtime preflight validates the stored policy
+acceptance or qualification result. Runtime startup validates the stored policy
 and controller contracts but does not reinterpret an operator deployment as a
-passed gate.
+passed acceptance result.
 
 Runtime policy composition is private to `runtime/_policy.py`. A `{kind:
 policy}` routine step resolves the strict policy artifact, builds the matching

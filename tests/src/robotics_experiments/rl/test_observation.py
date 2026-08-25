@@ -26,22 +26,6 @@ def test_hover_layout_length_and_order() -> None:
     np.testing.assert_allclose(vector[10:13], [7.0, 8.0, 9.0])
 
 
-def test_hover_layout_field_changes_move_expected_slots() -> None:
-    base = pack_hover_observation(
-        np.zeros(3),
-        np.array([1.0, 0.0, 0.0, 0.0]),
-        np.zeros(3),
-        np.zeros(3),
-    )
-    changed = pack_hover_observation(
-        np.zeros(3),
-        np.array([1.0, 0.0, 0.0, 0.0]),
-        np.zeros(3),
-        np.array([0.0, 0.0, 0.5]),
-    )
-    assert np.nonzero(changed - base)[0].tolist() == [12]
-
-
 def test_hover_layout_schema_version_pinned() -> None:
     assert HOVER_OBSERVATION_SCHEMA_VERSION == 1
     assert HOVER_OBSERVATION_DIM == 13

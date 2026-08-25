@@ -17,25 +17,18 @@ from robotics_experiments.flight_parameters import (
     SignalStatistics,
     summarize_signal,
 )
+from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation, RewardMean
 from robotics_experiments.rl.press import (
     PressApproachResult,
     PressApproachRewardTerms,
     press_approach_target_velocity,
     quaternion_geodesic_error_rad,
 )
-from robotics_experiments.rl.training.progress import (
-    AcceptanceResult,
-    EvaluationMetric,
-    GateResult,
-    PolicyEvaluation,
-    RewardMean,
-)
 
 __all__ = [
     "PressApproachEpisodeMetrics",
     "PressApproachEvaluationResult",
     "PressApproachEvaluationSummary",
-    "evaluate_press_acceptance",
     "evaluate_press_approach_policy",
     "press_policy_evaluation",
     "summarize_press_approach_episodes",
@@ -833,84 +826,3 @@ def press_policy_evaluation(
         reward_means=result.reward_means,
         source=source,
     )
-
-
-def evaluate_press_acceptance(
-    *,
-    evaluation: PolicyEvaluation,
-    evaluation_config: PressApproachEvaluationConfig,
-    minimum_range_m: float,
-    flight_parameters: FlightParameters,
-) -> AcceptanceResult:
-    """Apply every fixed press gate to one completed raw evaluation."""
-    predicates = (
-        (
-            "trace finiteness",
-            evaluation.metric("all_traces_finite"),
-            "==",
-            1.0,
-        ),
-        (
-            "approach success rate",
-            evaluation.metric("approach_success_rate"),
-            ">=",
-            float(evaluation_config.success_rate_min),
-        ),
-        (
-            "collision rate",
-            evaluation.metric("collision_rate"),
-            "<=",
-            float(evaluation_config.collision_rate_max),
-        ),
-        (
-            "minimum closest range",
-            evaluation.metric("minimum_closest_range_m"),
-            ">=",
-            float(minimum_range_m),
-        ),
-        (
-            "other flight-failure rate",
-            evaluation.metric("other_flight_failure_rate"),
-            "==",
-            0.0,
-        ),
-    ) + tuple(
-        (
-            f"flight parameters {limit.name} {metric_name}",
-            next(
-                (
-                    float(metric.value)
-                    for metric in evaluation.metrics
-                    if metric.name == f"flight_parameters.{limit.name}.{metric_name}"
-                    and metric.value is not None
-                    and np.isfinite(metric.value)
-                ),
-                None,
-            ),
-            "<=",
-            float(getattr(limit, field_name)),
-        )
-        for limit in flight_parameters.hover.acceptance_limits
-        for metric_name, field_name in _BINDING_STATISTICS
-    )
-    gates = tuple(
-        GateResult(
-            name=name,
-            passed=(
-                actual is not None
-                and (
-                    actual == threshold
-                    if comparison == "=="
-                    else actual >= threshold
-                    if comparison == ">="
-                    else actual <= threshold
-                )
-            ),
-            actual=actual,
-            comparison=comparison,
-            threshold=threshold,
-        )
-        for name, actual, comparison, threshold in predicates
-    )
-    reasons = tuple(gate.name for gate in gates if not gate.passed)
-    return AcceptanceResult(passed=not reasons, gates=gates, reasons=reasons)

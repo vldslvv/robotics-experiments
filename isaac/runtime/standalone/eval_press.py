@@ -13,6 +13,11 @@ import torch
 
 from robotics_experiments.config import ExperimentConfig, load_config
 from robotics_experiments.rl import POLICY_FILENAME, validate_policy_artifact
+from robotics_experiments.rl.press import (
+    create_press_acceptance_criteria,
+    evaluate_press_acceptance,
+)
+from robotics_experiments.rl.press._fingerprint import _press_comparison_fingerprint
 
 if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab import PressApproachEvaluationResult
@@ -32,7 +37,6 @@ def _repo_root() -> Path:
 def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvaluationResult:
     # AppLauncher must start before the Isaac Lab workflow import.
     from robotics_experiments.workflows.isaac_lab import (
-        evaluate_press_acceptance,
         evaluate_press_approach_policy,
         make_isaac_lab_env,
         press_policy_evaluation,
@@ -48,6 +52,13 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
             f"press artifact stage {contract.curriculum_stage!r} does not match "
             f"configured stage {stage.name!r}"
         )
+    comparison_fingerprint = _press_comparison_fingerprint(
+        config=config,
+        contract=contract,
+        flight_parameters_fingerprint=metadata.flight_parameters.artifact_fingerprint,
+    )
+    if metadata.values.get("comparison_fingerprint") != comparison_fingerprint:
+        raise ValueError("published policy does not match the selected press configuration")
     env, env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
         experiment_config=config,
@@ -132,10 +143,11 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     )
     _report(f"held_out_task_cost={evaluated.metric('held_out_task_cost'):.6f}")
     acceptance = evaluate_press_acceptance(
+        criteria=create_press_acceptance_criteria(
+            config=config.rl.press.acceptance,
+            flight_parameters=metadata.flight_parameters,
+        ),
         evaluation=evaluated,
-        evaluation_config=evaluation,
-        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
-        flight_parameters=metadata.flight_parameters,
     )
     if not acceptance.passed:
         raise AssertionError("press acceptance failed: " + ", ".join(acceptance.reasons))

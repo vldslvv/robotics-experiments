@@ -53,8 +53,8 @@ def test_press_episode_counters_exist_before_phase_configuration():
         "_timeout_episode_count",
     }
     assert counters <= assigned_attributes(methods["__init__"])
-    assert "_training_termination_cfg" in assigned_attributes(methods["__init__"])
-    assert "_training_termination_cfg" in assigned_attributes(methods["configure_training_phase"])
+    assert "_training_minimum_range_m" in assigned_attributes(methods["__init__"])
+    assert "_training_minimum_range_m" in assigned_attributes(methods["configure_training_phase"])
 
 
 class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):
@@ -91,7 +91,6 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
         "SwitchPressEnv",
         "SwitchPressEnvCfg",
         "compute_lab_rotor_omega",
-        "evaluate_press_acceptance",
         "evaluate_press_approach_policy",
         "make_drone_hover_env_cfg",
         "make_isaac_lab_env",

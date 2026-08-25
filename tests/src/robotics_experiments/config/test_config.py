@@ -235,8 +235,8 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 0.5
     assert not config.rl.lab_vehicle.enable_gyroscopic_forces
-    assert training.controller_artifact == ".build/alignment/x500-px4-v1/best"
-    assert training.flight_parameters_artifact.endswith("/latest")
+    assert config.rl.inputs.controller_artifact == ".build/alignment/x500-px4-v1/best"
+    assert config.rl.inputs.flight_parameters_artifact.endswith("/latest")
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
     assert config.rl.episode_length_s == 45.0
@@ -282,7 +282,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert reward.terminal_success_weight == 150.0
     assert reward.terminal_failure_weight == 300.0
     assert config.rl.press.evaluation.timeout_penalty == 3.0
-    assert config.rl.press.termination.range_undershoot_min_m == 0.40
+    assert config.rl.press.acceptance.minimum_range_m == 0.40
     assert config.rl.press.goal.stable_steps == 600
     assert config.rl.press.goal.alignment_error_max_m == 0.01
     assert config.rl.press.goal.relative_attitude_error_max_rad == pytest.approx(
@@ -322,8 +322,8 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert navigation_noise.relative_attitude_error_max_rad == pytest.approx(0.01633899543191001)
     assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
     assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
-    assert config.rl.press.evaluation.success_rate_min == 0.95
-    assert config.rl.press.evaluation.collision_rate_max == 0.0
+    assert config.rl.press.acceptance.success_rate_min == 0.95
+    assert config.rl.press.acceptance.collision_rate_max == 0.0
     assert config.rl.press.evaluation.validation_seeds == (101, 202, 303)
     assert config.rl.press.evaluation.test_seeds == (404, 505, 606)
     assert config.rl.press.evaluation.episodes_per_seed == 100
@@ -536,7 +536,7 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
             "initial_noise_std must be finite and non-negative",
         ),
         (
-            {"rl": {"training": {"controller_artifact": "  "}}},
+            {"rl": {"inputs": {"controller_artifact": "  "}}},
             "controller_artifact must be non-empty",
         ),
         (
@@ -687,7 +687,7 @@ def test_active_stage_phase_validation(tmp_path):
             {
                 "rl": {
                     "press": {
-                        "evaluation": {
+                        "acceptance": {
                             "collision_rate_max": 1.1,
                         }
                     }

@@ -45,17 +45,19 @@ from robotics_experiments.config import (
     RlTrainingPhaseConfig,
     load_config,
 )
-from robotics_experiments.controller import (
-    ControllerArtifact,
-    load_controller_artifact,
-    resolve_controller_path,
-)
-from robotics_experiments.flight_parameters import (
-    FlightParameters,
-    load_flight_parameters_bundle,
-)
+from robotics_experiments.controller import ControllerArtifact
+from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
-from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
+from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation, RewardMean
+from robotics_experiments.rl.press import (
+    AcceptanceCheck,
+    AcceptanceResult,
+    PressAcceptanceCriteria,
+    create_press_acceptance_criteria,
+    evaluate_press_acceptance,
+    press_policy_contract,
+)
+from robotics_experiments.rl.press._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training._monitoring import (
     metric_registry_payload,
     write_evaluation_scalars,
@@ -63,29 +65,23 @@ from robotics_experiments.rl.training._monitoring import (
 )
 from robotics_experiments.rl.training._telemetry import TelemetrySampler, probe_telemetry
 from robotics_experiments.rl.training.progress import (
-    AcceptanceResult,
-    EvaluationMetric,
-    GateResult,
     PlateauState,
-    PolicyEvaluation,
-    RewardMean,
     advance_plateau,
     select_best_evaluation,
 )
-from robotics_experiments.rl.training.selection import publish_policy_labels
+from robotics_experiments.rl.training.publication import publish_policy_labels
 
 _POLICY_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
-_CONTROLLER_ARTIFACT_ENV = "CONTROLLER_ARTIFACT"
 _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 18
-_CACHE_SCHEMA_VERSION = 21
-_EVALUATOR_REVISION = 22
+_REPORT_SCHEMA_VERSION = 19
+_CACHE_SCHEMA_VERSION = 22
+_EVALUATOR_REVISION = 23
 
 
 def _report(message: str) -> None:
@@ -296,88 +292,6 @@ def _policy_content_sha256(path: Path) -> str:
             digest.update(len(content).to_bytes(8, "big"))
             digest.update(content)
     return digest.hexdigest()
-
-
-def _load_training_controller(
-    *,
-    args: argparse.Namespace,
-    config: ExperimentConfig,
-    repo_root: Path,
-) -> tuple[ControllerArtifact, str, Path]:
-    authored = (
-        args.controller_artifact
-        or os.environ.get(_CONTROLLER_ARTIFACT_ENV)
-        or config.rl.training.controller_artifact
-    )
-    artifact_path = Path(authored)
-    if not artifact_path.is_absolute():
-        artifact_path = repo_root / artifact_path
-    controller_path = resolve_controller_path(artifact_path).resolve(strict=True)
-    artifact = load_controller_artifact(controller_path)
-    vehicle_id = config.rl.training.vehicle_id
-    try:
-        vehicle_label, vehicle = next(
-            (label, item) for label, item in config.vehicles.items() if item.id == vehicle_id
-        )
-    except StopIteration as exc:
-        raise ValueError(f"rl.training.vehicle_id={vehicle_id} is not in the experiment") from exc
-    action = config.rl.action
-    mismatches = []
-    if artifact.vehicle != vehicle_label:
-        mismatches.append(f"vehicle {artifact.vehicle!r} != {vehicle_label!r}")
-    if artifact.airframe != Path(vehicle.spawn.usd_path).name:
-        mismatches.append(
-            f"airframe {artifact.airframe!r} != {Path(vehicle.spawn.usd_path).name!r}"
-        )
-    if artifact.command_rate_hz != config.rl.policy_rate_hz:
-        mismatches.append(f"cadence {artifact.command_rate_hz} != {config.rl.policy_rate_hz}")
-    if action.kind not in artifact.certified_control_modes or action.action_dim != 4:
-        mismatches.append(f"action contract {(action.kind, action.action_dim)!r} is incompatible")
-    if mismatches:
-        raise ValueError("controller artifact is incompatible: " + "; ".join(mismatches))
-    if not artifact.advisory_quality_passed:
-        raise ValueError(
-            "controller artifact failed its quality gates: "
-            + "; ".join(artifact.advisory_quality_reasons)
-        )
-    return artifact, _file_sha256(controller_path), controller_path
-
-
-def _load_training_flight_parameters(
-    *,
-    artifact_path: str | Path | None,
-    config: ExperimentConfig,
-    controller_artifact: ControllerArtifact,
-    repo_root: Path,
-) -> tuple[FlightParameters, str, Path]:
-    authored = artifact_path or config.rl.training.flight_parameters_artifact
-    resolved_path = Path(authored)
-    if not resolved_path.is_absolute():
-        resolved_path = repo_root / resolved_path
-    bundle = load_flight_parameters_bundle(path=resolved_path)
-    flight_parameters = bundle.flight_parameters
-    try:
-        vehicle_label = next(
-            label
-            for label, vehicle in config.vehicles.items()
-            if vehicle.id == config.rl.training.vehicle_id
-        )
-    except StopIteration as exc:
-        raise ValueError(
-            f"rl.training.vehicle_id={config.rl.training.vehicle_id} is not in the experiment"
-        ) from exc
-    mismatches = []
-    if flight_parameters.vehicle != vehicle_label:
-        mismatches.append(f"vehicle {flight_parameters.vehicle!r} != {vehicle_label!r}")
-    if flight_parameters.source_backend != "px4-sitl":
-        mismatches.append(f"source backend {flight_parameters.source_backend!r} != 'px4-sitl'")
-    if flight_parameters.run_id != controller_artifact.flight_parameters_run_id:
-        mismatches.append("run ID does not match the controller qualification")
-    if flight_parameters.artifact_fingerprint != controller_artifact.flight_parameters_fingerprint:
-        mismatches.append("artifact fingerprint does not match the controller qualification")
-    if mismatches:
-        raise ValueError("flight parameters are incompatible: " + "; ".join(mismatches))
-    return flight_parameters, bundle.flight_parameters_digest, bundle.run_dir
 
 
 def _previous_stage_checkpoint(
@@ -776,7 +690,7 @@ def _report_evaluation(
         "workload_role": "validation",
         "metrics": metrics,
         "reward_means": {reward.name: reward.mean for reward in evaluation.reward_means},
-        "gates": [asdict(gate) for gate in validation.gates],
+        "checks": [asdict(check) for check in validation.checks],
         "validation_passed": validation.passed,
         "plateau": {
             "made_progress": False,
@@ -817,27 +731,27 @@ def _workload_payload(*, role: str, config: ExperimentConfig) -> dict[str, Any]:
 def _acceptance_payload(*, acceptance) -> dict[str, Any]:
     return {
         "passed": acceptance.passed,
-        "gates": [asdict(gate) for gate in acceptance.gates],
+        "checks": [asdict(check) for check in acceptance.checks],
         "reasons": list(acceptance.reasons),
     }
 
 
 def _acceptance_from_payload(*, payload: dict[str, Any]) -> AcceptanceResult:
-    gates = payload.get("gates")
+    checks = payload.get("checks")
     reasons = payload.get("reasons")
-    if not isinstance(gates, list) or not isinstance(reasons, list):
+    if not isinstance(checks, list) or not isinstance(reasons, list):
         raise ValueError("attempt acceptance payload is incomplete")
     return AcceptanceResult(
         passed=bool(payload.get("passed")),
-        gates=tuple(
-            GateResult(
-                name=str(gate["name"]),
-                passed=bool(gate["passed"]),
-                actual=None if gate["actual"] is None else float(gate["actual"]),
-                comparison=str(gate["comparison"]),
-                threshold=float(gate["threshold"]),
+        checks=tuple(
+            AcceptanceCheck(
+                name=str(check["name"]),
+                passed=bool(check["passed"]),
+                actual=None if check["actual"] is None else float(check["actual"]),
+                comparison=str(check["comparison"]),
+                required=float(check["required"]),
             )
-            for gate in gates
+            for check in checks
         ),
         reasons=tuple(str(reason) for reason in reasons),
     )
@@ -907,6 +821,7 @@ def _training_report(
     test_evaluation: PolicyEvaluation | None,
     acceptance,
     status: str,
+    acceptance_criteria: PressAcceptanceCriteria | None = None,
     active_attempt: dict[str, Any] | None = None,
     telemetry_probe: dict[str, float] | None = None,
 ) -> dict[str, Any]:
@@ -918,6 +833,9 @@ def _training_report(
         "policy_name": config.rl.training.policy_name,
         "policy_interface": rl.PolicyInterface.PRESS.value,
         "comparison_fingerprint": comparison_fingerprint,
+        "acceptance_criteria": (
+            asdict(acceptance_criteria) if acceptance_criteria is not None else None
+        ),
         "phases": [asdict(phase) for phase in phases],
         "plateau_criteria": asdict(criteria),
         "metric_registry": metric_registry_payload(),
@@ -927,7 +845,7 @@ def _training_report(
                 config.rl.training.gpu_utilization_target_rate
             ),
             "policy_decision_input": False,
-            "preflight_probe": telemetry_probe,
+            "startup_probe": telemetry_probe,
         },
         "attempt_execution": "isolated_process",
         "training_attempt_seeds": list(config.rl.training.attempt_seeds),
@@ -1136,22 +1054,13 @@ def _restore_phase_branch(
     return restored_iteration
 
 
-def _finalize_campaign(
+def _run_final_test(
     *,
-    run_dir: Path,
-    policy_root: Path,
     config_path: Path,
     config: ExperimentConfig,
-    phases: tuple[RlTrainingPhaseConfig, ...],
-    attempts: list[dict[str, Any]],
     selection: _AttemptSelection,
-    selected_attempt_index: int,
-    comparison_fingerprint: str,
-    metadata: dict[str, Any],
-    writer,
-    telemetry_probe: dict[str, float],
-) -> None:
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
+) -> tuple[PolicyEvaluation, dict[str, Any]]:
+    """Run one fresh final test of the exact validation-selected actor."""
 
     selected = selection.evaluation
     selected_policy = selection.artifact_dir / POLICY_FILENAME
@@ -1176,6 +1085,29 @@ def _finalize_campaign(
         raise RuntimeError("final test evaluation was not executed freshly")
     if test_evaluation.policy_digest != selected.policy_digest:
         raise RuntimeError("final test evaluated a different actor digest")
+    return test_evaluation, telemetry_interval
+
+
+def _record_final_test(
+    *,
+    run_dir: Path,
+    config: ExperimentConfig,
+    phases: tuple[RlTrainingPhaseConfig, ...],
+    attempts: list[dict[str, Any]],
+    selection: _AttemptSelection,
+    selected_attempt_index: int,
+    comparison_fingerprint: str,
+    writer,
+    telemetry_probe: dict[str, float],
+    acceptance_criteria: PressAcceptanceCriteria,
+    test_evaluation: PolicyEvaluation,
+    telemetry_interval: dict[str, Any],
+    acceptance: AcceptanceResult,
+) -> dict[str, Any]:
+    """Record final-test metrics, acceptance, and telemetry."""
+
+    selected = selection.evaluation
+    selected_policy = selection.artifact_dir / POLICY_FILENAME
     attempt_dir = selection.artifact_dir.parents[1]
     attempt_record = attempts[selected_attempt_index]
     tensorboard_step = int(attempt_record["attempted_updates"])
@@ -1200,23 +1132,16 @@ def _finalize_campaign(
             test_evaluation=test_evaluation,
             acceptance=None,
             status="telemetry_failed",
+            acceptance_criteria=acceptance_criteria,
             telemetry_probe=telemetry_probe,
         )
         _write_json(path=run_dir / _REPORT_FILENAME, payload=telemetry_failed_report)
         raise
-    acceptance = evaluate_press_acceptance(
-        evaluation=test_evaluation,
-        evaluation_config=config.rl.press.evaluation,
-        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
-        flight_parameters=rl.validate_policy_artifact(
-            artifact_dir=selection.artifact_dir
-        ).flight_parameters,
-    )
     write_evaluation_scalars(
         writer=writer,
         role="test",
         evaluation=test_evaluation,
-        all_gates_passed=acceptance.passed,
+        all_checks_passed=acceptance.passed,
         step=tensorboard_step,
     )
     write_system_scalars(
@@ -1248,33 +1173,14 @@ def _finalize_campaign(
         test_evaluation=test_evaluation,
         acceptance=acceptance,
         status="accepted" if acceptance.passed else "test_failed",
+        acceptance_criteria=acceptance_criteria,
         telemetry_probe=telemetry_probe,
     )
     _write_json(path=run_dir / _REPORT_FILENAME, payload=final_report)
-    if not acceptance.passed:
-        raise RuntimeError("final policy test failed: " + ", ".join(acceptance.reasons))
-    best_updated = _publish_selected(
-        run_dir=run_dir,
-        policy_root=policy_root,
-        metadata=metadata,
-        report=final_report,
-        selected=selected,
-        selected_policy=selected_policy,
-        test_evaluation=test_evaluation,
-        acceptance=acceptance,
-        comparison_fingerprint=comparison_fingerprint,
-        config=config,
-    )
-    _report(
-        f"train-rl COMPLETE run={run_dir} attempts={len(attempts)} "
-        f"selected={selected.iteration} cost="
-        f"{selected.metric(config.rl.training.plateau.metric_name):.6f} "
-        f"acceptance=true latest={policy_root / 'latest'} "
-        f"best_updated={str(best_updated).lower()}"
-    )
+    return final_report
 
 
-def _run_new_training(
+def _train_and_validate_attempt(
     *,
     args: argparse.Namespace,
     config: ExperimentConfig,
@@ -1283,16 +1189,21 @@ def _run_new_training(
     policy_root: Path,
     repo_root: Path,
     device: str,
-    controller_artifact: ControllerArtifact,
-    controller_digest: str,
-    flight_parameters: FlightParameters,
-    flight_parameters_digest: str,
+    inputs: rl.PolicyInputs,
+    acceptance_criteria: PressAcceptanceCriteria,
+    comparison_fingerprint: str,
     run_dir: Path,
     attempt_index_offset: int = 0,
 ) -> None:
+    """Train one isolated attempt and validate its exported checkpoints."""
+
     if not args.attempt_worker or len(attempt_seeds) != 1:
         raise ValueError("a training worker must own exactly one isolated attempt")
     training_config = config.rl.training
+    controller_artifact = inputs.controller
+    controller_digest = inputs.controller_digest
+    flight_parameters = inputs.flight_parameters
+    flight_parameters_digest = inputs.flight_parameters_digest
     phases = (
         _procedural_smoke_phases(phases=_campaign_phases(config=config))
         if args.procedural_smoke
@@ -1312,12 +1223,9 @@ def _run_new_training(
     )
     from torch.utils.tensorboard import SummaryWriter
 
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
-
     writer = None
     validation_worker: _EvaluationWorker | None = None
     metadata: dict[str, Any] | None = None
-    comparison_fingerprint: str | None = None
     attempts: list[dict[str, Any]] = []
     partial_attempt_report_path: Path | None = None
     partial_attempt_record: dict[str, Any] | None = None
@@ -1382,11 +1290,9 @@ def _run_new_training(
                 )
                 if attempt_fingerprint is None:
                     raise ValueError("press campaign did not produce a comparison fingerprint")
-                if comparison_fingerprint is None:
-                    comparison_fingerprint = attempt_fingerprint
-                    metadata["comparison_fingerprint"] = comparison_fingerprint
-                elif attempt_fingerprint != comparison_fingerprint:
+                if attempt_fingerprint != comparison_fingerprint:
                     raise ValueError("training attempt changed the comparison fingerprint")
+                metadata["comparison_fingerprint"] = comparison_fingerprint
                 _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
                 attempt_metadata = metadata
                 fingerprint = comparison_fingerprint
@@ -1436,7 +1342,7 @@ def _run_new_training(
                     checkpoint_path=initial_checkpoint,
                     iteration=0,
                 )
-                cache_dir = policy_root / ".validation-cache-v7"
+                cache_dir = policy_root / ".validation-cache-v22"
                 telemetry = TelemetrySampler(
                     sample_interval_s=training_config.telemetry_sample_interval_s
                 )
@@ -1565,10 +1471,8 @@ def _run_new_training(
                             source_run_id=run_dir.name,
                         )
                     validation = evaluate_press_acceptance(
+                        criteria=acceptance_criteria,
                         evaluation=evaluation,
-                        evaluation_config=config.rl.press.evaluation,
-                        minimum_range_m=config.rl.press.termination.range_undershoot_min_m,
-                        flight_parameters=flight_parameters,
                     )
                     candidates.append(
                         _AttemptSelection(
@@ -1600,7 +1504,7 @@ def _run_new_training(
                         writer=writer,
                         role="val",
                         evaluation=evaluation,
-                        all_gates_passed=validation.passed,
+                        all_checks_passed=validation.passed,
                         step=tensorboard_step,
                     )
                     writer.flush()
@@ -1967,19 +1871,20 @@ def _attempt_worker_command(
     return command
 
 
-def _run_isolated_campaign(
+def _run_policy_workflow(
     *,
     args: argparse.Namespace,
     config: ExperimentConfig,
     config_path: Path,
-    controller_artifact_digest: str,
-    controller_artifact_path: Path,
-    flight_parameters_artifact_digest: str,
-    flight_parameters_artifact_path: Path,
+    inputs: rl.PolicyInputs,
+    acceptance_criteria: PressAcceptanceCriteria,
+    comparison_fingerprint: str,
     attempt_seeds: tuple[int, ...],
     policy_root: Path,
     repo_root: Path,
 ) -> None:
+    """Train and validate attempts, select one actor, test it, then publish it."""
+
     training_config = config.rl.training
     phases = (
         _procedural_smoke_phases(phases=_campaign_phases(config=config))
@@ -1993,7 +1898,6 @@ def _run_isolated_campaign(
     run_dir = _make_run_dir(out_root=policy_root, run_id=os.environ.get(_RUN_ID_ENV))
     attempts: list[dict[str, Any]] = []
     selections: list[tuple[int, _AttemptSelection]] = []
-    comparison_fingerprint = ""
     worker_pids: set[int] = set()
     _write_json(
         path=run_dir / _REPORT_FILENAME,
@@ -2009,6 +1913,7 @@ def _run_isolated_campaign(
             test_evaluation=None,
             acceptance=None,
             status="training",
+            acceptance_criteria=acceptance_criteria,
             telemetry_probe=telemetry_probe,
         ),
     )
@@ -2060,6 +1965,7 @@ def _run_isolated_campaign(
                 test_evaluation=None,
                 acceptance=None,
                 status="training",
+                acceptance_criteria=acceptance_criteria,
                 active_attempt=active_attempt,
                 telemetry_probe=telemetry_probe,
             ),
@@ -2073,10 +1979,10 @@ def _run_isolated_campaign(
                 _attempt_worker_command(
                     args=args,
                     attempt_index=attempt_index,
-                    controller_artifact_digest=controller_artifact_digest,
-                    controller_artifact_path=controller_artifact_path,
-                    flight_parameters_artifact_digest=(flight_parameters_artifact_digest),
-                    flight_parameters_artifact_path=flight_parameters_artifact_path,
+                    controller_artifact_digest=inputs.controller_digest,
+                    controller_artifact_path=inputs.controller_path,
+                    flight_parameters_artifact_digest=inputs.flight_parameters_digest,
+                    flight_parameters_artifact_path=inputs.flight_parameters_path,
                     seed=seed,
                 ),
                 cwd=repo_root,
@@ -2176,6 +2082,7 @@ def _run_isolated_campaign(
                 test_evaluation=None,
                 acceptance=None,
                 status=status,
+                acceptance_criteria=acceptance_criteria,
                 telemetry_probe=telemetry_probe,
             ),
         )
@@ -2210,6 +2117,7 @@ def _run_isolated_campaign(
             test_evaluation=None,
             acceptance=None,
             status="procedural_smoke_complete",
+            acceptance_criteria=acceptance_criteria,
             telemetry_probe=telemetry_probe,
         )
         _write_json(path=run_dir / _REPORT_FILENAME, payload=smoke_report)
@@ -2232,10 +2140,11 @@ def _run_isolated_campaign(
             test_evaluation=None,
             acceptance=None,
             status="validation_failed",
+            acceptance_criteria=acceptance_criteria,
             telemetry_probe=telemetry_probe,
         )
         _write_json(path=run_dir / _REPORT_FILENAME, payload=failed_report)
-        raise RuntimeError("all training attempts failed the validation gates")
+        raise RuntimeError("all training attempts failed validation")
 
     metadata_payload = json.loads((campaign_selection.artifact_dir / METADATA_FILENAME).read_text())
     if not isinstance(metadata_payload, dict):
@@ -2246,19 +2155,52 @@ def _run_isolated_campaign(
         log_dir=str(run_dir / "logs" / f"attempt_{selected_attempt_index + 1:02d}")
     )
     try:
-        _finalize_campaign(
-            run_dir=run_dir,
-            policy_root=policy_root,
+        test_evaluation, telemetry_interval = _run_final_test(
             config_path=config_path,
+            config=config,
+            selection=campaign_selection,
+        )
+        acceptance = evaluate_press_acceptance(
+            criteria=acceptance_criteria,
+            evaluation=test_evaluation,
+        )
+        final_report = _record_final_test(
+            run_dir=run_dir,
             config=config,
             phases=phases,
             attempts=attempts,
             selection=campaign_selection,
             selected_attempt_index=selected_attempt_index,
             comparison_fingerprint=comparison_fingerprint,
-            metadata=metadata_payload,
             writer=writer,
             telemetry_probe=telemetry_probe,
+            acceptance_criteria=acceptance_criteria,
+            test_evaluation=test_evaluation,
+            telemetry_interval=telemetry_interval,
+            acceptance=acceptance,
+        )
+        if not acceptance.passed:
+            raise RuntimeError("final policy test failed: " + ", ".join(acceptance.reasons))
+        selected = campaign_selection.evaluation
+        selected_policy = campaign_selection.artifact_dir / POLICY_FILENAME
+        best_updated = _publish_selected(
+            run_dir=run_dir,
+            policy_root=policy_root,
+            metadata=metadata_payload,
+            report=final_report,
+            selected=selected,
+            selected_policy=selected_policy,
+            test_evaluation=test_evaluation,
+            acceptance=acceptance,
+            comparison_fingerprint=comparison_fingerprint,
+            config=config,
+        )
+        _report(
+            f"train-rl COMPLETE run={run_dir} attempts={len(attempts)} "
+            f"selected={selected.iteration} cost="
+            f"{selected.metric(config.rl.training.plateau.metric_name):.6f} "
+            f"acceptance=true latest={policy_root / 'latest'} "
+            f"best_updated={str(best_updated).lower()}"
         )
     finally:
         writer.close()
@@ -2276,31 +2218,33 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
         repo_root / ".build" / "training" / _validate_policy_name(training_config.policy_name)
     )
     try:
-        controller_artifact, controller_digest, controller_artifact_path = (
-            _load_training_controller(
-                args=args,
-                config=config,
-                repo_root=repo_root,
-            )
+        inputs = rl.prepare_policy_inputs(
+            config=config,
+            repo_root=repo_root,
+            controller_artifact=args.controller_artifact,
+            flight_parameters_artifact=args.flight_parameters_artifact,
         )
-        flight_parameters, flight_parameters_digest, flight_parameters_artifact_path = (
-            _load_training_flight_parameters(
-                artifact_path=args.flight_parameters_artifact,
-                config=config,
-                controller_artifact=controller_artifact,
-                repo_root=repo_root,
-            )
+        acceptance_criteria = create_press_acceptance_criteria(
+            config=config.rl.press.acceptance,
+            flight_parameters=inputs.flight_parameters,
         )
+        comparison_fingerprint = _press_comparison_fingerprint(
+            config=config,
+            contract=press_policy_contract(config=config, controller=inputs.controller),
+            flight_parameters_fingerprint=inputs.flight_parameters.artifact_fingerprint,
+        )
+        if comparison_fingerprint is None:
+            raise ValueError("press training did not produce a comparison fingerprint")
         if (
             args.controller_artifact_digest is not None
-            and args.controller_artifact_digest != controller_digest
+            and args.controller_artifact_digest != inputs.controller_digest
         ):
-            raise ValueError("controller artifact changed after campaign preflight")
+            raise ValueError("controller artifact changed after campaign preparation")
         if (
             args.flight_parameters_artifact_digest is not None
-            and args.flight_parameters_artifact_digest != flight_parameters_digest
+            and args.flight_parameters_artifact_digest != inputs.flight_parameters_digest
         ):
-            raise ValueError("flight parameters changed after campaign preflight")
+            raise ValueError("flight parameters changed after campaign preparation")
     except (OSError, ValueError) as exc:
         _report(f"input artifact validation FAILED: {exc}")
         raise SystemExit(2) from None
@@ -2313,7 +2257,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
         run_dir = Path(run_dir_value)
         if not run_dir.is_absolute():
             raise ValueError(f"{_CAMPAIGN_RUN_DIR_ENV} must be an absolute path")
-        _run_new_training(
+        _train_and_validate_attempt(
             args=args,
             config=config,
             config_path=config_path,
@@ -2321,27 +2265,25 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             policy_root=policy_root,
             repo_root=repo_root,
             device="cuda:0" if torch.cuda.is_available() else "cpu",
-            controller_artifact=controller_artifact,
-            controller_digest=controller_digest,
-            flight_parameters=flight_parameters,
-            flight_parameters_digest=flight_parameters_digest,
+            inputs=inputs,
+            acceptance_criteria=acceptance_criteria,
+            comparison_fingerprint=comparison_fingerprint,
             run_dir=run_dir,
             attempt_index_offset=args.attempt_index,
         )
         return
     _report(
         "input artifact validation PASSED: "
-        f"controller={controller_artifact_path} "
-        f"flight_parameters={flight_parameters_artifact_path}"
+        f"controller={inputs.controller_path} "
+        f"flight_parameters={inputs.flight_parameters_path}"
     )
-    _run_isolated_campaign(
+    _run_policy_workflow(
         args=args,
         config=config,
         config_path=config_path,
-        controller_artifact_digest=controller_digest,
-        controller_artifact_path=controller_artifact_path,
-        flight_parameters_artifact_digest=flight_parameters_digest,
-        flight_parameters_artifact_path=flight_parameters_artifact_path,
+        inputs=inputs,
+        acceptance_criteria=acceptance_criteria,
+        comparison_fingerprint=comparison_fingerprint,
         attempt_seeds=attempt_seeds,
         policy_root=policy_root,
         repo_root=repo_root,
@@ -2374,7 +2316,7 @@ def main() -> None:
         "--controller-artifact",
         type=Path,
         default=None,
-        help="override rl.training.controller_artifact for training",
+        help="override rl.inputs.controller_artifact for training",
     )
     parser.add_argument("--controller-artifact-digest", help=argparse.SUPPRESS)
     parser.add_argument("--flight-parameters-artifact", type=Path, help=argparse.SUPPRESS)
