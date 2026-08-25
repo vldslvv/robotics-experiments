@@ -262,10 +262,13 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     )
     assert tuple(phase.entropy_coef for phase in stage.phases) == (0.0, 0.0, 0.0)
     assert tuple(phase.evaluation_interval for phase in stage.phases) == (10, 5, 5)
-    assert training.plateau.metric_name == "mean_normalized_pose_error"
-    assert training.plateau.direction == "minimize"
-    assert training.plateau.minimum_delta == 0.003
-    assert training.plateau.patience_evaluations == 10
+    assert stage.plateau.metric_name == "mean_normalized_pose_error"
+    assert stage.plateau.direction == "minimize"
+    assert stage.plateau.minimum_delta == 0.003
+    assert stage.plateau.patience_evaluations == 10
+    hover_stage = config.rl.press.curriculum.stages[0]
+    assert hover_stage.plateau.metric_name == "mean_max_stable_goal_fraction"
+    assert hover_stage.plateau.direction == "maximize"
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
     assert training.attempt_seeds == (42, 43, 44)

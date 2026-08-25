@@ -29,7 +29,6 @@ import sys
 import tempfile
 import time
 import traceback
-import zipfile
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +41,7 @@ import robotics_experiments.rl as rl
 import robotics_experiments.rl.training.rsl_rl as training
 from robotics_experiments.config import (
     ExperimentConfig,
+    RlPlateauCriteriaConfig,
     RlTrainingPhaseConfig,
     load_config,
 )
@@ -70,6 +70,7 @@ from robotics_experiments.rl.training.progress import (
     select_best_evaluation,
 )
 from robotics_experiments.rl.training.publication import publish_policy_labels
+from robotics_experiments.rl.workflow import _load_pinned_policy_inputs
 
 _POLICY_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -79,9 +80,7 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 19
-_CACHE_SCHEMA_VERSION = 22
-_EVALUATOR_REVISION = 23
+_REPORT_SCHEMA_VERSION = 20
 
 
 def _report(message: str) -> None:
@@ -134,6 +133,12 @@ def _campaign_phases(*, config: ExperimentConfig) -> tuple[RlTrainingPhaseConfig
     if config.rl.training.task_id == "Isaac-Switch-Press-Direct-v1":
         return tuple(config.rl.press.selected_stage().phases)
     return tuple(config.rl.training.phases)
+
+
+def _campaign_plateau(*, config: ExperimentConfig) -> RlPlateauCriteriaConfig:
+    if config.rl.training.task_id == "Isaac-Switch-Press-Direct-v1":
+        return config.rl.press.selected_stage().plateau
+    return config.rl.training.plateau
 
 
 def _git_source_metadata(*, repo_root: Path) -> dict[str, str | bool]:
@@ -277,23 +282,6 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _policy_content_sha256(path: Path) -> str:
-    """Hash TorchScript executable content without its generated archive ID."""
-    digest = hashlib.sha256()
-    with zipfile.ZipFile(path) as archive:
-        members = sorted(
-            name for name in archive.namelist() if not name.endswith("/.data/serialization_id")
-        )
-        for name in members:
-            encoded_name = name.encode()
-            content = archive.read(name)
-            digest.update(len(encoded_name).to_bytes(8, "big"))
-            digest.update(encoded_name)
-            digest.update(len(content).to_bytes(8, "big"))
-            digest.update(content)
-    return digest.hexdigest()
-
-
 def _previous_stage_checkpoint(
     *,
     config: ExperimentConfig,
@@ -348,42 +336,11 @@ def _previous_stage_checkpoint(
     }
 
 
-def _capped_phases(
-    *,
-    phases: tuple[RlTrainingPhaseConfig, ...],
-    maximum_iterations: int | None,
-) -> tuple[RlTrainingPhaseConfig, ...]:
-    if maximum_iterations is None:
-        return phases
-    remaining = maximum_iterations
-    capped = []
-    for phase in phases:
-        if remaining == 0:
-            break
-        phase_iterations = min(remaining, int(phase.max_iterations))
-        capped.append(
-            replace(
-                phase,
-                max_iterations=phase_iterations,
-                evaluation_interval=min(phase.evaluation_interval, phase_iterations),
-            )
-        )
-        remaining -= phase_iterations
-    return tuple(capped)
-
-
 def _procedural_smoke_phases(
     *, phases: tuple[RlTrainingPhaseConfig, ...]
 ) -> tuple[RlTrainingPhaseConfig, ...]:
     """Retain every phase boundary while limiting each branch to one update."""
     return tuple(replace(phase, max_iterations=1, evaluation_interval=1) for phase in phases)
-
-
-def _evaluation_payload(evaluation: PolicyEvaluation) -> dict[str, Any]:
-    return {
-        "metrics": {metric.name: metric.value for metric in evaluation.metrics},
-        "reward_means": {reward.name: reward.mean for reward in evaluation.reward_means},
-    }
 
 
 def _evaluation_from_payload(
@@ -397,7 +354,7 @@ def _evaluation_from_payload(
     metrics = payload.get("metrics")
     reward_means = payload.get("reward_means")
     if not isinstance(metrics, dict) or not isinstance(reward_means, dict):
-        raise ValueError("cached policy evaluation has an invalid metric contract")
+        raise ValueError("policy evaluation report has an invalid metric contract")
     return PolicyEvaluation(
         iteration=iteration,
         checkpoint_path=checkpoint_path,
@@ -409,76 +366,6 @@ def _evaluation_from_payload(
             RewardMean(name=str(name), mean=float(value)) for name, value in reward_means.items()
         ),
         source=source,
-    )
-
-
-def _cache_path(
-    *,
-    cache_dir: Path,
-    policy_content_digest: str,
-    comparison_fingerprint: str,
-    controller_digest: str,
-    workload_role: str,
-    seeds: tuple[int, ...],
-    episodes_per_seed: int,
-) -> Path:
-    payload = {
-        "schema_version": _CACHE_SCHEMA_VERSION,
-        "evaluator_revision": _EVALUATOR_REVISION,
-        "policy_content_digest": policy_content_digest,
-        "comparison_fingerprint": comparison_fingerprint,
-        "controller_digest": controller_digest,
-        "workload_role": workload_role,
-        "seeds": list(seeds),
-        "episodes_per_seed": episodes_per_seed,
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return cache_dir / f"{hashlib.sha256(encoded).hexdigest()}.json"
-
-
-def _read_cached_evaluation(
-    *,
-    cache_path: Path,
-    iteration: int,
-    checkpoint_path: Path,
-    policy_digest: str,
-    policy_content_digest: str,
-) -> PolicyEvaluation | None:
-    if not cache_path.is_file():
-        return None
-    payload = json.loads(cache_path.read_text())
-    if payload.get("schema_version") != _CACHE_SCHEMA_VERSION:
-        raise ValueError(f"unsupported evaluation cache schema in {cache_path}")
-    if payload.get("policy_content_digest") != policy_content_digest:
-        raise ValueError("cached policy content digest does not match its cache key")
-    evaluation = payload.get("evaluation")
-    if not isinstance(evaluation, dict):
-        raise ValueError(f"evaluation cache entry is incomplete: {cache_path}")
-    return _evaluation_from_payload(
-        payload=evaluation,
-        iteration=iteration,
-        checkpoint_path=checkpoint_path,
-        policy_digest=policy_digest,
-        source="cache",
-    )
-
-
-def _write_cached_evaluation(
-    *,
-    cache_path: Path,
-    evaluation: PolicyEvaluation,
-    policy_content_digest: str,
-    source_run_id: str,
-) -> None:
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json(
-        path=cache_path,
-        payload={
-            "schema_version": _CACHE_SCHEMA_VERSION,
-            "source_run_id": source_run_id,
-            "policy_content_digest": policy_content_digest,
-            "evaluation": _evaluation_payload(evaluation),
-        },
     )
 
 
@@ -653,10 +540,10 @@ def _export_candidate(
     runner,
     artifact_dir: Path,
     metadata: dict[str, Any],
-) -> tuple[Path, str, str]:
+) -> tuple[Path, str]:
     training.export_policy(runner, artifact_dir, metadata=metadata)
     policy_path = artifact_dir / POLICY_FILENAME
-    return artifact_dir, _file_sha256(policy_path), _policy_content_sha256(policy_path)
+    return artifact_dir, _file_sha256(policy_path)
 
 
 def _report_evaluation(
@@ -825,7 +712,7 @@ def _training_report(
     active_attempt: dict[str, Any] | None = None,
     telemetry_probe: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    criteria = config.rl.training.plateau
+    criteria = _campaign_plateau(config=config)
     return {
         "schema_version": _REPORT_SCHEMA_VERSION,
         "report_kind": "campaign",
@@ -933,6 +820,7 @@ def _publish_selected(
     comparison_fingerprint: str,
     config: ExperimentConfig,
 ) -> bool:
+    criteria = _campaign_plateau(config=config)
     if not acceptance.passed:
         raise ValueError("a failed test evaluation cannot be published")
     if selected.policy_digest != test_evaluation.policy_digest:
@@ -949,7 +837,7 @@ def _publish_selected(
     selected_metadata = metadata | {
         "selected_checkpoint_iteration": selected.iteration,
         "selected_policy_digest": selected.policy_digest,
-        "selection_method": config.rl.training.plateau.metric_name,
+        "selection_method": criteria.metric_name,
         "training_attempt_seeds": list(config.rl.training.attempt_seeds),
         "validation_selection": {
             "comparison_fingerprint": comparison_fingerprint,
@@ -979,7 +867,6 @@ def _publish_selected(
         )
         for filename in (POLICY_FILENAME, METADATA_FILENAME, _REPORT_FILENAME):
             (stage_dir / filename).replace(run_dir / filename)
-    criteria = config.rl.training.plateau
     return publish_policy_labels(
         policy_root=policy_root,
         run_dir=run_dir,
@@ -1186,7 +1073,6 @@ def _train_and_validate_attempt(
     config: ExperimentConfig,
     config_path: Path,
     attempt_seeds: tuple[int, ...],
-    policy_root: Path,
     repo_root: Path,
     device: str,
     inputs: rl.PolicyInputs,
@@ -1200,6 +1086,7 @@ def _train_and_validate_attempt(
     if not args.attempt_worker or len(attempt_seeds) != 1:
         raise ValueError("a training worker must own exactly one isolated attempt")
     training_config = config.rl.training
+    plateau_criteria = _campaign_plateau(config=config)
     controller_artifact = inputs.controller
     controller_digest = inputs.controller_digest
     flight_parameters = inputs.flight_parameters
@@ -1207,10 +1094,7 @@ def _train_and_validate_attempt(
     phases = (
         _procedural_smoke_phases(phases=_campaign_phases(config=config))
         if args.procedural_smoke
-        else _capped_phases(
-            phases=_campaign_phases(config=config),
-            maximum_iterations=args.max_iterations,
-        )
+        else _campaign_phases(config=config)
     )
     total_maximum = sum(phase.max_iterations for phase in phases)
     if not run_dir.is_dir():
@@ -1257,7 +1141,7 @@ def _train_and_validate_attempt(
             env, env_cfg = _build_env(
                 task_id=training_config.task_id,
                 seed=seed,
-                num_envs=args.num_envs,
+                num_envs=config.rl.num_envs,
                 experiment_config=config,
                 controller_settings=controller_artifact.selected_settings,
                 flight_parameters=flight_parameters,
@@ -1280,7 +1164,7 @@ def _train_and_validate_attempt(
                     if metadata["policy_interface"] != rl.PolicyInterface.PRESS.value:
                         raise ValueError("campaign requires the press deterministic evaluator")
                     metadata["training_phases"] = [asdict(phase) for phase in phases]
-                    metadata["plateau_criteria"] = asdict(training_config.plateau)
+                    metadata["plateau_criteria"] = asdict(plateau_criteria)
                 _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
                 contract = rl.load_policy_metadata(artifact_dir=attempt_dir).contract
                 attempt_fingerprint = _press_comparison_fingerprint(
@@ -1295,7 +1179,6 @@ def _train_and_validate_attempt(
                 metadata["comparison_fingerprint"] = comparison_fingerprint
                 _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
                 attempt_metadata = metadata
-                fingerprint = comparison_fingerprint
                 previous_stage = _previous_stage_checkpoint(
                     config=config,
                     repo_root=repo_root,
@@ -1342,7 +1225,6 @@ def _train_and_validate_attempt(
                     checkpoint_path=initial_checkpoint,
                     iteration=0,
                 )
-                cache_dir = policy_root / ".validation-cache-v22"
                 telemetry = TelemetrySampler(
                     sample_interval_s=training_config.telemetry_sample_interval_s
                 )
@@ -1394,8 +1276,6 @@ def _train_and_validate_attempt(
                     attempt_dir: Path = attempt_dir,
                     runner=runner,
                     metadata: dict[str, Any] = attempt_metadata,
-                    cache_dir: Path = cache_dir,
-                    comparison_fingerprint: str = fingerprint,
                     candidates: list[_AttemptSelection] = candidates,
                     evaluation_records: list[dict[str, Any]] = evaluation_records,
                     attempt_index: int = attempt_index,
@@ -1404,72 +1284,48 @@ def _train_and_validate_attempt(
                 ) -> PolicyEvaluation:
                     nonlocal evaluation_index, validation_worker
                     artifact_dir = attempt_dir / "evaluated" / f"candidate_{evaluation_index:03d}"
-                    artifact_dir, policy_digest, content_digest = _export_candidate(
+                    artifact_dir, policy_digest = _export_candidate(
                         runner=runner,
                         artifact_dir=artifact_dir,
                         metadata=metadata,
                     )
-                    validation_seeds = tuple(config.rl.press.evaluation.validation_seeds)
-                    candidate_cache = _cache_path(
-                        cache_dir=cache_dir,
-                        policy_content_digest=content_digest,
-                        comparison_fingerprint=comparison_fingerprint,
-                        controller_digest=controller_digest,
-                        workload_role="validation",
-                        seeds=validation_seeds,
-                        episodes_per_seed=config.rl.press.evaluation.episodes_per_seed,
-                    )
-                    evaluation = _read_cached_evaluation(
-                        cache_path=candidate_cache,
+                    if validation_worker is None:
+                        validation_worker = _EvaluationWorker(
+                            config_path=config_path,
+                            run_dir=attempt_dir,
+                            timeout_s=training_config.evaluation_worker_timeout_s,
+                            workload_role="validation",
+                        )
+                    evaluation, telemetry_interval = validation_worker.evaluate(
                         iteration=iteration,
                         checkpoint_path=checkpoint_path,
+                        artifact_dir=artifact_dir,
                         policy_digest=policy_digest,
-                        policy_content_digest=content_digest,
                     )
-                    if evaluation is None:
-                        if validation_worker is None:
-                            validation_worker = _EvaluationWorker(
-                                config_path=config_path,
-                                run_dir=attempt_dir,
-                                timeout_s=training_config.evaluation_worker_timeout_s,
-                                workload_role="validation",
-                            )
-                        evaluation, telemetry_interval = validation_worker.evaluate(
-                            iteration=iteration,
-                            checkpoint_path=checkpoint_path,
-                            artifact_dir=artifact_dir,
-                            policy_digest=policy_digest,
-                        )
-                        tensorboard_step = training.monitoring_step(runner=runner)
-                        telemetry_interval["tensorboard_step"] = tensorboard_step
-                        _record_telemetry(
-                            path=attempt_dir / _TELEMETRY_FILENAME,
-                            interval=telemetry_interval,
-                            target_rate=training_config.gpu_utilization_target_rate,
-                        )
-                        telemetry_summary = _require_telemetry_interval(interval=telemetry_interval)
-                        write_system_scalars(
-                            writer=writer,
-                            role="val",
-                            summary=telemetry_summary,
-                            step=tensorboard_step,
-                        )
-                        attempt_record["telemetry"]["summaries"].append(
-                            {
-                                "role": "val",
-                                "tensorboard_step": tensorboard_step,
-                                **_telemetry_report_summary(
-                                    summary=telemetry_summary,
-                                    target_rate=training_config.gpu_utilization_target_rate,
-                                ),
-                            }
-                        )
-                        _write_cached_evaluation(
-                            cache_path=candidate_cache,
-                            evaluation=evaluation,
-                            policy_content_digest=content_digest,
-                            source_run_id=run_dir.name,
-                        )
+                    tensorboard_step = training.monitoring_step(runner=runner)
+                    telemetry_interval["tensorboard_step"] = tensorboard_step
+                    _record_telemetry(
+                        path=attempt_dir / _TELEMETRY_FILENAME,
+                        interval=telemetry_interval,
+                        target_rate=training_config.gpu_utilization_target_rate,
+                    )
+                    telemetry_summary = _require_telemetry_interval(interval=telemetry_interval)
+                    write_system_scalars(
+                        writer=writer,
+                        role="val",
+                        summary=telemetry_summary,
+                        step=tensorboard_step,
+                    )
+                    attempt_record["telemetry"]["summaries"].append(
+                        {
+                            "role": "val",
+                            "tensorboard_step": tensorboard_step,
+                            **_telemetry_report_summary(
+                                summary=telemetry_summary,
+                                target_rate=training_config.gpu_utilization_target_rate,
+                            ),
+                        }
+                    )
                     validation = evaluate_press_acceptance(
                         criteria=acceptance_criteria,
                         evaluation=evaluation,
@@ -1484,7 +1340,7 @@ def _train_and_validate_attempt(
                     reporting_plateau_state = plateau_state
                     if math.isnan(reporting_plateau_state.reference_value):
                         reporting_plateau_state = PlateauState(
-                            reference_value=evaluation.metric(training_config.plateau.metric_name),
+                            reference_value=evaluation.metric(plateau_criteria.metric_name),
                             stale_evaluations=0,
                         )
                     evaluation_records.append(
@@ -1516,13 +1372,12 @@ def _train_and_validate_attempt(
                     *,
                     candidates: list[_AttemptSelection] = candidates,
                     attempt_record: dict[str, Any] = attempt_record,
-                    comparison_fingerprint: str = fingerprint,
                     attempt_index: int = attempt_index,
                     runner=runner,
                     attempt_report_path: Path = attempt_report_path,
                 ) -> None:
                     current_selection = _select_attempt_candidate(
-                        criteria=training_config.plateau,
+                        criteria=plateau_criteria,
                         candidates=tuple(candidates),
                     )
                     attempt_record.update(
@@ -1561,7 +1416,7 @@ def _train_and_validate_attempt(
                 )
                 evaluation_records[-1]["plateau"] = {
                     "made_progress": True,
-                    "reference_value": initial.metric(training_config.plateau.metric_name),
+                    "reference_value": initial.metric(plateau_criteria.metric_name),
                     "stale_evaluations": 0,
                     "reached": False,
                 }
@@ -1569,7 +1424,7 @@ def _train_and_validate_attempt(
                     evaluation=initial,
                     made_progress=True,
                     plateau_state=PlateauState(
-                        reference_value=initial.metric(training_config.plateau.metric_name),
+                        reference_value=initial.metric(plateau_criteria.metric_name),
                         stale_evaluations=0,
                     ),
                     plateau_reached=False,
@@ -1579,7 +1434,7 @@ def _train_and_validate_attempt(
                 randomize_episode_lengths = True
                 for phase_index, phase in enumerate(phases):
                     parent = _select_attempt_candidate(
-                        criteria=training_config.plateau,
+                        criteria=plateau_criteria,
                         candidates=tuple(candidates),
                     )
                     if phase_index > 0:
@@ -1612,9 +1467,7 @@ def _train_and_validate_attempt(
                             env.reset()
                         _report("initial phase environment reset COMPLETE")
                     plateau_state = PlateauState(
-                        reference_value=parent.evaluation.metric(
-                            training_config.plateau.metric_name
-                        ),
+                        reference_value=parent.evaluation.metric(plateau_criteria.metric_name),
                         stale_evaluations=0,
                     )
                     phase_iteration = 0
@@ -1687,7 +1540,7 @@ def _train_and_validate_attempt(
                             plateau_state=provisional,
                         )
                         plateau = advance_plateau(
-                            criteria=training_config.plateau,
+                            criteria=plateau_criteria,
                             state=plateau_state,
                             evaluation=evaluation,
                         )
@@ -1723,7 +1576,7 @@ def _train_and_validate_attempt(
                         }
                     )
                 attempt_selection = _select_attempt_candidate(
-                    criteria=training_config.plateau,
+                    criteria=plateau_criteria,
                     candidates=tuple(candidates),
                 )
                 attempt_record.update(
@@ -1798,7 +1651,7 @@ def _train_and_validate_attempt(
         if partial_attempt_report_path is not None and partial_attempt_record is not None:
             partial_selection = (
                 _select_attempt_candidate(
-                    criteria=training_config.plateau,
+                    criteria=plateau_criteria,
                     candidates=tuple(partial_candidates),
                 )
                 if partial_candidates
@@ -1847,7 +1700,7 @@ def _attempt_worker_command(
         "--attempt-worker",
         "--attempt-index",
         str(attempt_index),
-        "--seed",
+        "--attempt-seed",
         str(seed),
         "--controller-artifact",
         str(controller_artifact_path),
@@ -1860,10 +1713,6 @@ def _attempt_worker_command(
     ]
     if args.procedural_smoke:
         command.append("--procedural-smoke")
-    if args.max_iterations is not None:
-        command.extend(("--max-iterations", str(args.max_iterations)))
-    if args.num_envs is not None:
-        command.extend(("--num-envs", str(args.num_envs)))
     if args.scene is not None:
         command.extend(("--scene", str(args.scene)))
     if args.strict:
@@ -1885,14 +1734,11 @@ def _run_policy_workflow(
 ) -> None:
     """Train and validate attempts, select one actor, test it, then publish it."""
 
-    training_config = config.rl.training
+    plateau_criteria = _campaign_plateau(config=config)
     phases = (
         _procedural_smoke_phases(phases=_campaign_phases(config=config))
         if args.procedural_smoke
-        else _capped_phases(
-            phases=_campaign_phases(config=config),
-            maximum_iterations=args.max_iterations,
-        )
+        else _campaign_phases(config=config)
     )
     telemetry_probe = probe_telemetry()
     run_dir = _make_run_dir(out_root=policy_root, run_id=os.environ.get(_RUN_ID_ENV))
@@ -1936,7 +1782,7 @@ def _run_policy_workflow(
         }
         current_selection = (
             _select_attempt_candidate(
-                criteria=training_config.plateau,
+                criteria=plateau_criteria,
                 candidates=tuple(candidate for _, candidate in selections),
             )
             if selections
@@ -2061,7 +1907,7 @@ def _run_policy_workflow(
         attempts.append(attempt)
         selections.append((attempt_index, selection))
         current_selection = _select_attempt_candidate(
-            criteria=training_config.plateau,
+            criteria=plateau_criteria,
             candidates=tuple(candidate for _, candidate in selections),
         )
         current_index = next(
@@ -2099,7 +1945,7 @@ def _run_policy_workflow(
 
     if args.procedural_smoke:
         smoke_selection = _select_attempt_candidate(
-            criteria=training_config.plateau,
+            criteria=plateau_criteria,
             candidates=tuple(selection for _, selection in selections),
         )
         smoke_attempt_index = next(
@@ -2197,8 +2043,8 @@ def _run_policy_workflow(
         )
         _report(
             f"train-rl COMPLETE run={run_dir} attempts={len(attempts)} "
-            f"selected={selected.iteration} cost="
-            f"{selected.metric(config.rl.training.plateau.metric_name):.6f} "
+            f"selected={selected.iteration} metric={plateau_criteria.metric_name} "
+            f"value={selected.metric(plateau_criteria.metric_name):.6f} "
             f"acceptance=true latest={policy_root / 'latest'} "
             f"best_updated={str(best_updated).lower()}"
         )
@@ -2209,21 +2055,22 @@ def _run_policy_workflow(
 def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Path) -> None:
     training_config = config.rl.training
     attempt_seeds: tuple[int, ...]
-    if args.seed is not None:
-        attempt_seeds = (args.seed,)
-    else:
-        attempt_seeds = tuple(int(seed) for seed in training_config.attempt_seeds)
     repo_root = _repo_root()
     policy_root = (
         repo_root / ".build" / "training" / _validate_policy_name(training_config.policy_name)
     )
     try:
-        inputs = rl.prepare_policy_inputs(
-            config=config,
-            repo_root=repo_root,
-            controller_artifact=args.controller_artifact,
-            flight_parameters_artifact=args.flight_parameters_artifact,
-        )
+        if args.attempt_worker:
+            inputs = _load_pinned_policy_inputs(
+                controller_path=args.controller_artifact,
+                controller_digest=args.controller_artifact_digest,
+                flight_parameters_path=args.flight_parameters_artifact,
+                flight_parameters_digest=args.flight_parameters_artifact_digest,
+            )
+            attempt_seeds = (int(args.attempt_seed),)
+        else:
+            inputs = rl.prepare_policy_inputs(config=config, repo_root=repo_root)
+            attempt_seeds = tuple(int(seed) for seed in training_config.attempt_seeds)
         acceptance_criteria = create_press_acceptance_criteria(
             config=config.rl.press.acceptance,
             flight_parameters=inputs.flight_parameters,
@@ -2235,16 +2082,6 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
         )
         if comparison_fingerprint is None:
             raise ValueError("press training did not produce a comparison fingerprint")
-        if (
-            args.controller_artifact_digest is not None
-            and args.controller_artifact_digest != inputs.controller_digest
-        ):
-            raise ValueError("controller artifact changed after campaign preparation")
-        if (
-            args.flight_parameters_artifact_digest is not None
-            and args.flight_parameters_artifact_digest != inputs.flight_parameters_digest
-        ):
-            raise ValueError("flight parameters changed after campaign preparation")
     except (OSError, ValueError) as exc:
         _report(f"input artifact validation FAILED: {exc}")
         raise SystemExit(2) from None
@@ -2262,7 +2099,6 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             config=config,
             config_path=config_path,
             attempt_seeds=attempt_seeds,
-            policy_root=policy_root,
             repo_root=repo_root,
             device="cuda:0" if torch.cuda.is_available() else "cpu",
             inputs=inputs,
@@ -2295,43 +2131,20 @@ def main() -> None:
     parser.add_argument("--scene", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--strict", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
-        "--max-iterations",
-        type=int,
-        default=None,
-        help="cap the configured phase sequence for procedural verification",
-    )
-    parser.add_argument(
         "--procedural-smoke",
         action="store_true",
         help="run one update per phase and stop before the reserved final test",
     )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="run one procedural attempt instead of rl.training.attempt_seeds",
-    )
-    parser.add_argument("--num-envs", type=int, default=None, help="override rl.num_envs")
-    parser.add_argument(
-        "--controller-artifact",
-        type=Path,
-        default=None,
-        help="override rl.inputs.controller_artifact for training",
-    )
+    parser.add_argument("--attempt-seed", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--controller-artifact", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--controller-artifact-digest", help=argparse.SUPPRESS)
     parser.add_argument("--flight-parameters-artifact", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--flight-parameters-artifact-digest", help=argparse.SUPPRESS)
     parser.add_argument("--attempt-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--attempt-index", type=int, default=None, help=argparse.SUPPRESS)
     args, _unknown = parser.parse_known_args()
-    if args.max_iterations is not None and args.max_iterations < 1:
-        raise SystemExit("--max-iterations must be >= 1")
-    if args.procedural_smoke and args.max_iterations is not None:
-        raise SystemExit("--procedural-smoke cannot be combined with --max-iterations")
-    if args.num_envs is not None and args.num_envs < 1:
-        raise SystemExit("--num-envs must be >= 1")
     if args.attempt_worker and (
-        args.seed is None
+        args.attempt_seed is None
         or args.attempt_index is None
         or args.controller_artifact is None
         or args.controller_artifact_digest is None
@@ -2339,7 +2152,7 @@ def main() -> None:
         or args.flight_parameters_artifact_digest is None
     ):
         raise SystemExit(
-            "--attempt-worker requires --seed, --attempt-index, exact controller and "
+            "--attempt-worker requires --attempt-seed, --attempt-index, exact controller and "
             "flight-parameters artifacts, and their digests"
         )
     if args.attempt_index is not None and args.attempt_index < 0:

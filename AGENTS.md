@@ -242,8 +242,9 @@ the current contents and the intended home for that kind of code.
   mixture, and reset the environments before collecting rollouts. Other external
   checkpoint initialization, process resume, and post-run fine-tuning are
   unsupported. Every checkpoint uses one fixed
-  validation workload. The evaluator returns raw named metrics, the Hydra-owned
-  plateau rule reads exactly one named scalar, and validation gates establish
+  validation workload. The evaluator returns raw named metrics, each press
+  curriculum stage owns its Hydra plateau rule, the rule reads exactly one named
+  scalar, and validation gates establish
   selection eligibility only. A completed validation-passing attempt freezes
   its exact exported actor and runs one fresh, uncached, disjoint test workload.
   Acceptance reads only that test `PolicyEvaluation`; failure ends the campaign

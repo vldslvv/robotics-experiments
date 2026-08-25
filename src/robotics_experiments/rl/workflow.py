@@ -140,3 +140,28 @@ def prepare_policy_inputs(
         flight_parameters_path=bundle.run_dir,
         flight_parameters_digest=bundle.flight_parameters_digest,
     )
+
+
+def _load_pinned_policy_inputs(
+    *,
+    controller_path: Path,
+    controller_digest: str,
+    flight_parameters_path: Path,
+    flight_parameters_digest: str,
+) -> PolicyInputs:
+    """Load campaign inputs after verifying their process-boundary identity."""
+
+    resolved_controller = controller_path.resolve(strict=True)
+    if _file_sha256(resolved_controller) != controller_digest:
+        raise ValueError("controller artifact changed after campaign preparation")
+    bundle = load_flight_parameters_bundle(path=flight_parameters_path)
+    if bundle.flight_parameters_digest != flight_parameters_digest:
+        raise ValueError("flight parameters changed after campaign preparation")
+    return PolicyInputs(
+        controller=load_controller_artifact(resolved_controller),
+        controller_path=resolved_controller,
+        controller_digest=controller_digest,
+        flight_parameters=bundle.flight_parameters,
+        flight_parameters_path=bundle.run_dir,
+        flight_parameters_digest=flight_parameters_digest,
+    )

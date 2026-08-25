@@ -9,8 +9,12 @@ from types import SimpleNamespace
 import pytest
 
 from robotics_experiments.config import load_config
-from robotics_experiments.flight_parameters import load_flight_parameters
+from robotics_experiments.flight_parameters import (
+    load_flight_parameters,
+    load_flight_parameters_bundle,
+)
 from robotics_experiments.rl import prepare_policy_inputs
+from robotics_experiments.rl.workflow import _load_pinned_policy_inputs
 from tests.support.paths import REPO_ROOT
 
 
@@ -90,4 +94,36 @@ def test_prepare_policy_inputs_rejects_flight_parameters_not_used_by_controller(
             repo_root=REPO_ROOT,
             controller_artifact=controller_path,
             flight_parameters_artifact=flight_parameters_path,
+        )
+
+
+def test_load_pinned_policy_inputs_checks_identity_without_revalidating_compatibility(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import robotics_experiments.rl.workflow as workflow
+
+    controller_path = tmp_path / "controller.json"
+    controller_path.write_bytes(b"pinned controller")
+    controller = object()
+    monkeypatch.setattr(workflow, "load_controller_artifact", lambda _path: controller)
+    flight_parameters_path = REPO_ROOT / "tests/fixtures/flight_parameters"
+    bundle = load_flight_parameters_bundle(path=flight_parameters_path)
+
+    inputs = _load_pinned_policy_inputs(
+        controller_path=controller_path,
+        controller_digest=hashlib.sha256(b"pinned controller").hexdigest(),
+        flight_parameters_path=flight_parameters_path,
+        flight_parameters_digest=bundle.flight_parameters_digest,
+    )
+
+    assert inputs.controller is controller
+    assert inputs.flight_parameters == bundle.flight_parameters
+
+    with pytest.raises(ValueError, match="controller artifact changed"):
+        _load_pinned_policy_inputs(
+            controller_path=controller_path,
+            controller_digest="wrong",
+            flight_parameters_path=flight_parameters_path,
+            flight_parameters_digest=bundle.flight_parameters_digest,
         )

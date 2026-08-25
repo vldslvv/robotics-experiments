@@ -21,8 +21,6 @@ rl:
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
     policy_name: press-approach
-    plateau:
-      metric_name: mean_normalized_pose_error
     evaluation_worker_timeout_s: 600.0
     telemetry_sample_interval_s: 1.0
     gpu_utilization_target_rate: 0.95

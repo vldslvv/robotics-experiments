@@ -336,8 +336,6 @@ def _drive_to_done(
             active_deadlines = _active_driver_backstop_deadlines(fleet=fleet)
             if active_deadlines:
                 backstop_deadline_s = max(active_deadlines)
-            if backstop_deadline_s and time.monotonic() > backstop_deadline_s:
-                raise AssertionError("Timed out driving the routine to completion")
             _advance_once(context, fleet)
             if callback_error is not None:
                 raise callback_error
@@ -346,6 +344,12 @@ def _drive_to_done(
             if routine_stop_predicate is not None and routine_stop_predicate(fleet):
                 context.report("integration stop predicate satisfied")
                 break
+            if (
+                not fleet_is_done(state=fleet)
+                and backstop_deadline_s
+                and time.monotonic() > backstop_deadline_s
+            ):
+                raise AssertionError("Timed out driving the routine to completion")
     finally:
         del physics_subscription
     if context.strict:

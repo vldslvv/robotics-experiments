@@ -39,9 +39,9 @@ if acceptance.passed:
 
 Preparation validates each producer artifact once, confirms the controller was
 qualified with that exact flight-parameter run and fingerprint, and pins both
-resolved paths and digests. It also creates the press acceptance criteria once
-from `rl.press.acceptance` and the measured hover limits. The campaign report
-records those criteria before training starts.
+resolved paths and digests. The coordinator then creates the press acceptance
+criteria once from `rl.press.acceptance` and the measured hover limits. The
+campaign report records those criteria before training starts.
 
 Workers receive the pinned paths and digests and confirm the files have not
 changed before constructing Isaac Lab. Training reads the producer files in
@@ -91,8 +91,8 @@ translation component at the task scale.
 entry by name; there are no parent or child links. The first entry starts from
 scratch. A later entry restores the complete accepted checkpoint published as
 `best` by the entry immediately before it. Each entry owns its reset
-mixture, hold schedule, episode duration, and PPO phases. The current order is
-`hover`, then `approach`.
+mixture, hold schedule, episode duration, PPO phases, and plateau rule. The
+current order is `hover`, then `approach`.
 
 The hover stage starts around the common 0.48 m press target using only poses
 sampled from the pinned flight-parameter artifact. Its training phases require
@@ -169,11 +169,12 @@ regresses.
 The evaluator and phase driver have separate contracts. Validation receives an
 exact exported actor and returns raw named metrics plus `held_out_task_cost`.
 The plateau detector reads only the configured metric, direction, minimum delta,
-and patience. It never reads the PPO reward or any acceptance check. The uniform rule
-minimizes held-out mean normalized pose error, requires a `0.003` reduction
-from the phase reference, and declares a plateau after 10 consecutive stale
-evaluations. Raw aggregate task cost remains diagnostic and cannot select a
-timeout-heavy checkpoint over demonstrated pose progress.
+and patience. It never reads the PPO reward or any acceptance check. The active
+curriculum stage owns the rule. Hover maximizes mean completed hold fraction;
+approach minimizes held-out mean normalized pose error. Both require a `0.003`
+material change from the phase reference and declare a plateau after 10
+consecutive stale evaluations. Raw aggregate task cost remains diagnostic and
+cannot select a timeout-heavy checkpoint over demonstrated task progress.
 
 Hover training uses a 40-second episode horizon; approach uses 45 seconds. Both
 press stages run:
@@ -197,6 +198,11 @@ Run training with:
 ```bash
 make train-rl HYDRA_CONFIG=configs/train_press_hover_quad.yaml
 ```
+
+Environment count, attempt seeds, phase lengths, evaluation cadence, PPO
+settings, artifact selectors, and plateau rules are Hydra-owned. The launcher
+does not provide command-line overrides for them. `--procedural-smoke` remains
+an operational workflow check rather than a training parameter.
 
 The GPU procedural check keeps every phase/restore boundary, performs one update
 per phase on every configured attempt seed, and deliberately stops before
@@ -292,10 +298,9 @@ pinned measured envelope. Validation and test use matching `outcome/`, `goal/`, 
 ## Validation, final test, artifact, and acceptance
 
 Every checkpoint in every phase and attempt uses the same validation workload:
-100 episodes for each of seeds 101, 202, and 303. A persistent worker serves
-validation cache misses; cache identity includes the `validation` role, exact
-seeds, and episode count. The actor is exported before evaluation, so every
-record identifies exact `policy.pt` bytes.
+100 episodes for each of seeds 101, 202, and 303. A persistent worker evaluates
+each exported actor on that workload, so every record identifies exact
+`policy.pt` bytes. Validation is not cached.
 
 The raw held-out task cost is the untransformed weighted sum of collision,
 flight failure, timeout, non-success, missing maximum dwell progress, terminal
@@ -309,12 +314,8 @@ phases end, validation-passing checkpoints rank ahead of failures. Within each
 group the lower task cost wins, with the earlier checkpoint winning an exact
 tie. A validation pass only makes the candidate eligible for the final test.
 
-Validation evaluations are cached by workload identity, executable TorchScript
-content digest, comparison fingerprint, controller digest, and evaluator
-revision. The content digest
-excludes only PyTorch's generated archive serialization ID; the raw SHA-256 of
-the exact exported `policy.pt` remains in every evaluation and published
-artifact record. The campaign parent is the only writer of
+The raw SHA-256 of the exact exported `policy.pt` remains in every evaluation
+and published artifact record. The campaign parent is the only writer of
 `training_report.json`. Before each worker launch it records the active attempt
 identity and its report path. The worker atomically writes
 `attempt_report.json` below its attempt directory; the parent validates and
@@ -323,12 +324,11 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 19 records the prepared acceptance criteria and every attempt, phase parent, raw
-validation metrics, exact TensorBoard step, telemetry summaries, cache source,
+`training_report.json` schema 20 records the prepared acceptance criteria and every attempt, phase parent, raw
+validation metrics, exact TensorBoard step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
-acceptance. The evaluator, cache, metric registry, and comparison fingerprint
-carry evaluator revision 23, metric-registry revision 16, comparison revision 22,
-and validation-cache v22; older metric/report shapes and cached evaluations are
+acceptance. The metric registry and comparison fingerprint carry
+metric-registry revision 16 and comparison revision 22; older report shapes are
 unsupported. Flight failure and timeout each cost 3.0 in checkpoint ranking, so
 the selector cannot improve merely by converting failed attempts into waits.
 

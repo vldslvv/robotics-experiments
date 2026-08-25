@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -81,16 +80,6 @@ def test_train_rl_rejects_invalid_policy_names(policy_name: str) -> None:
         train_rl._validate_policy_name(policy_name)  # noqa: SLF001
 
 
-def test_phase_cap_preserves_order_and_reduces_terminal_evaluation_interval() -> None:
-    train_rl = _load_train_rl_module()
-    phases = train_rl._capped_phases(  # noqa: SLF001
-        phases=(_phase(maximum=20, interval=10), _phase(maximum=20, interval=10)),
-        maximum_iterations=25,
-    )
-    assert tuple(phase.max_iterations for phase in phases) == (20, 5)
-    assert tuple(phase.evaluation_interval for phase in phases) == (10, 5)
-
-
 def test_procedural_smoke_keeps_every_phase_boundary_at_one_update() -> None:
     train_rl = _load_train_rl_module()
     phases = train_rl._procedural_smoke_phases(  # noqa: SLF001
@@ -98,15 +87,6 @@ def test_procedural_smoke_keeps_every_phase_boundary_at_one_update() -> None:
     )
     assert tuple(phase.max_iterations for phase in phases) == (1, 1)
     assert tuple(phase.evaluation_interval for phase in phases) == (1, 1)
-
-
-def test_procedural_smoke_preserves_all_configured_attempt_seeds() -> None:
-    source = (REPO_ROOT / "isaac" / "runtime" / "standalone" / "train_rl.py").read_text()
-    seed_selection = source.split("if args.seed is not None:", maxsplit=1)[1].split(
-        "repo_root =", maxsplit=1
-    )[0]
-    assert "args.procedural_smoke" not in seed_selection
-    assert "training_config.attempt_seeds" in seed_selection
 
 
 def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
@@ -170,60 +150,6 @@ def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
     assert selected[1]["stage"] == "hover"
 
 
-def test_evaluation_cache_round_trip_rebinds_candidate_identity(tmp_path: Path) -> None:
-    train_rl = _load_train_rl_module()
-    original = PolicyEvaluation(
-        iteration=10,
-        checkpoint_path=Path("logs/model_10.pt"),
-        policy_digest="policy-digest",
-        metrics=(EvaluationMetric("held_out_task_cost", 0.4),),
-        reward_means=(),
-        source="fresh",
-    )
-    cache_path = tmp_path / "cache.json"
-    train_rl._write_cached_evaluation(  # noqa: SLF001
-        cache_path=cache_path,
-        evaluation=original,
-        policy_content_digest="content-digest",
-        source_run_id="source",
-    )
-    loaded = train_rl._read_cached_evaluation(  # noqa: SLF001
-        cache_path=cache_path,
-        iteration=20,
-        checkpoint_path=Path("logs/model_20.pt"),
-        policy_digest="new-raw-policy-digest",
-        policy_content_digest="content-digest",
-    )
-    assert loaded is not None
-    assert loaded.iteration == 20
-    assert loaded.checkpoint_path == Path("logs/model_20.pt")
-    assert loaded.policy_digest == "new-raw-policy-digest"
-    assert loaded.source == "cache"
-    assert loaded.metric("held_out_task_cost") == 0.4
-
-
-def test_validation_cache_identity_includes_role_and_exact_workload(tmp_path: Path) -> None:
-    train_rl = _load_train_rl_module()
-    common = {
-        "cache_dir": tmp_path,
-        "policy_content_digest": "content",
-        "comparison_fingerprint": "fingerprint",
-        "controller_digest": "controller",
-        "episodes_per_seed": 100,
-    }
-    validation = train_rl._cache_path(  # noqa: SLF001
-        **common,
-        workload_role="validation",
-        seeds=(101, 202, 303),
-    )
-    test = train_rl._cache_path(  # noqa: SLF001
-        **common,
-        workload_role="test",
-        seeds=(404, 505, 606),
-    )
-    assert validation != test
-
-
 def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) -> None:
     train_rl = _load_train_rl_module()
     from robotics_experiments.config import load_config
@@ -244,7 +170,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         status="training",
         acceptance_criteria=acceptance_criteria,
     )
-    assert report["schema_version"] == 19
+    assert report["schema_version"] == 20
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -265,14 +191,27 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
     assert len(report["acceptance_criteria"]["hover_limits"]) == 10
 
 
-def test_attempt_worker_command_forwards_one_seed_and_campaign_overrides() -> None:
+def test_attempt_report_preserves_unavailable_metrics_as_null(tmp_path: Path) -> None:
+    train_rl = _load_train_rl_module()
+    evaluation = train_rl._evaluation_from_payload(  # noqa: SLF001
+        payload={
+            "metrics": {"hover_position_rmse_m": None},
+            "reward_means": {},
+        },
+        iteration=1,
+        checkpoint_path=tmp_path / "model.pt",
+        policy_digest="digest",
+        source="fresh-validation",
+    )
+
+    assert evaluation.metrics[0].value is None
+
+
+def test_attempt_worker_command_forwards_pinned_inputs_and_one_hydra_seed() -> None:
     train_rl = _load_train_rl_module()
     command = train_rl._attempt_worker_command(  # noqa: SLF001
         args=SimpleNamespace(
             procedural_smoke=True,
-            max_iterations=None,
-            num_envs=64,
-            controller_artifact=Path("controller"),
             scene="@config",
             strict=True,
         ),
@@ -288,7 +227,7 @@ def test_attempt_worker_command_forwards_one_seed_and_campaign_overrides() -> No
         "--attempt-worker",
         "--attempt-index",
         "2",
-        "--seed",
+        "--attempt-seed",
         "44",
         "--controller-artifact",
         "resolved/controller.json",
@@ -299,8 +238,6 @@ def test_attempt_worker_command_forwards_one_seed_and_campaign_overrides() -> No
         "--flight-parameters-artifact-digest",
         "flight-parameters-digest",
         "--procedural-smoke",
-        "--num-envs",
-        "64",
         "--scene",
         "@config",
         "--strict",
@@ -331,14 +268,7 @@ def test_campaign_parent_prepares_and_pins_input_artifacts(
     )
 
     train_rl._run(  # noqa: SLF001
-        args=SimpleNamespace(
-            attempt_worker=False,
-            controller_artifact=None,
-            controller_artifact_digest=None,
-            flight_parameters_artifact=None,
-            flight_parameters_artifact_digest=None,
-            seed=None,
-        ),
+        args=SimpleNamespace(attempt_worker=False),
         config=config,
         config_path=config_path,
     )
@@ -371,14 +301,7 @@ def test_invalid_campaign_input_fails_before_run_creation(
 
     with pytest.raises(SystemExit) as raised:
         train_rl._run(  # noqa: SLF001
-            args=SimpleNamespace(
-                attempt_worker=False,
-                controller_artifact=None,
-                controller_artifact_digest=None,
-                flight_parameters_artifact=None,
-                flight_parameters_artifact_digest=None,
-                seed=None,
-            ),
+            args=SimpleNamespace(attempt_worker=False),
             config=config,
             config_path=config_path,
         )
@@ -410,7 +333,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
     def run_worker(command, **kwargs):
         commands.append(command)
         attempt_index = int(command[command.index("--attempt-index") + 1])
-        seed = int(command[command.index("--seed") + 1])
+        seed = int(command[command.index("--attempt-seed") + 1])
         passed = attempt_index == 1
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         candidate_dir = attempt_dir / "evaluated" / "candidate_000"
@@ -500,9 +423,6 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
     train_rl._run_policy_workflow(  # noqa: SLF001
         args=SimpleNamespace(
             procedural_smoke=False,
-            max_iterations=1,
-            num_envs=64,
-            controller_artifact=None,
             scene=None,
             strict=False,
         ),
@@ -515,7 +435,10 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
         policy_root=policy_root,
         repo_root=tmp_path,
     )
-    assert [command[command.index("--seed") + 1] for command in commands] == ["42", "43"]
+    assert [command[command.index("--attempt-seed") + 1] for command in commands] == [
+        "42",
+        "43",
+    ]
     assert finalized["selected_attempt_index"] == 1
     assert [attempt["training_seed"] for attempt in finalized["attempts"]] == [42, 43]
     assert len({attempt["worker_pid"] for attempt in finalized["attempts"]}) == 2
@@ -539,11 +462,11 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
 
     def interrupt(command, **_kwargs):
         attempt_index = int(command[command.index("--attempt-index") + 1])
-        seed = int(command[command.index("--seed") + 1])
+        seed = int(command[command.index("--attempt-seed") + 1])
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         attempt_dir.mkdir()
         (attempt_dir / "attempt_report.json").write_text(
-            '{"schema_version": 19, "report_kind": "attempt", "status": "training"}\n'
+            '{"schema_version": 20, "report_kind": "attempt", "status": "training"}\n'
         )
         raise KeyboardInterrupt
 
@@ -555,9 +478,6 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
         train_rl._run_policy_workflow(  # noqa: SLF001
             args=SimpleNamespace(
                 procedural_smoke=False,
-                max_iterations=1,
-                num_envs=64,
-                controller_artifact=None,
                 scene=None,
                 strict=False,
             ),
@@ -612,9 +532,6 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
         train_rl._run_policy_workflow(  # noqa: SLF001
             args=SimpleNamespace(
                 procedural_smoke=False,
-                max_iterations=1,
-                num_envs=64,
-                controller_artifact=None,
                 scene=None,
                 strict=False,
             ),
@@ -633,7 +550,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 19,
+        "schema_version": 20,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -728,22 +645,6 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
     )
     plateau_log = capsys.readouterr().err
     assert "progress=true reference=0.250000 stale=0 reached=false" in plateau_log
-
-
-def test_policy_content_digest_ignores_only_generated_serialization_id(
-    tmp_path: Path,
-) -> None:
-    train_rl = _load_train_rl_module()
-    paths = (tmp_path / "first.pt", tmp_path / "second.pt")
-    for path, serialization_id in zip(paths, (b"first", b"second"), strict=True):
-        with zipfile.ZipFile(path, "w") as archive:
-            archive.writestr("policy/data/0", b"model parameters")
-            archive.writestr("policy/code/model.py", b"def forward(): pass")
-            archive.writestr("policy/.data/serialization_id", serialization_id)
-    assert train_rl._file_sha256(paths[0]) != train_rl._file_sha256(paths[1])  # noqa: SLF001
-    assert train_rl._policy_content_sha256(  # noqa: SLF001
-        paths[0]
-    ) == train_rl._policy_content_sha256(paths[1])  # noqa: SLF001
 
 
 def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path) -> None:

@@ -291,7 +291,6 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     if training.task_id == "Isaac-Switch-Press-Direct-v1":
         stage = experiment.rl.press.selected_stage()
         phases = stage.phases
-        plateau = training.plateau
         range_limit_m = experiment.rl.press.goal.range_min_m
         if training.policy_name != f"press-{stage.name}":
             raise ValueError("press policy_name must match the active ordered stage")
@@ -301,7 +300,6 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
             )
     else:
         phases = training.phases
-        plateau = training.plateau
         range_limit_m = math.inf
     _validate_training_phases(
         phases=phases,
@@ -310,12 +308,14 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
         else "rl.training.phases",
         range_limit_m=range_limit_m,
     )
-    _validate_plateau(
-        plateau=plateau,
-        path="rl.press.curriculum active stage plateau"
-        if training.task_id == "Isaac-Switch-Press-Direct-v1"
-        else "rl.training.plateau",
-    )
+    if training.task_id == "Isaac-Switch-Press-Direct-v1":
+        for index, curriculum_stage in enumerate(experiment.rl.press.curriculum.stages):
+            _validate_plateau(
+                plateau=curriculum_stage.plateau,
+                path=f"rl.press.curriculum.stages[{index}].plateau",
+            )
+    else:
+        _validate_plateau(plateau=training.plateau, path="rl.training.plateau")
     if (
         not math.isfinite(training.evaluation_worker_timeout_s)
         or training.evaluation_worker_timeout_s <= 0.0

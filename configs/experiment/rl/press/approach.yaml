@@ -32,6 +32,11 @@ curriculum:
           schedule: fixed
           entropy_coef: 0.0
           range_undershoot_min_m: 0.40
+      plateau:
+        metric_name: mean_max_stable_goal_fraction
+        direction: maximize
+        minimum_delta: 0.003
+        patience_evaluations: 10
     - name: approach
       reset_mix:
         - source: measured_navigation_handoff
@@ -60,6 +65,11 @@ curriculum:
           schedule: fixed
           entropy_coef: 0.0
           range_undershoot_min_m: 0.40
+      plateau:
+        metric_name: mean_normalized_pose_error
+        direction: minimize
+        minimum_delta: 0.003
+        patience_evaluations: 10
 
 policy:
   activation: elu

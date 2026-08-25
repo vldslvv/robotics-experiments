@@ -345,6 +345,7 @@ class PressCurriculumStageConfig(_FreezableConfig):
     training_hold_s: List[float]
     episode_length_s: float
     phases: List[RlTrainingPhaseConfig]
+    plateau: RlPlateauCriteriaConfig
 
 
 @dataclass
