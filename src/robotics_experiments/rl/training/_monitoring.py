@@ -18,7 +18,7 @@ __all__ = [
     "write_system_scalars",
 ]
 
-METRIC_REGISTRY_REVISION = 16
+METRIC_REGISTRY_REVISION = 17
 
 _HOVER_SIGNAL_UNITS = {
     "position_error_enu_x": "m",
@@ -54,7 +54,7 @@ class MetricSpec:
 EVALUATION_METRICS = (
     MetricSpec(None, "acceptance/all_checks_passed", "boolean", "All checks passed.", "maximize"),
     MetricSpec(
-        "approach_success_rate",
+        "success_rate",
         "outcome/success_rate",
         "fraction",
         "Successful episodes.",
@@ -88,69 +88,87 @@ EVALUATION_METRICS = (
         "maximize",
     ),
     MetricSpec(
-        "range_pass_rate", "goal/range_pass_rate", "fraction", "Strict range samples.", "maximize"
-    ),
-    MetricSpec(
-        "alignment_pass_rate",
-        "goal/alignment_pass_rate",
+        "target_range_occupancy_rate",
+        "target/range_occupancy_rate",
         "fraction",
-        "Strict alignment samples.",
+        "Samples inside the task target range.",
         "maximize",
     ),
     MetricSpec(
-        "attitude_pass_rate",
-        "goal/attitude_pass_rate",
+        "target_alignment_occupancy_rate",
+        "target/alignment_occupancy_rate",
         "fraction",
-        "Strict attitude samples.",
+        "Samples inside the task target alignment disk.",
         "maximize",
     ),
     MetricSpec(
-        "linear_speed_pass_rate",
-        "goal/linear_speed_pass_rate",
+        "target_attitude_occupancy_rate",
+        "target/attitude_occupancy_rate",
         "fraction",
-        "Strict linear-speed samples.",
+        "Samples inside the task target attitude ball.",
         "maximize",
     ),
     MetricSpec(
-        "angular_speed_pass_rate",
-        "goal/angular_speed_pass_rate",
+        "linear_speed_threshold_occupancy_rate",
+        "target/linear_speed_threshold_occupancy_rate",
         "fraction",
-        "Strict angular-speed samples.",
+        "Samples below the task linear-speed threshold.",
         "maximize",
     ),
     MetricSpec(
-        "contact_clear_pass_rate",
-        "goal/contact_clear_pass_rate",
+        "angular_speed_threshold_occupancy_rate",
+        "target/angular_speed_threshold_occupancy_rate",
+        "fraction",
+        "Samples below the task angular-speed threshold.",
+        "maximize",
+    ),
+    MetricSpec(
+        "contact_clear_rate",
+        "target/contact_clear_rate",
         "fraction",
         "Contact-free samples.",
         "maximize",
     ),
     MetricSpec(
-        "complete_goal_pass_rate",
-        "goal/complete_pass_rate",
+        "hover_envelope_occupancy_rate",
+        "hover/envelope_occupancy_rate",
         "fraction",
-        "Complete strict-goal samples.",
+        "Samples inside the measured hover pose envelope.",
         "maximize",
     ),
     MetricSpec(
-        "mean_max_stable_goal_fraction",
-        "goal/mean_dwell_fraction",
-        "fraction",
-        "Mean maximum dwell fraction.",
+        "episode_longest_hover_duration_mean_s",
+        "hover/episode_longest_duration_mean_s",
+        "s",
+        "Mean of each episode's longest continuous hover.",
         "maximize",
     ),
     MetricSpec(
-        "maximum_stable_goal_fraction",
-        "goal/maximum_dwell_fraction",
-        "fraction",
-        "Maximum dwell fraction.",
+        "episode_longest_hover_duration_max_s",
+        "hover/episode_longest_duration_max_s",
+        "s",
+        "Longest continuous hover in any episode.",
         "maximize",
     ),
     MetricSpec(
-        "mean_normalized_pose_error",
-        "state/mean_normalized_pose_error",
+        "hover_envelope_utilization_mean",
+        "state/hover_envelope_utilization_mean",
         "normalized",
-        "Mean normalized pose error.",
+        "Mean maximum measured pose-envelope utilization; 1 is the boundary.",
+        "minimize",
+    ),
+    MetricSpec(
+        "position_envelope_utilization_mean",
+        "state/position_envelope_utilization_mean",
+        "normalized",
+        "Mean measured position-envelope utilization; 1 is the boundary.",
+        "minimize",
+    ),
+    MetricSpec(
+        "attitude_envelope_utilization_mean",
+        "state/attitude_envelope_utilization_mean",
+        "normalized",
+        "Mean measured attitude-envelope utilization; 1 is the boundary.",
         "minimize",
     ),
     MetricSpec(
@@ -166,7 +184,13 @@ EVALUATION_METRICS = (
     MetricSpec(
         "all_traces_finite", "trace/all_finite", "boolean", "All traces are finite.", "maximize"
     ),
-    MetricSpec("held_out_task_cost", "cost/total", "cost", "Total held-out task cost.", "minimize"),
+    MetricSpec(
+        "evaluation_diagnostic_cost",
+        "cost/diagnostic_total",
+        "cost",
+        "Diagnostic evaluation cost; PPO does not optimize it.",
+        "minimize",
+    ),
     MetricSpec(
         "body_collision_rate",
         "outcome/body_collision_rate",

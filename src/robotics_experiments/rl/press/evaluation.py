@@ -81,8 +81,8 @@ def evaluate_press_acceptance(
     requirements = (
         ("trace finiteness", evaluation.metric("all_traces_finite"), "==", 1.0),
         (
-            "approach success rate",
-            evaluation.metric("approach_success_rate"),
+            "success rate",
+            evaluation.metric("success_rate"),
             ">=",
             criteria.success_rate_min,
         ),

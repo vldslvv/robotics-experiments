@@ -214,7 +214,7 @@ class PressApproachRewardConfig(_FreezableConfig):
     position_progress_weight: float
     stabilization_weight: float
     predictive_barrier_weight: float
-    strict_hold_weight: float
+    hold_progress_weight: float
     terminal_success_weight: float
     terminal_failure_weight: float
 
@@ -324,6 +324,7 @@ class RlTrainingPhaseConfig(_FreezableConfig):
     learning_rate: float
     schedule: str
     entropy_coef: float
+    reset_envelope_scale: float
     range_undershoot_min_m: float | None
 
 

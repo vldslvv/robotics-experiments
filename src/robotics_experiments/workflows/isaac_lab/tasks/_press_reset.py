@@ -67,7 +67,10 @@ def _quaternion_from_rpy(*, rpy_rad: torch.Tensor) -> torch.Tensor:
 
 
 def _hover_pose_from_unit_samples(
-    *, unit_samples: torch.Tensor, flight_parameters: FlightParameters
+    *,
+    unit_samples: torch.Tensor,
+    flight_parameters: FlightParameters,
+    envelope_scale: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Sample target-local poses from the measured hover parameters."""
     if unit_samples.ndim != 2 or unit_samples.shape[1] != 6:
@@ -84,7 +87,7 @@ def _hover_pose_from_unit_samples(
     )
     position_error /= radial_utilization.clamp_min(1.0)[:, None]
     interior_scale = 1.0 - math.sqrt(torch.finfo(unit_samples.dtype).eps)
-    position_error *= interior_scale
+    position_error *= interior_scale * envelope_scale
 
     attitude_lower = unit_samples.new_tensor(hover.attitude_error_rpy_rad.lower)
     attitude_upper = unit_samples.new_tensor(hover.attitude_error_rpy_rad.upper)
@@ -98,8 +101,16 @@ def _hover_pose_from_unit_samples(
         ).attitude_utilization
         rpy /= utilization.clamp_min(1.0)[:, None]
         attitude = _quaternion_from_rpy(rpy_rad=rpy)
-    rpy *= interior_scale
+    rpy *= interior_scale * envelope_scale
     attitude = _quaternion_from_rpy(rpy_rad=rpy)
+    for _ in range(2):
+        utilization = evaluate_hover_envelope(
+            flight_parameters=flight_parameters,
+            position_error_enu_m=torch.zeros_like(position_error),
+            attitude_error_flu_enu_wxyz=attitude,
+        ).attitude_utilization
+        rpy /= (utilization / envelope_scale).clamp_min(1.0)[:, None]
+        attitude = _quaternion_from_rpy(rpy_rad=rpy)
     return position_error, attitude
 
 

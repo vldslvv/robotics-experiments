@@ -38,6 +38,7 @@ training:
       learning_rate: 1.0e-3
       schedule: adaptive
       entropy_coef: 0.005
+      reset_envelope_scale: 1.0
       range_undershoot_min_m: null
   plateau:
     metric_name: held_out_task_cost

@@ -126,14 +126,16 @@ def test_approach_evaluation_aggregation() -> None:
     )
 
     common = {
-        "range_pass_rate": 0.8,
-        "alignment_pass_rate": 0.7,
-        "attitude_pass_rate": 0.9,
-        "linear_speed_pass_rate": 0.6,
-        "angular_speed_pass_rate": 0.85,
-        "contact_clear_pass_rate": 0.95,
-        "complete_goal_pass_rate": 0.5,
-        "mean_normalized_pose_error": 0.4,
+        "target_range_occupancy_rate": 0.8,
+        "target_alignment_occupancy_rate": 0.7,
+        "target_attitude_occupancy_rate": 0.9,
+        "linear_speed_threshold_occupancy_rate": 0.6,
+        "angular_speed_threshold_occupancy_rate": 0.85,
+        "contact_clear_rate": 0.95,
+        "hover_envelope_occupancy_rate": 0.5,
+        "hover_envelope_utilization_mean": 0.4,
+        "position_envelope_utilization_mean": 0.3,
+        "attitude_envelope_utilization_mean": 0.2,
         "terminal_range_cost": 0.2,
         "trajectory_alignment_cost": 0.3,
         "relative_attitude_error_cost": 0.4,
@@ -146,39 +148,41 @@ def test_approach_evaluation_aggregation() -> None:
     summary = summarize_press_approach_episodes(
         episodes=(
             PressApproachEpisodeMetrics(
-                approach_success=True,
+                success=True,
                 collision=False,
                 body_collision=False,
                 pusher_collision=False,
                 other_flight_failure=False,
                 range_undershoot=False,
                 timeout=False,
-                max_stable_goal_fraction=1.0,
+                longest_hover_duration_s=30.0,
                 closest_range_m=0.405,
                 completion_time_s=1.0,
                 **common,
             ),
             PressApproachEpisodeMetrics(
-                approach_success=False,
+                success=False,
                 collision=True,
                 body_collision=True,
                 pusher_collision=False,
                 other_flight_failure=False,
                 range_undershoot=True,
                 timeout=False,
-                max_stable_goal_fraction=0.2,
+                longest_hover_duration_s=6.0,
                 closest_range_m=0.39,
                 completion_time_s=None,
                 **common,
             ),
-        )
+        ),
+        required_hover_duration_s=30.0,
     )
     assert summary.episodes == 2
-    assert summary.approach_success_rate == 0.5
+    assert summary.success_rate == 0.5
     assert summary.collision_rate == 0.5
     assert summary.body_collision_rate == 0.5
     assert summary.range_undershoot_rate == 0.5
-    assert summary.maximum_stable_goal_fraction == 1.0
+    assert summary.episode_longest_hover_duration_mean_s == 18.0
+    assert summary.episode_longest_hover_duration_max_s == 30.0
     assert summary.mean_closest_range_m == pytest.approx(0.3975)
     assert summary.min_closest_range_m == pytest.approx(0.39)
     assert summary.median_completion_time_s == 1.0
@@ -254,6 +258,7 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
                     closest_range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
                     normalized_pose_error=torch.tensor([0.0, 2.0]),
                     stable_goal_steps=torch.tensor([100 if first else 0, 0]),
+                    longest_stable_goal_steps=torch.tensor([100 if first else 0, 0]),
                 ),
                 range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
                 range_error_m=torch.tensor([0.0, 0.04 if first else 0.02]),
@@ -270,6 +275,8 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
                     attitude_error_rpy_rad=torch.zeros((2, 3)),
                     tilt_error_rad=torch.zeros(2),
                     orientation_error_rad=torch.zeros(2),
+                    position_utilization=torch.tensor([0.0, 2.0]),
+                    attitude_utilization=torch.zeros(2),
                 ),
                 termination=SimpleNamespace(
                     success=success,
@@ -309,7 +316,7 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         trace_worst_episode=True,
     )
     assert env.seeds == [202]
-    assert result.summary.approach_success_rate == 0.5
+    assert result.summary.success_rate == 0.5
     assert result.summary.timeout_rate == 0.5
     assert result.summary.median_completion_time_s == pytest.approx(0.05)
     assert len(result.hover_statistics) == 10
@@ -401,23 +408,26 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
     result = workflow.PressApproachEvaluationResult(
         summary=workflow.PressApproachEvaluationSummary(
             episodes=3,
-            approach_success_rate=1.0,
+            success_rate=1.0,
             collision_rate=0.0,
             body_collision_rate=0.0,
             pusher_collision_rate=0.0,
             other_flight_failure_rate=0.0,
             range_undershoot_rate=0.0,
             timeout_rate=0.0,
-            range_pass_rate=1.0,
-            alignment_pass_rate=1.0,
-            attitude_pass_rate=1.0,
-            linear_speed_pass_rate=1.0,
-            angular_speed_pass_rate=1.0,
-            contact_clear_pass_rate=1.0,
-            complete_goal_pass_rate=1.0,
-            mean_normalized_pose_error=0.0,
-            mean_max_stable_goal_fraction=1.0,
-            maximum_stable_goal_fraction=1.0,
+            target_range_occupancy_rate=1.0,
+            target_alignment_occupancy_rate=1.0,
+            target_attitude_occupancy_rate=1.0,
+            linear_speed_threshold_occupancy_rate=1.0,
+            angular_speed_threshold_occupancy_rate=1.0,
+            contact_clear_rate=1.0,
+            hover_envelope_occupancy_rate=1.0,
+            hover_envelope_utilization_mean=0.0,
+            position_envelope_utilization_mean=0.0,
+            attitude_envelope_utilization_mean=0.0,
+            episode_longest_hover_duration_mean_s=30.0,
+            episode_longest_hover_duration_max_s=30.0,
+            required_hover_duration_s=30.0,
             mean_closest_range_m=0.41,
             min_closest_range_m=0.405,
             median_completion_time_s=1.0,

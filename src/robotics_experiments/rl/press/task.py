@@ -49,6 +49,7 @@ class PressApproachState(Generic[ArrayT]):
     normalized_position_error: ArrayT
     normalized_pose_error: ArrayT
     stable_goal_steps: ArrayT
+    longest_stable_goal_steps: ArrayT
     closest_range_m: ArrayT
 
 
@@ -81,7 +82,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
     position_progress: ArrayT
     stabilization: ArrayT
     predictive_barrier: ArrayT
-    strict_hold: ArrayT
+    hold_progress: ArrayT
     terminal_outcome: ArrayT
 
     @property
@@ -91,7 +92,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
             self.position_progress
             + self.stabilization
             + self.predictive_barrier
-            + self.strict_hold
+            + self.hold_progress
             + self.terminal_outcome
         )
 
@@ -222,6 +223,7 @@ def initial_press_approach_state(
         normalized_position_error=normalized_position_error,
         normalized_pose_error=normalized_pose_error,
         stable_goal_steps=_zeros_like(value=normalized_pose_error, integer=True),
+        longest_stable_goal_steps=_zeros_like(value=normalized_pose_error, integer=True),
         closest_range_m=relative_switch_pos_m[..., 0],
     )
 
@@ -387,6 +389,11 @@ def step_press_approach(
         state.stable_goal_steps + 1,
         _zeros_like(value=state.stable_goal_steps),
     )
+    longest_stable_goal_steps = _maximum(
+        state.longest_stable_goal_steps,
+        stable_goal_steps,
+    )
+    hold_progress_steps = longest_stable_goal_steps - state.longest_stable_goal_steps
 
     crash = sample.body_z_world_z < termination_cfg.crash_tilt_cos
     altitude = sample.altitude_m < termination_cfg.min_altitude_m
@@ -451,7 +458,7 @@ def step_press_approach(
         position_progress=position_progress,
         stabilization=stabilization,
         predictive_barrier=predictive_barrier,
-        strict_hold=reward_cfg.strict_hold_weight * stable_goal,
+        hold_progress=reward_cfg.hold_progress_weight * hold_progress_steps,
         terminal_outcome=(
             reward_cfg.terminal_success_weight * success
             - reward_cfg.terminal_failure_weight * unsuccessful_termination
@@ -461,6 +468,7 @@ def step_press_approach(
         normalized_position_error=normalized_position_error,
         normalized_pose_error=normalized_pose_error,
         stable_goal_steps=stable_goal_steps,
+        longest_stable_goal_steps=longest_stable_goal_steps,
         closest_range_m=_minimum(state.closest_range_m, current_range),
     )
     return PressApproachResult(

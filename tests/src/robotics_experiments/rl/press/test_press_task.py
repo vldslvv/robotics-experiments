@@ -48,12 +48,12 @@ _GOAL = PressApproachGoalConfig(
     ),
 )
 _REWARD = PressApproachRewardConfig(
-    position_progress_weight=10.0,
-    stabilization_weight=1.0,
-    predictive_barrier_weight=10.0,
-    strict_hold_weight=1.0,
-    terminal_success_weight=150.0,
-    terminal_failure_weight=300.0,
+    position_progress_weight=0.1,
+    stabilization_weight=0.01,
+    predictive_barrier_weight=0.1,
+    hold_progress_weight=0.01,
+    terminal_success_weight=1.5,
+    terminal_failure_weight=3.0,
 )
 _TERMINATION = PressApproachTerminationConfig(
     crash_tilt_cos=0.819152,
@@ -162,7 +162,7 @@ def test_position_ready_stage_rewards_stabilization_quality() -> None:
     tilted = _step(sample=_sample(range_m=0.41, attitude_error_rad=np.deg2rad(0.5)))
     captured = _step(sample=_sample(range_m=0.43))
     outside = _step(sample=_sample(range_m=0.52))
-    assert settled.rewards.stabilization[0] == pytest.approx(1.0)
+    assert settled.rewards.stabilization[0] == pytest.approx(0.01)
     assert moving.rewards.stabilization[0] == settled.rewards.stabilization[0]
     assert 0.0 < tilted.rewards.stabilization[0] < settled.rewards.stabilization[0]
     assert 0.0 < captured.rewards.stabilization[0] < settled.rewards.stabilization[0]
@@ -174,7 +174,7 @@ def test_predictive_barrier_penalizes_only_projected_range_undershoot() -> None:
     safe = _step(sample=_sample(range_m=0.45, closing_speed_mps=0.05))
     unsafe = _step(sample=_sample(range_m=0.41, closing_speed_mps=0.05))
     assert safe.rewards.predictive_barrier[0] == 0.0
-    assert unsafe.rewards.predictive_barrier[0] == pytest.approx(-2.5)
+    assert unsafe.rewards.predictive_barrier[0] == pytest.approx(-0.025)
 
 
 def test_hover_reward_tracks_strict_pose_progress_without_predictive_barrier() -> None:
@@ -209,12 +209,68 @@ def test_hover_reward_tracks_strict_pose_progress_without_predictive_barrier() -
     assert -_REWARD.stabilization_weight < degraded.rewards.stabilization[0] < 0.0
 
 
-def test_strict_hold_and_success_terminal_reward() -> None:
-    state = replace(_state(range_m=0.41), stable_goal_steps=np.array([99]))
+def test_hold_progress_and_success_terminal_reward() -> None:
+    state = replace(
+        _state(range_m=0.41),
+        stable_goal_steps=np.array([99]),
+        longest_stable_goal_steps=np.array([99]),
+    )
     result = _step(state=state, sample=_sample(range_m=0.41))
-    assert result.rewards.strict_hold[0] == 1.0
-    assert result.rewards.terminal_outcome[0] == 150.0
+    assert result.rewards.hold_progress[0] == 0.01
+    assert result.rewards.terminal_outcome[0] == 1.5
     assert bool(result.termination.success[0])
+
+
+def test_repeated_hold_below_episode_record_earns_no_progress() -> None:
+    state = replace(
+        _state(range_m=0.41),
+        stable_goal_steps=np.array([20]),
+        longest_stable_goal_steps=np.array([40]),
+    )
+    result = _step(state=state, sample=_sample(range_m=0.41))
+    assert result.state.stable_goal_steps[0] == 21
+    assert result.state.longest_stable_goal_steps[0] == 40
+    assert result.rewards.hold_progress[0] == 0.0
+
+
+def test_continuous_success_outscores_repeated_near_success() -> None:
+    reward = replace(
+        _REWARD,
+        position_progress_weight=0.0,
+        stabilization_weight=0.0,
+        predictive_barrier_weight=0.0,
+    )
+
+    def discounted_return(*, break_before_success: bool) -> float:
+        state = _state(range_m=0.41)
+        total = 0.0
+        discount = 1.0
+        for step in range(800):
+            inside = not break_before_success or step % 100 != 99
+            result = step_press_approach(
+                state=state,
+                sample=_sample(
+                    range_m=0.41 if inside else 0.60,
+                    time_out=step == 799,
+                ),
+                goal_cfg=_GOAL,
+                reward_cfg=reward,
+                termination_cfg=_TERMINATION,
+                minimum_range_m=0.40,
+                flight_parameters=_ENVELOPE,
+                hold_steps=100,
+                approach_enabled=False,
+            )
+            total += discount * float(result.rewards.total[0])
+            if bool(result.termination.terminated[0] | result.termination.time_out[0]):
+                break
+            discount *= 0.995
+            state = result.state
+        return total
+
+    assert discounted_return(break_before_success=False) > discounted_return(
+        break_before_success=True
+    )
 
 
 @pytest.mark.parametrize(
@@ -229,7 +285,7 @@ def test_every_unsuccessful_termination_gets_one_terminal_penalty(
     sample: PressApproachInput[np.ndarray],
 ) -> None:
     result = _step(sample=sample)
-    assert result.rewards.terminal_outcome[0] == -300.0
+    assert result.rewards.terminal_outcome[0] == -3.0
 
 
 def test_target_velocity_remains_an_evaluation_reference() -> None:
@@ -249,6 +305,7 @@ def test_reset_replaces_only_selected_environment() -> None:
         normalized_position_error=np.array([1.0, 2.0]),
         normalized_pose_error=np.array([1.0, 2.0]),
         stable_goal_steps=np.array([4, 5]),
+        longest_stable_goal_steps=np.array([6, 7]),
         closest_range_m=np.array([0.41, 0.42]),
     )
     reset = reset_press_approach_state(
@@ -264,6 +321,7 @@ def test_reset_replaces_only_selected_environment() -> None:
     assert reset.normalized_position_error[0] == 1.0
     assert reset.normalized_pose_error[0] == 1.0
     assert reset.stable_goal_steps.tolist() == [4, 0]
+    assert reset.longest_stable_goal_steps.tolist() == [6, 0]
     assert reset.closest_range_m.tolist() == [0.41, 0.48]
 
 

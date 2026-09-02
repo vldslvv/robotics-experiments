@@ -14,29 +14,32 @@ curriculum:
       training_hold_s: [5.0, 15.0, 30.0]
       episode_length_s: 40.0
       phases:
-        - max_iterations: 50
+        - max_iterations: 20
           evaluation_interval: 10
           learning_rate: 1.0e-4
           schedule: fixed
           entropy_coef: 0.0
+          reset_envelope_scale: 0.25
           range_undershoot_min_m: 0.38
         - max_iterations: 30
           evaluation_interval: 5
           learning_rate: 3.0e-5
           schedule: fixed
           entropy_coef: 0.0
+          reset_envelope_scale: 0.50
           range_undershoot_min_m: 0.39
         - max_iterations: 100
           evaluation_interval: 5
           learning_rate: 1.0e-5
           schedule: fixed
           entropy_coef: 0.0
+          reset_envelope_scale: 1.00
           range_undershoot_min_m: 0.40
       plateau:
-        metric_name: mean_max_stable_goal_fraction
+        metric_name: episode_longest_hover_duration_mean_s
         direction: maximize
-        minimum_delta: 0.003
-        patience_evaluations: 10
+        minimum_delta: 0.10
+        patience_evaluations: 3
     - name: approach
       reset_mix:
         - source: measured_navigation_handoff
@@ -52,21 +55,24 @@ curriculum:
           learning_rate: 1.0e-4
           schedule: fixed
           entropy_coef: 0.0
+          reset_envelope_scale: 1.0
           range_undershoot_min_m: 0.40
         - max_iterations: 30
           evaluation_interval: 5
           learning_rate: 3.0e-5
           schedule: fixed
           entropy_coef: 0.0
+          reset_envelope_scale: 1.0
           range_undershoot_min_m: 0.40
         - max_iterations: 100
           evaluation_interval: 5
           learning_rate: 1.0e-5
           schedule: fixed
           entropy_coef: 0.0
+          reset_envelope_scale: 1.0
           range_undershoot_min_m: 0.40
       plateau:
-        metric_name: mean_normalized_pose_error
+        metric_name: hover_envelope_utilization_mean
         direction: minimize
         minimum_delta: 0.003
         patience_evaluations: 10
@@ -127,12 +133,12 @@ goal:
     tangential_speed_max_mps: 0.10
 
 reward:
-  position_progress_weight: 10.0
-  stabilization_weight: 1.0
-  predictive_barrier_weight: 10.0
-  strict_hold_weight: 1.0
-  terminal_success_weight: 150.0
-  terminal_failure_weight: 300.0
+  position_progress_weight: 0.1
+  stabilization_weight: 0.01
+  predictive_barrier_weight: 0.1
+  hold_progress_weight: 0.01
+  terminal_success_weight: 1.5
+  terminal_failure_weight: 3.0
 
 reset:
   physical_contact_enabled: true

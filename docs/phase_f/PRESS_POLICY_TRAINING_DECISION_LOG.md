@@ -2282,3 +2282,56 @@ distribution, curriculum, PPO settings, workloads, and every acceptance gate
 unchanged. Approach retains its target-position progress definition. Advance
 evaluator revision 22, comparison revision 21, and validation-cache schema 21;
 the report schema and fixed metric registry do not change.
+
+### 73. Align hover reward, resets, and metrics with continuous hold progress
+
+Date: 2026-08-26.
+
+Campaign `press-hover-20260825T2027Z` was interrupted after 50 phase-one updates
+and two refinement updates. Its best validation checkpoint was update 20: zero
+success, 5.87% measured-envelope occupancy, 0.715 seconds mean episode-longest
+hover, 3.4 seconds maximum episode-longest hover, and 3.344 mean measured-pose
+envelope utilization. Updates 30 through 50 reduced the mean longest hover to
+0.14-0.26 seconds. The apparent 0.105 training completion spike after the
+refinement reset was transition occupancy during one rollout, not episode
+completion. The critic value loss ranged from about 400 to 5200 while the PPO
+surrogate remained near zero.
+
+The full-envelope reset sampler placed 56% of starts at or above 0.9 envelope
+utilization, so the first phase mostly learned edge recovery. Expand training
+reset errors through 0.25, 0.50, and 1.00 of the pinned envelope while keeping
+all validation and test resets at 1.00. End phase one at update 20, where the
+previous run peaked. Reward only increases in the episode's longest continuous
+hold; a shorter repeated hold cannot collect the same reward again. Uniformly
+scale all PPO reward weights by 0.01 to reduce critic targets without changing
+their relative weights or normalized policy advantages.
+
+Replace completion-like occupancy names and phase-dependent dwell fractions
+with measured-envelope occupancy, utilization, and continuous-hover seconds.
+Keep task-target occupancy separate from measured flight-parameter acceptance.
+Name PPO losses by their optimizer role and record actor and critic relative
+parameter changes after every update. Advance report schema 21, metric-registry
+revision 17, and comparison revision 23. Older metric and report shapes are
+unsupported.
+
+### 74. Stop after full-envelope hover refinement erases progress
+
+Date: 2026-08-26.
+
+Campaign `20260826T170226Z.47212` validated the scaled reward, progressive
+resets, continuous-hover metrics, and actor/critic movement in the Isaac/RSL
+runtime. Seed 42 improved from 0.108 seconds mean episode-longest hover at the
+neutral actor to 1.109 seconds at update 30, with 8.92% measured-envelope
+occupancy and zero collisions. The selected actor still had zero success, 100%
+other flight failures, 34% range undershoots, and 3.136 mean measured-pose
+envelope utilization. Its maximum episode-longest hover was 2.6 seconds.
+
+The final phase restored that exact update-30 checkpoint before changing the
+training reset scale from 0.50 to 1.00. Mean episode-longest hover then fell to
+0.814, 0.367, and 0.520 seconds at its three validation checkpoints. Each had
+zero success and 100% other flight failures, so the phase plateaued after 15
+updates. Stop the campaign before a second scratch attempt: the first attempt
+proved that learning occurs, but also showed that the final reset expansion
+reliably erases the selected behavior. Preserve the interrupted run and its
+selected checkpoint as diagnostic evidence. Do not start another campaign
+until the transition from half-envelope to full-envelope resets is revised.

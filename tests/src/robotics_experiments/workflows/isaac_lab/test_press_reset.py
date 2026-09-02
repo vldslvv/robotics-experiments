@@ -69,6 +69,7 @@ def test_hover_reset_samples_stay_inside_measured_envelope() -> None:
     position_error, attitude_error = _hover_pose_from_unit_samples(
         unit_samples=unit_samples,
         flight_parameters=_ENVELOPE,
+        envelope_scale=1.0,
     )
     evaluation = evaluate_hover_envelope(
         flight_parameters=_ENVELOPE,
@@ -76,6 +77,23 @@ def test_hover_reset_samples_stay_inside_measured_envelope() -> None:
         attitude_error_flu_enu_wxyz=attitude_error,
     )
     assert torch.all(evaluation.inside)
+
+
+@pytest.mark.parametrize("scale", [0.25, 0.5, 1.0])
+def test_hover_reset_scales_measured_pose_errors(scale: float) -> None:
+    unit_samples = torch.rand((10_000, 6), generator=torch.Generator().manual_seed(42))
+    position_error, attitude_error = _hover_pose_from_unit_samples(
+        unit_samples=unit_samples,
+        flight_parameters=_ENVELOPE,
+        envelope_scale=scale,
+    )
+    evaluation = evaluate_hover_envelope(
+        flight_parameters=_ENVELOPE,
+        position_error_enu_m=position_error,
+        attitude_error_flu_enu_wxyz=attitude_error,
+    )
+    assert float(evaluation.position_utilization.max()) <= scale + 1.0e-5
+    assert float(evaluation.attitude_utilization.max()) <= scale + 3.0e-4
 
 
 def test_rotation_sampling_is_volume_uniform() -> None:

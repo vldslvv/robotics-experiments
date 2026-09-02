@@ -80,7 +80,7 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 20
+_REPORT_SCHEMA_VERSION = 21
 
 
 def _report(message: str) -> None:
@@ -560,8 +560,8 @@ def _report_evaluation(
     _report(
         f"evaluation phase={phase_index + 1} phase_iteration={phase_iteration} "
         f"iteration={evaluation.iteration} source={evaluation.source} "
-        f"cost={metrics['held_out_task_cost']:.6f} "
-        f"success={metrics['approach_success_rate']:.3f} "
+        f"diagnostic_cost={metrics['evaluation_diagnostic_cost']:.6f} "
+        f"success={metrics['success_rate']:.3f} "
         f"collision={metrics['collision_rate']:.3f} "
         f"other_flight_failure={metrics['other_flight_failure_rate']:.3f} "
         f"timeout={metrics['timeout_rate']:.3f}"

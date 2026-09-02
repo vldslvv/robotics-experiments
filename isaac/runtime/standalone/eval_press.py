@@ -99,7 +99,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     _report(
         "press approach evaluation: "
         f"episodes={summary.episodes} "
-        f"success={summary.approach_success_rate:.3f} "
+        f"success={summary.success_rate:.3f} "
         f"collision={summary.collision_rate:.3f} "
         f"body_collision={summary.body_collision_rate:.3f} "
         f"pusher_collision={summary.pusher_collision_rate:.3f} "
@@ -141,7 +141,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         evaluation_config=evaluation,
         source="independent",
     )
-    _report(f"held_out_task_cost={evaluated.metric('held_out_task_cost'):.6f}")
+    _report(f"evaluation_diagnostic_cost={evaluated.metric('evaluation_diagnostic_cost'):.6f}")
     acceptance = evaluate_press_acceptance(
         criteria=create_press_acceptance_criteria(
             config=config.rl.press.acceptance,

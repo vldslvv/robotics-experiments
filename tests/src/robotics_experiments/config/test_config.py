@@ -261,14 +261,19 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
         1.0e-5,
     )
     assert tuple(phase.entropy_coef for phase in stage.phases) == (0.0, 0.0, 0.0)
+    assert tuple(phase.reset_envelope_scale for phase in stage.phases) == (1.0, 1.0, 1.0)
     assert tuple(phase.evaluation_interval for phase in stage.phases) == (10, 5, 5)
-    assert stage.plateau.metric_name == "mean_normalized_pose_error"
+    assert stage.plateau.metric_name == "hover_envelope_utilization_mean"
     assert stage.plateau.direction == "minimize"
     assert stage.plateau.minimum_delta == 0.003
     assert stage.plateau.patience_evaluations == 10
     hover_stage = config.rl.press.curriculum.stages[0]
-    assert hover_stage.plateau.metric_name == "mean_max_stable_goal_fraction"
+    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (20, 30, 100)
+    assert tuple(phase.reset_envelope_scale for phase in hover_stage.phases) == (0.25, 0.5, 1.0)
+    assert hover_stage.plateau.metric_name == "episode_longest_hover_duration_mean_s"
     assert hover_stage.plateau.direction == "maximize"
+    assert hover_stage.plateau.minimum_delta == 0.10
+    assert hover_stage.plateau.patience_evaluations == 3
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
     assert training.attempt_seeds == (42, 43, 44)
@@ -278,12 +283,12 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert policy.actor.hidden_dims == (256, 256, 128)
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
-    assert reward.position_progress_weight == 10.0
-    assert reward.stabilization_weight == 1.0
-    assert reward.predictive_barrier_weight == 10.0
-    assert reward.strict_hold_weight == 1.0
-    assert reward.terminal_success_weight == 150.0
-    assert reward.terminal_failure_weight == 300.0
+    assert reward.position_progress_weight == 0.1
+    assert reward.stabilization_weight == 0.01
+    assert reward.predictive_barrier_weight == 0.1
+    assert reward.hold_progress_weight == 0.01
+    assert reward.terminal_success_weight == 1.5
+    assert reward.terminal_failure_weight == 3.0
     assert config.rl.press.evaluation.timeout_penalty == 3.0
     assert config.rl.press.acceptance.minimum_range_m == 0.40
     assert config.rl.press.goal.stable_steps == 600
@@ -553,6 +558,7 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
                                 "learning_rate": 1.0e-4,
                                 "schedule": "unknown",
                                 "entropy_coef": 0.0,
+                                "reset_envelope_scale": 1.0,
                                 "range_undershoot_min_m": None,
                             }
                         ]
@@ -560,6 +566,26 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
                 }
             },
             "schedule",
+        ),
+        (
+            {
+                "rl": {
+                    "training": {
+                        "phases": [
+                            {
+                                "max_iterations": 1,
+                                "evaluation_interval": 1,
+                                "learning_rate": 1.0e-4,
+                                "schedule": "fixed",
+                                "entropy_coef": 0.0,
+                                "reset_envelope_scale": 1.5,
+                                "range_undershoot_min_m": None,
+                            }
+                        ]
+                    }
+                }
+            },
+            "reset_envelope_scale",
         ),
         (
             {"rl": {"press": {"policy": {"actor": {"output_initialization": "task-controller"}}}}},

@@ -32,26 +32,28 @@ class _Writer:
 
 def _evaluation(*, undefined_completion_time: bool = False) -> PolicyEvaluation:
     values = {
-        "approach_success_rate": 0.96,
+        "success_rate": 0.96,
         "collision_rate": 0.01,
         "other_flight_failure_rate": 0.0,
         "range_undershoot_rate": 0.0,
         "timeout_rate": 0.03,
         "completed_episodes": 300.0,
-        "range_pass_rate": 0.9,
-        "alignment_pass_rate": 0.8,
-        "attitude_pass_rate": 0.95,
-        "linear_speed_pass_rate": 0.7,
-        "angular_speed_pass_rate": 0.85,
-        "contact_clear_pass_rate": 0.99,
-        "complete_goal_pass_rate": 0.6,
-        "mean_max_stable_goal_fraction": 0.8,
-        "maximum_stable_goal_fraction": 1.0,
-        "mean_normalized_pose_error": 0.5,
+        "target_range_occupancy_rate": 0.9,
+        "target_alignment_occupancy_rate": 0.8,
+        "target_attitude_occupancy_rate": 0.95,
+        "linear_speed_threshold_occupancy_rate": 0.7,
+        "angular_speed_threshold_occupancy_rate": 0.85,
+        "contact_clear_rate": 0.99,
+        "hover_envelope_occupancy_rate": 0.6,
+        "episode_longest_hover_duration_mean_s": 24.0,
+        "episode_longest_hover_duration_max_s": 30.0,
+        "hover_envelope_utilization_mean": 0.5,
+        "position_envelope_utilization_mean": 0.4,
+        "attitude_envelope_utilization_mean": 0.3,
         "minimum_closest_range_m": 0.405,
         "mean_closest_range_m": 0.41,
         "all_traces_finite": 1.0,
-        "held_out_task_cost": 0.25,
+        "evaluation_diagnostic_cost": 0.25,
         "body_collision_rate": 0.006,
         "pusher_collision_rate": 0.004,
         "median_successful_completion_time_s": None if undefined_completion_time else 1.5,
@@ -115,7 +117,7 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
 
 def test_metric_registry_names_rates_units_and_unavailable_values() -> None:
     registry = metric_registry_payload()
-    assert registry["revision"] == 16
+    assert registry["revision"] == 17
     assert all(spec.suffix == spec.suffix.lower() for spec in EVALUATION_METRICS)
     assert all(not spec.suffix.endswith("_percent") for spec in EVALUATION_METRICS)
     rate_specs = tuple(spec for spec in EVALUATION_METRICS if spec.suffix.endswith("_rate"))
@@ -137,7 +139,7 @@ def test_metric_registry_names_rates_units_and_unavailable_values() -> None:
 def test_rate_outside_fraction_range_is_rejected() -> None:
     evaluation = _evaluation()
     metrics = list(evaluation.metrics)
-    metrics[0] = EvaluationMetric("approach_success_rate", 96.0)
+    metrics[0] = EvaluationMetric("success_rate", 96.0)
     with pytest.raises(ValueError, match="must be in"):
         write_evaluation_scalars(
             writer=_Writer(),
@@ -185,6 +187,8 @@ def test_system_metric_tags_are_complete_ordered_and_namespaced() -> None:
 
 
 def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
+    torch = pytest.importorskip("torch")
+
     class BaseLogger:
         def __init__(self) -> None:
             self.writer = _Writer()
@@ -210,14 +214,20 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
     writer = _Writer()
     phase = SimpleNamespace(
         learning_rate=1.0e-4,
+        reset_envelope_scale=0.25,
         range_undershoot_min_m=0.38,
     )
-    runner = SimpleNamespace(logger=BaseLogger())
+    policy = SimpleNamespace(actor=torch.nn.Linear(2, 2), critic=torch.nn.Linear(2, 1))
+    runner = SimpleNamespace(logger=BaseLogger(), alg=SimpleNamespace(policy=policy))
     rsl_rl.configure_monitoring(runner=runner, writer=writer, phase=phase, phase_number=1)
+    with torch.no_grad():
+        policy.actor.weight.add_(0.1)
+        policy.critic.weight.add_(0.2)
     runner.logger.log(it=170)
     runner.logger.writer.configure_phase(
         phase=SimpleNamespace(
             learning_rate=3.0e-5,
+            reset_envelope_scale=0.5,
             range_undershoot_min_m=0.39,
         ),
         phase_number=2,
@@ -226,6 +236,7 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
     runner.logger.writer.configure_phase(
         phase=SimpleNamespace(
             learning_rate=1.0e-5,
+            reset_envelope_scale=1.0,
             range_undershoot_min_m=0.40,
         ),
         phase_number=3,
@@ -238,6 +249,13 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
         if tag == "train/schedule/checkpoint_update"
     ]
     assert checkpoint_events == [(170.0, 1), (141.0, 2), (141.0, 3)]
+    parameter_changes = {
+        tag: value
+        for tag, value, step in writer.events
+        if step == 1 and tag.endswith("relative_parameter_change")
+    }
+    assert parameter_changes["train/optimization/actor_relative_parameter_change"] > 0.0
+    assert parameter_changes["train/optimization/critic_relative_parameter_change"] > 0.0
     assert all(
         tag.startswith(("train/", "val/", "test/", "system/"))
         for tag, _value, _step in writer.events
@@ -251,12 +269,15 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
 
 
 def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
+    torch = pytest.importorskip("torch")
     writer = _Writer()
     phase = SimpleNamespace(
         learning_rate=1.0e-4,
+        reset_envelope_scale=1.0,
         range_undershoot_min_m=None,
     )
-    runner = SimpleNamespace()
+    policy = SimpleNamespace(actor=torch.nn.Linear(2, 2), critic=torch.nn.Linear(2, 1))
+    runner = SimpleNamespace(alg=SimpleNamespace(policy=policy))
     rsl_rl.configure_monitoring(runner=runner, writer=writer, phase=phase, phase_number=1)
     runner.writer.add_scalar("Loss/value_function", 1.0, 7)
     runner.writer.add_scalar("Perf/collection time", 0.2, 7)
@@ -264,7 +285,9 @@ def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
     assert rsl_rl.monitoring_step(runner=runner) == 1
     assert runner.log_dir == "logs"
     assert {tag for tag, _value, _step in writer.events} >= {
-        "train/optimization/value_loss",
+        "train/optimization/critic_return_mse",
+        "train/optimization/actor_relative_parameter_change",
+        "train/optimization/critic_relative_parameter_change",
         "train/performance/rollout_time_s",
         "train/performance/optimizer_update_time_s",
         "train/performance/total_update_time_s",
@@ -272,12 +295,18 @@ def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
 
 
 def test_training_chunk_advances_when_restored_learner_iteration_repeats() -> None:
+    torch = pytest.importorskip("torch")
     writer = _Writer()
     phase = SimpleNamespace(
         learning_rate=1.0e-4,
+        reset_envelope_scale=1.0,
         range_undershoot_min_m=None,
     )
-    runner = SimpleNamespace(current_learning_iteration=0)
+    policy = SimpleNamespace(actor=torch.nn.Linear(2, 2), critic=torch.nn.Linear(2, 1))
+    runner = SimpleNamespace(
+        current_learning_iteration=0,
+        alg=SimpleNamespace(policy=policy),
+    )
     rsl_rl.configure_monitoring(
         runner=runner,
         writer=writer,

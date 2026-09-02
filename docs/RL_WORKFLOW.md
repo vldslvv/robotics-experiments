@@ -158,7 +158,7 @@ The selected `rl.press.curriculum.stages[].phases` entry defines the ordered
 schedule within each press attempt; task-neutral training continues to use
 `rl.training.phases`. Each
 phase declares maximum iterations, validation cadence, learning rate, schedule,
-entropy coefficient, and the training-only recovery boundary. The first phase
+entropy coefficient, measured-envelope reset scale, and the training-only recovery boundary. The first phase
 starts from the stage-initial learner. Before every later phase, the campaign restores the
 attempt-wide best checkpoint's actor, critic, optimizer, and learner iteration,
 then applies the new phase settings and resets every training environment. This
@@ -167,20 +167,22 @@ exact process resume. An earlier checkpoint remains selectable if refinement
 regresses.
 
 The evaluator and phase driver have separate contracts. Validation receives an
-exact exported actor and returns raw named metrics plus `held_out_task_cost`.
+exact exported actor and returns raw named metrics plus
+`evaluation_diagnostic_cost`.
 The plateau detector reads only the configured metric, direction, minimum delta,
 and patience. It never reads the PPO reward or any acceptance check. The active
-curriculum stage owns the rule. Hover maximizes mean completed hold fraction;
-approach minimizes held-out mean normalized pose error. Both require a `0.003`
-material change from the phase reference and declare a plateau after 10
-consecutive stale evaluations. Raw aggregate task cost remains diagnostic and
-cannot select a timeout-heavy checkpoint over demonstrated task progress.
+curriculum stage owns the rule. Hover maximizes the mean longest continuous
+hover duration in seconds, requires a `0.10` second improvement, and declares a
+plateau after three stale evaluations. Approach minimizes mean measured
+pose-envelope utilization, requires a `0.003` improvement, and declares a
+plateau after 10 stale evaluations. The aggregate diagnostic cost cannot select
+a checkpoint.
 
 Hover training uses a 40-second episode horizon; approach uses 45 seconds. Both
 press stages run:
 
-1. 50 iterations at `1e-4`, fixed schedule and zero entropy, with recovery
-   at 0.38 m for hover and 0.40 m for approach;
+1. 20 hover iterations or 50 approach iterations at `1e-4`, fixed schedule and
+   zero entropy, with recovery at 0.38 m for hover and 0.40 m for approach;
 2. 30 iterations at `3e-5`, fixed schedule and zero entropy, with recovery
    at 0.39 m for hover and 0.40 m for approach;
 3. 100 iterations at `1e-5`, fixed schedule and zero entropy, with the strict
@@ -189,9 +191,12 @@ press stages run:
 The broad phase evaluates every ten updates and both refinement phases evaluate
 every five. Model zero and every cadence-aligned phase boundary are evaluated;
 there is no extra boundary update. Hover expands the continuous measured-envelope
-hold from 5 to 15 to 30 seconds. Approach uses the complete 30-second hold in
-every phase. The campaign totals 180 attempted PPO updates. Training advances
-after a phase reaches its maximum or the same plateau rule fires.
+hold from 5 to 15 to 30 seconds and expands training resets through 0.25, 0.50,
+and 1.00 of the pinned envelope. Approach uses the complete 30-second hold and
+full reset envelope in every phase. Hover permits 150 attempted PPO updates and
+approach permits 180. Training advances after a phase reaches its maximum or
+its plateau rule fires. Validation and test always sample the full pinned
+envelope.
 
 Run training with:
 
@@ -229,8 +234,9 @@ make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-hover/<run-id>/l
 and is served at `http://127.0.0.1:6006` by default. The training wrapper prints
 a run-scoped URL with `smoothing=0` and a filter for the primary learning and
 validation charts: training return, signed per-sample reward, all-checks pass,
-approach success, dwell progress, other flight failure, collision, minimum
-range, finite traces, and held-out task cost. Set
+success, longest hover duration, hover-envelope occupancy and utilization,
+other flight failure, collision, minimum range, finite traces, and evaluation
+diagnostic cost. Set
 `RL_TENSORBOARD_PORT=<port>` when that address is occupied. The Make target
 uses the stable loader for the double-precision scalar tensors, passes
 `--reload_interval 5`, and retains up to one million scalar samples per tag.
@@ -243,11 +249,11 @@ All rate metrics end in `_rate` and are fractions in `[0, 1]`.
 
 TensorBoard uses only the lowercase `train/`, `val/`, `test/`, and `system/`
 namespaces. Validation and test share one ordered registry: acceptance-check status,
-success/failure/collision rates, minimum range, trace finiteness, maximum dwell
-progress, task cost,
-secondary terminal rates, every strict-predicate pass rate, mean and maximum
-dwell, normalized pose error, range/completion measurements, and every mean
-cost component. Undefined values such as successful completion time when there are
+success/failure/collision rates, minimum range, trace finiteness, mean and
+maximum episode-longest hover duration, diagnostic cost, secondary terminal
+rates, task-target occupancy, measured-envelope occupancy and utilization,
+range/completion measurements, and every mean cost component. Undefined values
+such as successful completion time when there are
 no successes remain `null` in the report and are not emitted as a scalar.
 Acceptance is report metadata, not a TensorBoard namespace. Total attempted PPO
 updates are the X coordinate and never rewind when a refinement phase restores
@@ -269,31 +275,40 @@ as the measured bottleneck and never changes policy qualification.
 
 The press PPO reward has five signed contributions. Hover `position_progress`
 rewards each reduction in measured pose utilization and the bounded
-stabilization cost is `-utilization / (1 + utilization)`, alongside the strict
-hold and terminal outcome. Utilization is the larger of exact position and
+stabilization cost is `-0.01 * utilization / (1 + utilization)`, alongside
+hold progress and terminal outcome. Utilization is the larger of exact position and
 attitude envelope utilization from the pinned flight parameters. Hover sets
 only `predictive_barrier` to zero. In the approach stage, `position_progress`
 rewards reduction in target error until the measured position envelope is
 reached, `stabilization` is `1 / (1 + utilization)` inside that position
-envelope, and the predictive range barrier remains active.
-`strict_hold` is one on every complete envelope-passing sample.
-`terminal_outcome` is +150 on the selected stage's hold success and -300 on every unsuccessful
-termination, including timeout. The first monitored scratch campaign showed
-range undershoot as the dominant early flight failure, so the one added factor,
-`predictive_barrier`, penalizes squared projected undershoot of the strict range
-minimum. It projects positive wall-normal closing speed over the existing
-velocity-reference horizon and normalizes the deficit by the strict range
-width. Its weight is 10; weight 20 delayed the first dwell without improving
-its maximum, while a weight-50 isolation caused immediate attitude instability.
-Contact remains a binding predicate without a separate PPO shaping term.
+envelope before its 0.01 weight, and the predictive range barrier remains
+active.
+`hold_progress` is `0.01` only when the current continuous hold exceeds the
+episode's previous longest hold, so leaving and repeating a shorter hold cannot
+collect the reward again. `terminal_outcome` is +1.5 on hold success and -3.0
+on every unsuccessful termination, including timeout. Position progress and
+the approach predictive barrier have weight 0.1. This uniform 0.01 reward scale
+preserves relative preferences while keeping critic return targets compatible
+with joint actor/critic gradient clipping. Contact remains a binding predicate
+without a separate PPO shaping term.
 
 Training metrics use semantic groups without numeric prefixes:
-`train/reward/`, `train/outcome/`, `train/goal/`, `train/state/`,
+`train/reward/`, `train/cumulative_outcome/`, `train/target/`, `train/hover/`, `train/state/`,
 `train/optimization/`, `train/performance/`, and `train/schedule/`.
 `train/schedule/recovery_boundary_m` records the stage's configured safety
-boundary. Envelope pass rate, utilization, and dwell fractions refer to the
-pinned measured envelope. Validation and test use matching `outcome/`, `goal/`, `state/`,
+boundary, and `train/schedule/reset_envelope_scale` records the training reset
+coverage. Hover durations are seconds, utilization is normalized so 1 is the
+measured boundary, and rates are transition or episode fractions as named.
+Validation and test use matching `outcome/`, `target/`, `hover/`, `state/`,
 `trace/`, and `cost/` subgroups. Hardware telemetry is under `system/`.
+
+PPO minimizes the clipped policy surrogate plus the configured value-loss
+coefficient times the clipped critic return error, minus the entropy
+coefficient times action-distribution entropy. TensorBoard names these
+`ppo_clipped_surrogate_loss`, `critic_return_mse`, and
+`action_distribution_entropy`; the diagnostic evaluation cost is never part of
+that expression. Actor and critic relative parameter changes are recorded after
+every update because RSL-RL clips their combined gradient norm.
 
 ## Validation, final test, artifact, and acceptance
 
@@ -302,7 +317,7 @@ Every checkpoint in every phase and attempt uses the same validation workload:
 each exported actor on that workload, so every record identifies exact
 `policy.pt` bytes. Validation is not cached.
 
-The raw held-out task cost is the untransformed weighted sum of collision,
+The evaluation diagnostic cost is the untransformed weighted sum of collision,
 flight failure, timeout, non-success, missing maximum dwell progress, terminal
 range, trajectory alignment,
 relative-attitude error, velocity tracking, angular velocity, upright error,
@@ -311,8 +326,9 @@ costs each carry weight 0.10. Missing dwell progress carries weight 2.0, so
 checkpoint progress distinguishes partial settling from a zero-dwell timeout.
 Lower is better. This cost is independent of the per-step PPO reward. After all
 phases end, validation-passing checkpoints rank ahead of failures. Within each
-group the lower task cost wins, with the earlier checkpoint winning an exact
-tie. A validation pass only makes the candidate eligible for the final test.
+group the configured stage progress metric ranks checkpoints, with the earlier
+checkpoint winning an exact tie. A validation pass only makes the candidate
+eligible for the final test.
 
 The raw SHA-256 of the exact exported `policy.pt` remains in every evaluation
 and published artifact record. The campaign parent is the only writer of
@@ -324,11 +340,11 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 20 records the prepared acceptance criteria and every attempt, phase parent, raw
+`training_report.json` schema 21 records the prepared acceptance criteria and every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
-metric-registry revision 16 and comparison revision 22; older report shapes are
+metric-registry revision 17 and comparison revision 23; older report shapes are
 unsupported. Flight failure and timeout each cost 3.0 in checkpoint ranking, so
 the selector cannot improve merely by converting failed attempts into waits.
 

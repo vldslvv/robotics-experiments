@@ -40,6 +40,7 @@ def _phase(
         learning_rate=1.0e-4,
         schedule="fixed",
         entropy_coef=0.0,
+        reset_envelope_scale=1.0,
         range_undershoot_min_m=range_undershoot_min_m,
     )
 
@@ -170,7 +171,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         status="training",
         acceptance_criteria=acceptance_criteria,
     )
-    assert report["schema_version"] == 20
+    assert report["schema_version"] == 21
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -348,7 +349,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
             iteration=1,
             checkpoint_path=checkpoint,
             policy_digest=digest,
-            metrics=(EvaluationMetric("mean_normalized_pose_error", 2.0 - attempt_index),),
+            metrics=(EvaluationMetric("hover_envelope_utilization_mean", 2.0 - attempt_index),),
             reward_means=(),
             source="fresh-validation",
         )
@@ -364,7 +365,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
                     "policy": str((candidate_dir / "policy.pt").relative_to(run_dir)),
                     "policy_digest": digest,
                     "source": "fresh-validation",
-                    "metrics": {"mean_normalized_pose_error": 2.0 - attempt_index},
+                    "metrics": {"hover_envelope_utilization_mean": 2.0 - attempt_index},
                     "reward_means": {},
                 }
             ],
@@ -466,7 +467,7 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         attempt_dir.mkdir()
         (attempt_dir / "attempt_report.json").write_text(
-            '{"schema_version": 20, "report_kind": "attempt", "status": "training"}\n'
+            '{"schema_version": 21, "report_kind": "attempt", "status": "training"}\n'
         )
         raise KeyboardInterrupt
 
@@ -550,7 +551,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 20,
+        "schema_version": 21,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -586,12 +587,12 @@ def test_training_tensorboard_rates_are_fraction_valued_and_namespaced() -> None
     source = (
         REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py"
     ).read_text()
-    assert '"train/outcome/collision_rate"' in source
-    assert '"train/outcome/flight_failure_rate"' in source
-    assert '"train/outcome/crash_rate"' in source
-    assert '"train/outcome/altitude_failure_rate"' in source
-    assert '"train/outcome/range_undershoot_rate"' in source
-    assert '"train/outcome/relative_envelope_failure_rate"' in source
+    assert '"train/cumulative_outcome/collision_rate"' in source
+    assert '"train/cumulative_outcome/flight_failure_rate"' in source
+    assert '"train/cumulative_outcome/crash_rate"' in source
+    assert '"train/cumulative_outcome/altitude_failure_rate"' in source
+    assert '"train/cumulative_outcome/range_undershoot_rate"' in source
+    assert '"train/cumulative_outcome/relative_envelope_failure_rate"' in source
     assert "_percent" not in source
     assert "100.0 * self._" not in source
 
@@ -613,8 +614,8 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
         checkpoint_path=tmp_path / "model_20.pt",
         policy_digest="digest",
         metrics=(
-            EvaluationMetric("held_out_task_cost", 0.25),
-            EvaluationMetric("approach_success_rate", 0.95),
+            EvaluationMetric("evaluation_diagnostic_cost", 0.25),
+            EvaluationMetric("success_rate", 0.95),
             EvaluationMetric("collision_rate", 0.01),
             EvaluationMetric("other_flight_failure_rate", 0.0),
             EvaluationMetric("timeout_rate", 0.04),
@@ -633,7 +634,7 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
         validation=SimpleNamespace(checks=(), passed=False),
     )
     metrics_log = capsys.readouterr().err
-    assert "cost=0.250000" in metrics_log
+    assert "diagnostic_cost=0.250000" in metrics_log
     assert "progress=" not in metrics_log
     assert "stale=" not in metrics_log
 
@@ -703,7 +704,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
         iteration=10,
         checkpoint_path=run_dir / "attempt_01_seed_42" / "checkpoints" / "model.pt",
         policy_digest=digest,
-        metrics=(EvaluationMetric("mean_normalized_pose_error", 0.25),),
+        metrics=(EvaluationMetric("hover_envelope_utilization_mean", 0.25),),
         reward_means=(),
         source="fresh-validation",
     )
@@ -711,7 +712,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
         iteration=10,
         checkpoint_path=selected.checkpoint_path,
         policy_digest=digest,
-        metrics=(EvaluationMetric("mean_normalized_pose_error", 0.3),),
+        metrics=(EvaluationMetric("hover_envelope_utilization_mean", 0.3),),
         reward_means=(),
         source="fresh-test",
     )
@@ -721,7 +722,7 @@ def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path
         "selected_policy_digest": digest,
         "test_evaluation": {"policy_digest": digest},
         "selected_metric": {
-            "name": "mean_normalized_pose_error",
+            "name": "hover_envelope_utilization_mean",
             "direction": "minimize",
             "value": 0.25,
         },
@@ -763,7 +764,7 @@ def test_failed_test_cannot_publish_any_label(tmp_path: Path) -> None:
         iteration=1,
         checkpoint_path=run_dir / "model.pt",
         policy_digest="irrelevant",
-        metrics=(EvaluationMetric("held_out_task_cost", 1.0),),
+        metrics=(EvaluationMetric("evaluation_diagnostic_cost", 1.0),),
         reward_means=(),
         source="fresh-validation",
     )

@@ -38,7 +38,7 @@ def _acceptance_criteria(config):
 
 def _criteria(*, patience: int = 10) -> RlPlateauCriteriaConfig:
     return RlPlateauCriteriaConfig(
-        metric_name="held_out_task_cost",
+        metric_name="evaluation_diagnostic_cost",
         direction="minimize",
         minimum_delta=0.003,
         patience_evaluations=patience,
@@ -50,7 +50,7 @@ def _evaluation(*, iteration: int, cost: float) -> PolicyEvaluation:
         iteration=iteration,
         checkpoint_path=Path(f"logs/model_{iteration}.pt"),
         policy_digest=f"digest-{iteration}",
-        metrics=(EvaluationMetric("held_out_task_cost", cost),),
+        metrics=(EvaluationMetric("evaluation_diagnostic_cost", cost),),
         reward_means=(),
         source="fresh",
     )
@@ -64,23 +64,26 @@ def _press_result(**overrides):
 
     values = {
         "episodes": 300,
-        "approach_success_rate": 0.95,
+        "success_rate": 0.95,
         "collision_rate": 0.01,
         "body_collision_rate": 0.006,
         "pusher_collision_rate": 0.004,
         "other_flight_failure_rate": 0.0,
         "range_undershoot_rate": 0.0,
         "timeout_rate": 0.04,
-        "range_pass_rate": 1.0,
-        "alignment_pass_rate": 1.0,
-        "attitude_pass_rate": 1.0,
-        "linear_speed_pass_rate": 1.0,
-        "angular_speed_pass_rate": 1.0,
-        "contact_clear_pass_rate": 1.0,
-        "complete_goal_pass_rate": 0.95,
-        "mean_normalized_pose_error": 0.1,
-        "mean_max_stable_goal_fraction": 0.95,
-        "maximum_stable_goal_fraction": 1.0,
+        "target_range_occupancy_rate": 1.0,
+        "target_alignment_occupancy_rate": 1.0,
+        "target_attitude_occupancy_rate": 1.0,
+        "linear_speed_threshold_occupancy_rate": 1.0,
+        "angular_speed_threshold_occupancy_rate": 1.0,
+        "contact_clear_rate": 1.0,
+        "hover_envelope_occupancy_rate": 0.95,
+        "hover_envelope_utilization_mean": 0.1,
+        "position_envelope_utilization_mean": 0.1,
+        "attitude_envelope_utilization_mean": 0.1,
+        "episode_longest_hover_duration_mean_s": 28.5,
+        "episode_longest_hover_duration_max_s": 30.0,
+        "required_hover_duration_s": 30.0,
         "mean_closest_range_m": 0.41,
         "min_closest_range_m": 0.405,
         "median_completion_time_s": 2.0,
@@ -130,6 +133,7 @@ def _scored(**overrides) -> PolicyEvaluation:
 
 def test_unavailable_hover_statistics_keep_the_complete_null_metric_contract() -> None:
     from robotics_experiments.config import load_config
+    from robotics_experiments.rl.training._monitoring import evaluation_metric_names
     from robotics_experiments.workflows.isaac_lab import press_policy_evaluation
 
     config = load_config(REPO_ROOT / "configs" / "train_press_hover_quad.yaml")
@@ -144,6 +148,7 @@ def test_unavailable_hover_statistics_keep_the_complete_null_metric_contract() -
     hover_metrics = tuple(
         metric for metric in evaluation.metrics if metric.name.startswith("flight_parameters.")
     )
+    assert tuple(metric.name for metric in evaluation.metrics) == evaluation_metric_names()
     assert len(hover_metrics) == 40
     assert all(metric.value is None for metric in hover_metrics)
 
@@ -191,10 +196,11 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
 @pytest.mark.parametrize(
     ("field", "better", "worse"),
     [
-        ("approach_success_rate", 0.99, 0.95),
+        ("success_rate", 0.99, 0.95),
         ("collision_rate", 0.0, 0.01),
         ("other_flight_failure_rate", 0.0, 0.01),
         ("timeout_rate", 0.0, 0.04),
+        ("episode_longest_hover_duration_mean_s", 30.0, 15.0),
         ("mean_terminal_range_cost", 0.0, 0.1),
         ("mean_trajectory_alignment_cost", 0.0, 0.1),
         ("mean_relative_attitude_error_cost", 0.0, 0.1),
@@ -205,14 +211,14 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         ("mean_completion_time_fraction", 0.0, 0.2),
     ],
 )
-def test_raw_held_out_task_cost_preserves_every_configured_component(
+def test_evaluation_diagnostic_cost_preserves_every_configured_component(
     field: str,
     better: float,
     worse: float,
 ) -> None:
-    assert _scored(**{field: better}).metric("held_out_task_cost") < _scored(
+    assert _scored(**{field: better}).metric("evaluation_diagnostic_cost") < _scored(
         **{field: worse}
-    ).metric("held_out_task_cost")
+    ).metric("evaluation_diagnostic_cost")
 
 
 def test_acceptance_is_separate_from_evaluation_cost() -> None:
@@ -225,7 +231,7 @@ def test_acceptance_is_separate_from_evaluation_cost() -> None:
         pusher_collision_rate=0.0,
         min_closest_range_m=0.399,
     )
-    assert evaluation.metric("held_out_task_cost") >= 0.0
+    assert evaluation.metric("evaluation_diagnostic_cost") >= 0.0
     acceptance = evaluate_press_acceptance(
         criteria=_acceptance_criteria(config),
         evaluation=evaluation,
@@ -255,7 +261,7 @@ def test_acceptance_includes_configured_range_safety_boundary() -> None:
     ("overrides", "failed_gate"),
     [
         ({"median_completion_time_s": float("nan")}, "trace finiteness"),
-        ({"approach_success_rate": 0.94}, "approach success rate"),
+        ({"success_rate": 0.94}, "success rate"),
         ({"collision_rate": 0.02}, "collision rate"),
         ({"min_closest_range_m": 0.399}, "minimum closest range"),
         ({"other_flight_failure_rate": 0.01}, "other flight-failure rate"),
@@ -396,7 +402,7 @@ def _report(*, fingerprint: str, value: float) -> str:
         {
             "comparison_fingerprint": fingerprint,
             "selected_metric": {
-                "name": "held_out_task_cost",
+                "name": "evaluation_diagnostic_cost",
                 "direction": "minimize",
                 "value": value,
             },
@@ -417,7 +423,7 @@ def test_latest_always_advances_and_best_requires_lower_comparable_cost(
         policy_root=tmp_path,
         run_dir=first,
         comparison_fingerprint="same",
-        metric_name="held_out_task_cost",
+        metric_name="evaluation_diagnostic_cost",
         metric_value=0.5,
         direction="minimize",
     )
@@ -425,7 +431,7 @@ def test_latest_always_advances_and_best_requires_lower_comparable_cost(
         policy_root=tmp_path,
         run_dir=second,
         comparison_fingerprint="same",
-        metric_name="held_out_task_cost",
+        metric_name="evaluation_diagnostic_cost",
         metric_value=0.6,
         direction="minimize",
     )
@@ -435,7 +441,7 @@ def test_latest_always_advances_and_best_requires_lower_comparable_cost(
         policy_root=tmp_path,
         run_dir=third,
         comparison_fingerprint="same",
-        metric_name="held_out_task_cost",
+        metric_name="evaluation_diagnostic_cost",
         metric_value=0.4,
         direction="minimize",
     )

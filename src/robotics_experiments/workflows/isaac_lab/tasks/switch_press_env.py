@@ -62,7 +62,7 @@ _TRAINING_REWARD_TERMS = (
     "position_progress",
     "stabilization",
     "predictive_barrier",
-    "strict_hold",
+    "hold_progress",
     "terminal_outcome",
 )
 
@@ -241,6 +241,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._task_sample: PressApproachInput[torch.Tensor] | None = None
         self._training_minimum_range_m = self._experiment_config.rl.press.acceptance.minimum_range_m
         self._training_hold_steps = round(self._stage.hold_s * self.cfg.policy_rate_hz)
+        self._training_reset_envelope_scale = 1.0
         self._physics_substep_index = 0
         self._body_collision_latch = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
@@ -269,6 +270,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 f"training range undershoot minimum must be positive and at most {strict_min} m"
             )
         self._training_minimum_range_m = range_min_m
+        self._training_reset_envelope_scale = phase.reset_envelope_scale
         self._training_hold_steps = round(
             self._stage.training_hold_s[phase_number - 1] * self.cfg.policy_rate_hz
         )
@@ -480,66 +482,74 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._timeout_episode_count += (ended & result.termination.time_out).count_nonzero()
         episode_denominator = self._completed_episode_count.clamp_min(1.0)
         self.extras["log"] = {
-            "train/outcome/completed_episodes": self._completed_episode_count,
-            "train/outcome/success_rate": (self._successful_episode_count / episode_denominator),
-            "train/outcome/collision_rate": (self._collision_episode_count / episode_denominator),
-            "train/outcome/body_collision_rate": (
+            "train/cumulative_outcome/completed_episodes": self._completed_episode_count,
+            "train/cumulative_outcome/success_rate": (
+                self._successful_episode_count / episode_denominator
+            ),
+            "train/cumulative_outcome/collision_rate": (
+                self._collision_episode_count / episode_denominator
+            ),
+            "train/cumulative_outcome/body_collision_rate": (
                 self._body_collision_episode_count / episode_denominator
             ),
-            "train/outcome/pusher_collision_rate": (
+            "train/cumulative_outcome/pusher_collision_rate": (
                 self._pusher_collision_episode_count / episode_denominator
             ),
-            "train/outcome/flight_failure_rate": (
+            "train/cumulative_outcome/flight_failure_rate": (
                 self._flight_failure_episode_count / episode_denominator
             ),
-            "train/outcome/timeout_rate": (self._timeout_episode_count / episode_denominator),
-            "train/outcome/crash_rate": (self._crash_episode_count / episode_denominator),
-            "train/outcome/altitude_failure_rate": (
+            "train/cumulative_outcome/timeout_rate": (
+                self._timeout_episode_count / episode_denominator
+            ),
+            "train/cumulative_outcome/crash_rate": (
+                self._crash_episode_count / episode_denominator
+            ),
+            "train/cumulative_outcome/altitude_failure_rate": (
                 self._altitude_failure_episode_count / episode_denominator
             ),
-            "train/outcome/range_undershoot_rate": (
+            "train/cumulative_outcome/range_undershoot_rate": (
                 self._range_undershoot_episode_count / episode_denominator
             ),
-            "train/outcome/relative_envelope_failure_rate": (
+            "train/cumulative_outcome/relative_envelope_failure_rate": (
                 self._relative_envelope_episode_count / episode_denominator
             ),
-            "train/goal/range_pass_rate": (
+            "train/target/range_occupancy_rate": (
                 (sample.relative_switch_pos_m[:, 0] >= goal.range_min_m)
                 & (sample.relative_switch_pos_m[:, 0] <= goal.range_max_m)
             )
             .float()
             .mean(),
-            "train/goal/alignment_pass_rate": (
+            "train/target/alignment_occupancy_rate": (
                 torch.linalg.vector_norm(sample.relative_switch_pos_m[:, 1:3], dim=-1)
                 <= goal.alignment_error_max_m
             )
             .float()
             .mean(),
-            "train/goal/attitude_pass_rate": (
+            "train/target/attitude_occupancy_rate": (
                 quaternion_geodesic_error_rad(quaternion_xyzw=sample.relative_switch_quat_xyzw)
                 <= goal.relative_attitude_error_max_rad
             )
             .float()
             .mean(),
-            "train/goal/linear_speed_pass_rate": (
+            "train/target/linear_speed_threshold_occupancy_rate": (
                 torch.linalg.vector_norm(sample.linear_velocity_mps, dim=-1)
                 <= goal.linear_speed_max_mps
             )
             .float()
             .mean(),
-            "train/goal/angular_speed_pass_rate": (
+            "train/target/angular_speed_threshold_occupancy_rate": (
                 torch.linalg.vector_norm(sample.angular_velocity_radps, dim=-1)
                 <= goal.angular_speed_max_radps
             )
             .float()
             .mean(),
-            "train/goal/contact_clear_pass_rate": result.contact_clear.float().mean(),
-            "train/goal/complete_pass_rate": result.strict_goal.float().mean(),
-            "train/goal/mean_dwell_fraction": (
-                result.state.stable_goal_steps.float().mean() / self._training_hold_steps
+            "train/target/contact_clear_rate": result.contact_clear.float().mean(),
+            "train/hover/envelope_occupancy_rate": result.strict_goal.float().mean(),
+            "train/hover/current_hold_duration_mean_s": (
+                result.state.stable_goal_steps.float().mean() * self.step_dt
             ),
-            "train/goal/maximum_dwell_fraction": (
-                result.state.stable_goal_steps.max().float() / self._training_hold_steps
+            "train/hover/episode_longest_duration_mean_s": (
+                result.state.longest_stable_goal_steps.float().mean() * self.step_dt
             ),
         }
         self.extras["log"].update(
@@ -556,16 +566,13 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 "train/state/mean_attitude_error_rad": result.attitude_error_rad.mean(),
                 "train/state/mean_linear_speed_mps": result.linear_speed_mps.mean(),
                 "train/state/mean_angular_speed_radps": result.angular_speed_radps.mean(),
-                "train/state/mean_normalized_pose_error": (
+                "train/state/hover_envelope_utilization_mean": (
                     result.state.normalized_pose_error.mean()
                 ),
-                "train/state/flight_parameters_pass_rate": (
-                    result.hover_evaluation.inside.float().mean()
-                ),
-                "train/state/mean_position_envelope_utilization": (
+                "train/state/position_envelope_utilization_mean": (
                     result.hover_evaluation.position_utilization.mean()
                 ),
-                "train/state/mean_attitude_envelope_utilization": (
+                "train/state/attitude_envelope_utilization_mean": (
                     result.hover_evaluation.attitude_utilization.mean()
                 ),
             }
@@ -622,6 +629,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         position_error_enu_m, hover_quat_wxyz = _hover_pose_from_unit_samples(
             unit_samples=torch.rand((count, 6), device=self.device),
             flight_parameters=self._flight_parameters,
+            envelope_scale=self._training_reset_envelope_scale,
         )
         target_range = self._experiment_config.rl.press.goal.velocity_reference.range_center_m
         contact_quat = self._contact_frame_quat()[env_ids]

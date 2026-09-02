@@ -45,6 +45,7 @@ __all__ = [
 
 class _ActorCritic(Protocol):
     actor: torch.nn.Module
+    critic: torch.nn.Module
 
     def state_dict(self) -> dict[str, Any]:
         """Return the complete actor-critic parameter state."""
@@ -98,10 +99,20 @@ class TrainingResult:
 class _PresentationWriter:
     """Map RSL-RL logging onto the strict project TensorBoard contract."""
 
-    def __init__(self, *, writer, phase: RlTrainingPhaseConfig, phase_number: int) -> None:
+    def __init__(
+        self,
+        *,
+        writer,
+        phase: RlTrainingPhaseConfig,
+        phase_number: int,
+        policy: _ActorCritic,
+    ) -> None:
         self._writer = writer
         self._phase = phase
         self._phase_number = phase_number
+        self._policy = policy
+        self._actor_parameters = self._snapshot(policy.actor)
+        self._critic_parameters = self._snapshot(policy.critic)
         self._last_learner_step: int | None = None
         self._new_update_pending = False
         self._presentation_step = 0
@@ -129,6 +140,50 @@ class _PresentationWriter:
             double_precision=True,
         )
 
+    @staticmethod
+    def _snapshot(module: torch.nn.Module) -> tuple[torch.Tensor, ...]:
+        return tuple(parameter.detach().cpu().clone() for parameter in module.parameters())
+
+    @classmethod
+    def _relative_parameter_change(
+        cls,
+        *,
+        module: torch.nn.Module,
+        previous: tuple[torch.Tensor, ...],
+    ) -> tuple[float, tuple[torch.Tensor, ...]]:
+        current = cls._snapshot(module)
+        change_squared = sum(
+            float(torch.sum((now - before).square()))
+            for now, before in zip(current, previous, strict=True)
+        )
+        previous_squared = sum(float(torch.sum(value.square())) for value in previous)
+        denominator = max(previous_squared**0.5, torch.finfo(torch.float32).eps)
+        return change_squared**0.5 / denominator, current
+
+    def _write_parameter_changes(self) -> None:
+        actor_change, self._actor_parameters = self._relative_parameter_change(
+            module=self._policy.actor,
+            previous=self._actor_parameters,
+        )
+        critic_change, self._critic_parameters = self._relative_parameter_change(
+            module=self._policy.critic,
+            previous=self._critic_parameters,
+        )
+        self._write(
+            tag="train/optimization/actor_relative_parameter_change",
+            value=actor_change,
+            step=self._presentation_step,
+        )
+        self._write(
+            tag="train/optimization/critic_relative_parameter_change",
+            value=critic_change,
+            step=self._presentation_step,
+        )
+
+    def refresh_parameters(self) -> None:
+        self._actor_parameters = self._snapshot(self._policy.actor)
+        self._critic_parameters = self._snapshot(self._policy.critic)
+
     def _start_step(self, *, learner_step: int) -> None:
         if not self._new_update_pending and learner_step == self._last_learner_step:
             return
@@ -137,6 +192,11 @@ class _PresentationWriter:
         self._presentation_step += 1
         step = self._presentation_step
         self._write(tag="train/schedule/phase", value=self._phase_number, step=step)
+        self._write(
+            tag="train/schedule/reset_envelope_scale",
+            value=self._phase.reset_envelope_scale,
+            step=step,
+        )
         self._write(
             tag="train/optimization/learning_rate",
             value=self._phase.learning_rate,
@@ -163,17 +223,17 @@ class _PresentationWriter:
         if tag.startswith("train/"):
             mapped = tag
         elif tag in {"Loss/value", "Loss/value_function"}:
-            mapped = "train/optimization/value_loss"
+            mapped = "train/optimization/critic_return_mse"
         elif tag == "Loss/surrogate":
-            mapped = "train/optimization/policy_loss"
+            mapped = "train/optimization/ppo_clipped_surrogate_loss"
         elif tag == "Loss/entropy":
-            mapped = "train/optimization/entropy"
+            mapped = "train/optimization/action_distribution_entropy"
         elif tag == "Policy/mean_noise_std":
             mapped = "train/optimization/policy_noise_standard_deviation"
         elif tag == "Train/mean_reward":
-            mapped = "train/reward/episode_mean"
+            mapped = "train/reward/recent_100_episode_return_mean"
         elif tag == "Train/mean_episode_length":
-            mapped = "train/outcome/mean_episode_length_steps"
+            mapped = "train/outcome/recent_100_episode_length_mean_steps"
         elif tag == "Perf/total_fps":
             mapped = "train/performance/fps"
         elif tag in {"Perf/collection_time", "Perf/collection time"}:
@@ -202,6 +262,8 @@ class _PresentationWriter:
         else:
             raise ValueError(f"unregistered RSL-RL metric tag {tag!r}")
         self._write(tag=mapped, value=scalar_value, step=step)
+        if tag == "Perf/learning_time":
+            self._write_parameter_changes()
 
 
 class _MetricLogger:
@@ -321,6 +383,7 @@ def configure_monitoring(
         writer=writer,
         phase=phase,
         phase_number=phase_number,
+        policy=_policy_module(runner),
     )
     if hasattr(runner, "logger"):
         runner.logger = _MetricLogger(base=runner.logger, writer=presentation)
@@ -414,6 +477,7 @@ def restore_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: 
     payload = torch.load(checkpoint_path, map_location=device, weights_only=True)
     iteration = int(payload["iter"])
     runner.current_learning_iteration = iteration
+    _refresh_parameter_monitoring(runner=runner)
     return iteration
 
 
@@ -421,6 +485,13 @@ def _policy_module(runner: _PolicyRunner) -> _ActorCritic:
     # rsl_rl 3.x names the PPO policy `alg.policy`; 2.x used `alg.actor_critic`.
     policy = getattr(runner.alg, "policy", None)
     return policy if policy is not None else runner.alg.actor_critic
+
+
+def _refresh_parameter_monitoring(*, runner: _PolicyRunner) -> None:
+    logger = getattr(runner, "logger", None)
+    writer = logger.writer if isinstance(logger, _MetricLogger) else getattr(runner, "writer", None)
+    if isinstance(writer, _PresentationWriter):
+        writer.refresh_parameters()
 
 
 def initialize_actor_output(*, runner: _PolicyRunner, method: str) -> None:
@@ -437,6 +508,7 @@ def initialize_actor_output(*, runner: _PolicyRunner, method: str) -> None:
     torch.nn.init.orthogonal_(output.weight, gain=0.01)
     if output.bias is not None:
         torch.nn.init.zeros_(output.bias)
+    _refresh_parameter_monitoring(runner=runner)
 
 
 def _actor_module(runner: _PolicyRunner) -> torch.nn.Module:
