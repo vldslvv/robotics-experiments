@@ -26,7 +26,7 @@ def _press_comparison_fingerprint(
         if item.id == config.rl.training.vehicle_id
     )
     payload = {
-        "comparison_revision": 24,
+        "comparison_revision": 25,
         "acceptance": asdict(config.rl.press.acceptance),
         "evaluation": asdict(config.rl.press.evaluation),
         "goal": asdict(config.rl.press.goal),

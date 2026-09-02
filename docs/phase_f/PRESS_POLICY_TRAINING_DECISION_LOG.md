@@ -2364,3 +2364,31 @@ at update 5 as well. Refine at `1e-5`, then `3e-6`, evaluating every five update
 The later phases continue to restore the complete validation-selected learner.
 Stop if the lower-rate path repeatedly loses the update-10 hover duration or
 flight stability.
+
+### 76. Penalize persistent hover error directly
+
+Date: 2026-09-02.
+
+Campaign `press-hover-small-refinement-20260902` reproduced the measured-reset
+learning peak at update 10 with 2.378 seconds mean episode-longest hover, zero
+collisions, 10% other flight failures, and 90% timeouts. Refinement at `1e-5`
+then produced 1.947, 0.132, and 1.877 seconds and plateaued. A final branch at
+`3e-6` fell to 1.152 seconds after five updates. The campaign was interrupted
+during its next validation because both lower-rate branches had moved away from
+the same selected actor; no second seed was started.
+
+At a nominal target-centered, motionless observation, the selected update-10
+actor outputs about +0.0198 normalized vertical velocity, or +0.0099 m/s. Later
+actors increase that command to about +0.018 to +0.024 m/s physical velocity.
+This matches the validation pattern: most episodes survive initially, then fail
+together after the persistent command has accumulated vertical error.
+
+The hover reward allows this behavior. Its discounted pose-progress difference
+can prefer an early correction followed by later drift, and its bounded pose
+cost differs little between utilization 3 and utilization 7. For hover only,
+set `position_progress` to zero and use the direct per-step stabilization cost
+`-0.01 * utilization`. Keep hold progress, terminal outcomes, reset samples,
+PPO settings, schedule, workloads, and acceptance criteria unchanged. Approach
+retains its existing staged reward. Advance comparison revision 25 and start a
+fresh campaign. Stop if direct pose cost does not reduce the persistent action
+bias and improve held-out continuous hover.

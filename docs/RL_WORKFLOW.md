@@ -266,12 +266,11 @@ sampler failure terminates at the interval boundary with evidence preserved.
 The configured `0.95` GPU-utilization target is diagnostic: a miss is recorded
 as the measured bottleneck and never changes policy qualification.
 
-The press PPO reward has five signed contributions. Hover `position_progress`
-rewards each reduction in measured pose utilization and the bounded
-stabilization cost is `-0.01 * utilization / (1 + utilization)`, alongside
-hold progress and terminal outcome. Utilization is the larger of exact position and
-attitude envelope utilization from the pinned flight parameters. Hover sets
-only `predictive_barrier` to zero. In the approach stage, `position_progress`
+The press PPO reward has five signed contributions. Hover uses the direct
+stabilization cost `-0.01 * utilization`, alongside hold progress and terminal
+outcome. Utilization is the larger of exact position and attitude envelope
+utilization from the pinned flight parameters. Hover sets `position_progress`
+and `predictive_barrier` to zero. In the approach stage, `position_progress`
 rewards reduction in target error until the measured position envelope is
 reached, `stabilization` is `1 / (1 + utilization)` inside that position
 envelope before its 0.01 weight, and the predictive range barrier remains
@@ -333,7 +332,7 @@ trace-backed reset distribution, and every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
-metric-registry revision 18 and comparison revision 24; older report shapes are
+metric-registry revision 18 and comparison revision 25; older report shapes are
 unsupported.
 
 After selection, the exported actor is immutable. A new uncached worker runs the

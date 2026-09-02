@@ -177,7 +177,7 @@ def test_predictive_barrier_penalizes_only_projected_range_undershoot() -> None:
     assert unsafe.rewards.predictive_barrier[0] == pytest.approx(-0.025)
 
 
-def test_hover_reward_tracks_strict_pose_progress_without_predictive_barrier() -> None:
+def test_hover_reward_penalizes_current_pose_without_predictive_barrier() -> None:
     state = _state(range_m=0.50)
     recovered = step_press_approach(
         state=state,
@@ -201,12 +201,12 @@ def test_hover_reward_tracks_strict_pose_progress_without_predictive_barrier() -
         hold_steps=100,
         approach_enabled=False,
     )
-    assert recovered.rewards.position_progress[0] > 0.0
-    assert degraded.rewards.position_progress[0] < 0.0
+    assert recovered.rewards.position_progress[0] == 0.0
+    assert degraded.rewards.position_progress[0] == 0.0
     assert recovered.rewards.predictive_barrier[0] == 0.0
     assert degraded.rewards.predictive_barrier[0] == 0.0
     assert recovered.rewards.stabilization[0] == 0.0
-    assert -_REWARD.stabilization_weight < degraded.rewards.stabilization[0] < 0.0
+    assert degraded.rewards.stabilization[0] < -_REWARD.stabilization_weight
 
 
 def test_hold_progress_and_success_terminal_reward() -> None:
