@@ -267,7 +267,13 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert stage.plateau.minimum_delta == 0.003
     assert stage.plateau.patience_evaluations == 10
     hover_stage = config.rl.press.curriculum.stages[0]
-    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (20, 30, 100)
+    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (10, 60, 100)
+    assert tuple(phase.learning_rate for phase in hover_stage.phases) == (
+        1.0e-4,
+        1.0e-5,
+        3.0e-6,
+    )
+    assert tuple(phase.evaluation_interval for phase in hover_stage.phases) == (5, 5, 5)
     assert hover_stage.plateau.metric_name == "episode_longest_hover_duration_mean_s"
     assert hover_stage.plateau.direction == "maximize"
     assert hover_stage.plateau.minimum_delta == 0.10

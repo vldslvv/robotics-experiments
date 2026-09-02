@@ -2335,3 +2335,32 @@ proved that learning occurs, but also showed that the final reset expansion
 reliably erases the selected behavior. Preserve the interrupted run and its
 selected checkpoint as diagnostic evidence. Do not start another campaign
 until the transition from half-envelope to full-envelope resets is revised.
+
+### 75. Preserve the measured-reset learning peak with smaller refinement steps
+
+Date: 2026-09-02.
+
+Campaign `press-hover-trace-resets-20260902` replaced synthetic reset scaling
+with 14,400 paired position and attitude samples from the pinned flight-parameter
+policy windows. Seed 42 improved from 0.119 seconds mean episode-longest hover
+at model zero to 2.400 seconds at update 10, with a 6.550-second maximum, 7.16%
+measured-envelope occupancy, zero collisions, and 90% timeouts. Update 20 then
+collapsed to 0.122 seconds mean hover and 100% other flight failures. Refinement
+from the selected update-10 learner at `3e-5` reached 1.938 seconds after five
+updates and collapsed to 0.131 seconds after ten. The run was interrupted before
+another seed because repeating the same update path had no credible route to
+acceptance.
+
+The reset conversion matches the producer convention: flight traces store
+actual-minus-target ENU position error, and the environment reconstructs the
+corresponding target-relative pose. Training reward improved while validation
+collapsed. Actor relative parameter movement was 0.00379 at update 10, grew to
+0.0171 at update 20, and reached 0.0156 in refinement despite the lower learning
+rate. This isolates destructive policy updates rather than a reset sign error.
+
+Keep the measured reset population, reward, PPO batch, exploration, workloads,
+and acceptance criteria unchanged. End the `1e-4` phase at update 10 and validate
+at update 5 as well. Refine at `1e-5`, then `3e-6`, evaluating every five updates.
+The later phases continue to restore the complete validation-selected learner.
+Stop if the lower-rate path repeatedly loses the update-10 hover duration or
+flight stability.
