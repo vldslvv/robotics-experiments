@@ -2482,3 +2482,47 @@ workloads, and acceptance. Increase hover plateau patience from three to eight
 evaluations so the smaller updates have up to 40 updates to demonstrate progress.
 Advance comparison revision 29. Stop if actor movement still accelerates without
 held-out hover improvement.
+
+### 81. Preserve the one-epoch peak and inspect vertical hold error
+
+Date: 2026-09-02.
+
+Campaign `press-hover-one-epoch-20260902` ran only attempt 1, seed 42, from
+commit `10b0e2a`. The campaign coordinator was paused while the worker ran so a
+second attempt could not start. The worker completed 135 updates across all
+three phases and wrote a `validation_failed` attempt report. The coordinator
+was then stopped as requested, so the top-level report remains `training`; the
+completed source of truth is
+`.build/training/press-hover/press-hover-one-epoch-20260902/attempt_01_seed_42/attempt_report.json`.
+
+One PPO epoch improved the useful peak and delayed collapse. Phase 1 reached
+3.777 seconds mean episode-longest hover at update 10 and selected 6.071 seconds
+at update 15, with a 7.100-second maximum, 0.165 hover-envelope occupancy,
+2.996 mean pose-envelope utilization, zero success, zero collision, 0.120 other
+flight failure, and 0.880 timeout. The selected policy digest is
+`0ad43c10f13b26aae0a149fc818f7e03101a15a9a4876ad3671249b509c7efb5` and
+its learner checkpoint is
+`attempt_01_seed_42/checkpoints/phase_01_model_15.pt`.
+
+The selected validation reward means were -0.030797 stabilization, -0.000090
+action effort, +0.001718 hold progress, -0.004243 terminal outcome, and
+-0.033413 total. Phase 1 fell to 0.111 seconds at update 25. After restoring
+update 15, the `1e-5` phase peaked at 3.763 seconds and the `3e-6` phase peaked
+at 5.370 seconds; neither improved the selected actor. Eight-check patience did
+not uncover a late improvement and spent 120 updates after selection. Restore
+hover plateau patience to three before another campaign.
+
+The selected actor already passes every attitude check and every horizontal
+position check. Its remaining trace failures are concentrated in vertical
+hold: vertical RMSE is 0.02683 m against 0.01815 m, vertical p95 is 0.03119 m
+against 0.03052 m, and total-position RMSE is 0.04180 m against 0.03963 m. Its
+minimum closest range is also 0.39840 m against 0.40000 m. Success is zero
+because the full measured envelope is not held continuously for 30 seconds;
+other flight failure is 0.120.
+
+Before changing the optimizer or adding reward terms, inspect deterministic
+update-15 trajectories and actor outputs by position axis. Confirm whether the
+vertical miss is a constant command bias, a reset/reference mismatch, or drift
+over time. Then make one narrow correction at that source and compare against
+the immutable update-15 actor. Do not start seed 43 or refactor away the failed
+paths until a policy passes fresh test acceptance.
