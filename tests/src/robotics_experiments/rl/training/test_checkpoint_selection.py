@@ -66,35 +66,16 @@ def _press_result(**overrides):
         "episodes": 300,
         "success_rate": 0.95,
         "collision_rate": 0.01,
-        "body_collision_rate": 0.006,
-        "pusher_collision_rate": 0.004,
         "other_flight_failure_rate": 0.0,
         "range_undershoot_rate": 0.0,
         "timeout_rate": 0.04,
-        "target_range_occupancy_rate": 1.0,
-        "target_alignment_occupancy_rate": 1.0,
-        "target_attitude_occupancy_rate": 1.0,
-        "linear_speed_threshold_occupancy_rate": 1.0,
-        "angular_speed_threshold_occupancy_rate": 1.0,
-        "contact_clear_rate": 1.0,
         "hover_envelope_occupancy_rate": 0.95,
         "hover_envelope_utilization_mean": 0.1,
         "position_envelope_utilization_mean": 0.1,
         "attitude_envelope_utilization_mean": 0.1,
         "episode_longest_hover_duration_mean_s": 28.5,
         "episode_longest_hover_duration_max_s": 30.0,
-        "required_hover_duration_s": 30.0,
-        "mean_closest_range_m": 0.41,
         "min_closest_range_m": 0.405,
-        "median_completion_time_s": 2.0,
-        "mean_terminal_range_cost": 0.0,
-        "mean_trajectory_alignment_cost": 0.1,
-        "mean_relative_attitude_error_cost": 0.1,
-        "mean_velocity_tracking_cost": 0.1,
-        "mean_angular_velocity_cost": 0.1,
-        "mean_upright_error_cost": 0.1,
-        "mean_action_delta_cost": 0.1,
-        "mean_completion_time_fraction": 0.2,
     }
     values.update(overrides)
     return PressApproachEvaluationResult(
@@ -117,32 +98,26 @@ def _press_result(**overrides):
 
 
 def _scored(**overrides) -> PolicyEvaluation:
-    from robotics_experiments.config import load_config
     from robotics_experiments.workflows.isaac_lab import press_policy_evaluation
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     return press_policy_evaluation(
         iteration=10,
         checkpoint_path=Path("logs/model_10.pt"),
         policy_digest="digest",
         result=_press_result(**overrides),
-        evaluation_config=config.rl.press.evaluation,
         source="fresh",
     )
 
 
 def test_unavailable_hover_statistics_keep_the_complete_null_metric_contract() -> None:
-    from robotics_experiments.config import load_config
     from robotics_experiments.rl.training._monitoring import evaluation_metric_names
     from robotics_experiments.workflows.isaac_lab import press_policy_evaluation
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_hover_quad.yaml")
     evaluation = press_policy_evaluation(
         iteration=10,
         checkpoint_path=Path("logs/model_10.pt"),
         policy_digest="digest",
         result=replace(_press_result(), hover_statistics=()),
-        evaluation_config=config.rl.press.evaluation,
         source="fresh",
     )
     hover_metrics = tuple(
@@ -193,45 +168,14 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
     )
 
 
-@pytest.mark.parametrize(
-    ("field", "better", "worse"),
-    [
-        ("success_rate", 0.99, 0.95),
-        ("collision_rate", 0.0, 0.01),
-        ("other_flight_failure_rate", 0.0, 0.01),
-        ("timeout_rate", 0.0, 0.04),
-        ("episode_longest_hover_duration_mean_s", 30.0, 15.0),
-        ("mean_terminal_range_cost", 0.0, 0.1),
-        ("mean_trajectory_alignment_cost", 0.0, 0.1),
-        ("mean_relative_attitude_error_cost", 0.0, 0.1),
-        ("mean_velocity_tracking_cost", 0.0, 0.1),
-        ("mean_angular_velocity_cost", 0.0, 0.1),
-        ("mean_upright_error_cost", 0.0, 0.1),
-        ("mean_action_delta_cost", 0.0, 0.1),
-        ("mean_completion_time_fraction", 0.0, 0.2),
-    ],
-)
-def test_evaluation_diagnostic_cost_preserves_every_configured_component(
-    field: str,
-    better: float,
-    worse: float,
-) -> None:
-    assert _scored(**{field: better}).metric("evaluation_diagnostic_cost") < _scored(
-        **{field: worse}
-    ).metric("evaluation_diagnostic_cost")
-
-
-def test_acceptance_is_separate_from_evaluation_cost() -> None:
+def test_acceptance_uses_only_named_evaluation_metrics() -> None:
     from robotics_experiments.config import load_config
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     evaluation = _scored(
         collision_rate=0.0,
-        body_collision_rate=0.0,
-        pusher_collision_rate=0.0,
         min_closest_range_m=0.399,
     )
-    assert evaluation.metric("evaluation_diagnostic_cost") >= 0.0
     acceptance = evaluate_press_acceptance(
         criteria=_acceptance_criteria(config),
         evaluation=evaluation,
@@ -249,8 +193,6 @@ def test_acceptance_includes_configured_range_safety_boundary() -> None:
         criteria=_acceptance_criteria(config),
         evaluation=_scored(
             collision_rate=0.0,
-            body_collision_rate=0.0,
-            pusher_collision_rate=0.0,
             min_closest_range_m=0.40,
         ),
     )
@@ -260,7 +202,7 @@ def test_acceptance_includes_configured_range_safety_boundary() -> None:
 @pytest.mark.parametrize(
     ("overrides", "failed_gate"),
     [
-        ({"median_completion_time_s": float("nan")}, "trace finiteness"),
+        ({"hover_envelope_utilization_mean": float("nan")}, "trace finiteness"),
         ({"success_rate": 0.94}, "success rate"),
         ({"collision_rate": 0.02}, "collision rate"),
         ({"min_closest_range_m": 0.399}, "minimum closest range"),
@@ -289,8 +231,6 @@ def test_every_flight_parameter_statistic_is_binding(metric_name: str) -> None:
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     evaluation = _scored(
         collision_rate=0.0,
-        body_collision_rate=0.0,
-        pusher_collision_rate=0.0,
     )
     registered_name = f"flight_parameters.position_error.{metric_name}"
     limit = next(

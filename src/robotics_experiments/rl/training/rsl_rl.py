@@ -170,12 +170,12 @@ class _PresentationWriter:
             previous=self._critic_parameters,
         )
         self._write(
-            tag="train/optimization/actor_relative_parameter_change",
+            tag="train/04_optimization/actor_relative_parameter_change",
             value=actor_change,
             step=self._presentation_step,
         )
         self._write(
-            tag="train/optimization/critic_relative_parameter_change",
+            tag="train/04_optimization/critic_relative_parameter_change",
             value=critic_change,
             step=self._presentation_step,
         )
@@ -191,24 +191,19 @@ class _PresentationWriter:
         self._last_learner_step = learner_step
         self._presentation_step += 1
         step = self._presentation_step
-        self._write(tag="train/schedule/phase", value=self._phase_number, step=step)
+        self._write(tag="train/05_schedule/phase", value=self._phase_number, step=step)
         self._write(
-            tag="train/schedule/reset_envelope_scale",
-            value=self._phase.reset_envelope_scale,
-            step=step,
-        )
-        self._write(
-            tag="train/optimization/learning_rate",
+            tag="train/04_optimization/learning_rate",
             value=self._phase.learning_rate,
             step=step,
         )
         if self._phase.range_undershoot_min_m is not None:
             self._write(
-                tag="train/schedule/recovery_boundary_m",
+                tag="train/05_schedule/recovery_boundary_m",
                 value=self._phase.range_undershoot_min_m,
                 step=step,
             )
-        self._write(tag="train/schedule/checkpoint_update", value=learner_step, step=step)
+        self._write(tag="train/05_schedule/checkpoint_update", value=learner_step, step=step)
 
     def add_scalar(self, tag: str, scalar_value, global_step: int, /, *args, **kwargs) -> None:
         del args, kwargs
@@ -223,42 +218,42 @@ class _PresentationWriter:
         if tag.startswith("train/"):
             mapped = tag
         elif tag in {"Loss/value", "Loss/value_function"}:
-            mapped = "train/optimization/critic_return_mse"
+            mapped = "train/04_optimization/critic_return_mse"
         elif tag == "Loss/surrogate":
-            mapped = "train/optimization/ppo_clipped_surrogate_loss"
+            mapped = "train/04_optimization/ppo_clipped_surrogate_loss"
         elif tag == "Loss/entropy":
-            mapped = "train/optimization/action_distribution_entropy"
+            mapped = "train/04_optimization/action_distribution_entropy"
         elif tag == "Policy/mean_noise_std":
-            mapped = "train/optimization/policy_noise_standard_deviation"
+            mapped = "train/04_optimization/policy_noise_standard_deviation"
         elif tag == "Train/mean_reward":
-            mapped = "train/reward/recent_100_episode_return_mean"
+            mapped = "train/02_progress/recent_100_episode_return_mean"
         elif tag == "Train/mean_episode_length":
-            mapped = "train/outcome/recent_100_episode_length_mean_steps"
+            mapped = "train/02_progress/recent_100_episode_length_mean_steps"
         elif tag == "Perf/total_fps":
-            mapped = "train/performance/fps"
+            mapped = "train/06_performance/fps"
         elif tag in {"Perf/collection_time", "Perf/collection time"}:
             self._collection_time_s = float(scalar_value)
-            mapped = "train/performance/rollout_time_s"
+            mapped = "train/06_performance/rollout_time_s"
         elif tag == "Perf/learning_time":
             learning_time_s = float(scalar_value)
             self._write(
-                tag="train/performance/total_update_time_s",
+                tag="train/06_performance/total_update_time_s",
                 value=self._collection_time_s + learning_time_s,
                 step=step,
             )
             if torch.cuda.is_available():
                 self._write(
-                    tag="system/train/torch_gpu_memory_allocated_gib_peak",
+                    tag="system/train/01_gpu/torch_gpu_memory_allocated_gib_peak",
                     value=torch.cuda.max_memory_allocated() / 1024.0**3,
                     step=step,
                 )
                 self._write(
-                    tag="system/train/torch_gpu_memory_reserved_gib_peak",
+                    tag="system/train/01_gpu/torch_gpu_memory_reserved_gib_peak",
                     value=torch.cuda.max_memory_reserved() / 1024.0**3,
                     step=step,
                 )
                 torch.cuda.reset_peak_memory_stats()
-            mapped = "train/performance/optimizer_update_time_s"
+            mapped = "train/06_performance/optimizer_update_time_s"
         else:
             raise ValueError(f"unregistered RSL-RL metric tag {tag!r}")
         self._write(tag=mapped, value=scalar_value, step=step)

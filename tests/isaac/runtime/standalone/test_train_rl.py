@@ -40,19 +40,20 @@ def _phase(
         learning_rate=1.0e-4,
         schedule="fixed",
         entropy_coef=0.0,
-        reset_envelope_scale=1.0,
         range_undershoot_min_m=range_undershoot_min_m,
     )
 
 
 def _inputs(tmp_path: Path):
+    flight_parameters = load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters")
     return SimpleNamespace(
         controller=SimpleNamespace(selected_settings=SimpleNamespace(hover_thrust_normalized=0.5)),
         controller_path=tmp_path / "resolved/controller.json",
         controller_digest="controller-digest",
-        flight_parameters=load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters"),
+        flight_parameters=flight_parameters,
         flight_parameters_path=tmp_path / "resolved/flight-parameters",
         flight_parameters_digest="flight-parameters-digest",
+        hover_reset_samples=SimpleNamespace(summary=lambda **_kwargs: {"sample_count": 1.0}),
     )
 
 
@@ -171,7 +172,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         status="training",
         acceptance_criteria=acceptance_criteria,
     )
-    assert report["schema_version"] == 21
+    assert report["schema_version"] == 22
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -365,6 +366,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
                     "policy": str((candidate_dir / "policy.pt").relative_to(run_dir)),
                     "policy_digest": digest,
                     "source": "fresh-validation",
+                    "phase_index": 2,
                     "metrics": {"hover_envelope_utilization_mean": 2.0 - attempt_index},
                     "reward_means": {},
                 }
@@ -443,6 +445,33 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
     assert finalized["selected_attempt_index"] == 1
     assert [attempt["training_seed"] for attempt in finalized["attempts"]] == [42, 43]
     assert len({attempt["worker_pid"] for attempt in finalized["attempts"]}) == 2
+
+
+def test_campaign_stops_retrying_when_final_phase_did_not_improve(tmp_path: Path) -> None:
+    train_rl = _load_train_rl_module()
+    evaluation = PolicyEvaluation(
+        iteration=10,
+        checkpoint_path=tmp_path / "model.pt",
+        policy_digest="selected",
+        metrics=(),
+        reward_means=(),
+        source="fresh-validation",
+    )
+    selection = train_rl._AttemptSelection(  # noqa: SLF001
+        evaluation=evaluation,
+        artifact_dir=tmp_path,
+        validation=SimpleNamespace(passed=False),
+    )
+    assert train_rl._final_phase_failed_to_improve(  # noqa: SLF001
+        attempt={"evaluations": [{"policy_digest": "selected", "phase_index": 1}]},
+        selection=selection,
+        phase_count=3,
+    )
+    assert not train_rl._final_phase_failed_to_improve(  # noqa: SLF001
+        attempt={"evaluations": [{"policy_digest": "selected", "phase_index": 2}]},
+        selection=selection,
+        phase_count=3,
+    )
 
 
 def test_campaign_parent_preserves_active_attempt_on_interruption(
@@ -551,7 +580,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 21,
+        "schema_version": 22,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -583,16 +612,15 @@ def test_interrupt_handlers_raise_keyboard_interrupt(
             handler(0, None)  # type: ignore[operator]
 
 
-def test_training_tensorboard_rates_are_fraction_valued_and_namespaced() -> None:
+def test_training_tensorboard_metrics_are_small_and_namespaced() -> None:
     source = (
         REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py"
     ).read_text()
-    assert '"train/cumulative_outcome/collision_rate"' in source
-    assert '"train/cumulative_outcome/flight_failure_rate"' in source
-    assert '"train/cumulative_outcome/crash_rate"' in source
-    assert '"train/cumulative_outcome/altitude_failure_rate"' in source
-    assert '"train/cumulative_outcome/range_undershoot_rate"' in source
-    assert '"train/cumulative_outcome/relative_envelope_failure_rate"' in source
+    assert '"train/02_progress/hover_envelope_occupancy_rate"' in source
+    assert '"train/02_progress/hover_envelope_utilization_mean"' in source
+    assert '"train/03_reward/per_step_mean"' in source
+    assert '"train/cumulative_outcome/' not in source
+    assert '"train/target/' not in source
     assert "_percent" not in source
     assert "100.0 * self._" not in source
 
@@ -614,7 +642,7 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
         checkpoint_path=tmp_path / "model_20.pt",
         policy_digest="digest",
         metrics=(
-            EvaluationMetric("evaluation_diagnostic_cost", 0.25),
+            EvaluationMetric("episode_longest_hover_duration_mean_s", 15.0),
             EvaluationMetric("success_rate", 0.95),
             EvaluationMetric("collision_rate", 0.01),
             EvaluationMetric("other_flight_failure_rate", 0.0),
@@ -634,7 +662,7 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
         validation=SimpleNamespace(checks=(), passed=False),
     )
     metrics_log = capsys.readouterr().err
-    assert "diagnostic_cost=0.250000" in metrics_log
+    assert "longest_hover_mean_s=15.000" in metrics_log
     assert "progress=" not in metrics_log
     assert "stale=" not in metrics_log
 

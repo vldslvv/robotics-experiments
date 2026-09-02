@@ -46,8 +46,8 @@ from robotics_experiments.config import (
     load_config,
 )
 from robotics_experiments.controller import ControllerArtifact
-from robotics_experiments.flight_parameters import FlightParameters
-from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
+from robotics_experiments.flight_parameters import FlightParameters, load_flight_parameters_bundle
+from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME, HoverResetSamples
 from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation, RewardMean
 from robotics_experiments.rl.press import (
     AcceptanceCheck,
@@ -61,6 +61,7 @@ from robotics_experiments.rl.press._fingerprint import _press_comparison_fingerp
 from robotics_experiments.rl.training._monitoring import (
     metric_registry_payload,
     write_evaluation_scalars,
+    write_reset_scalars,
     write_system_scalars,
 )
 from robotics_experiments.rl.training._telemetry import TelemetrySampler, probe_telemetry
@@ -80,7 +81,7 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 21
+_REPORT_SCHEMA_VERSION = 22
 
 
 def _report(message: str) -> None:
@@ -168,6 +169,7 @@ def _build_env(
     experiment_config: ExperimentConfig,
     controller_settings,
     flight_parameters: FlightParameters,
+    hover_reset_samples: HoverResetSamples,
     policy_contract=None,
 ):
     # AppLauncher must start before the Isaac Lab workflow import.
@@ -181,6 +183,7 @@ def _build_env(
         num_envs=num_envs,
         policy_contract=policy_contract,
         flight_parameters=flight_parameters,
+        hover_reset_samples=hover_reset_samples,
     )
 
 
@@ -194,6 +197,7 @@ def _artifact_metadata(
     controller_digest: str,
     flight_parameters: FlightParameters,
     flight_parameters_digest: str,
+    hover_reset_samples: HoverResetSamples,
 ) -> dict[str, Any]:
     metadata = rl.policy_metadata(
         action_cfg=config.rl.action,
@@ -211,6 +215,10 @@ def _artifact_metadata(
             else None
         ),
     )
+    metadata["hover_reset_distribution"] = {
+        "source": "flight_parameters_policy_window",
+        **hover_reset_samples.summary(flight_parameters=flight_parameters),
+    }
     return metadata | source_metadata | {"artifact_run_id": artifact_run_id}
 
 
@@ -373,6 +381,8 @@ def _evaluation_worker_main(
     *,
     config_path: str,
     run_dir: str,
+    flight_parameters_path: str,
+    flight_parameters_digest: str,
     task_queue,
     result_queue,
     workload_role: str,
@@ -384,6 +394,12 @@ def _evaluation_worker_main(
     try:
         config = load_config(config_path)
         metadata = rl.load_policy_metadata(artifact_dir=Path(run_dir))
+        flight_parameters_bundle = load_flight_parameters_bundle(path=flight_parameters_path)
+        if flight_parameters_bundle.flight_parameters_digest != flight_parameters_digest:
+            raise ValueError("pinned flight parameters changed before evaluation")
+        if flight_parameters_bundle.flight_parameters != metadata.flight_parameters:
+            raise ValueError("evaluation flight parameters differ from policy metadata")
+        hover_reset_samples = rl.load_hover_reset_samples(bundle=flight_parameters_bundle)
         evaluation_config = config.rl.press.evaluation
         if workload_role == "validation":
             seeds = tuple(int(seed) for seed in evaluation_config.validation_seeds)
@@ -398,6 +414,7 @@ def _evaluation_worker_main(
             experiment_config=config,
             controller_settings=metadata.controller_settings,
             flight_parameters=metadata.flight_parameters,
+            hover_reset_samples=hover_reset_samples,
             policy_contract=metadata.contract,
         )
         telemetry = TelemetrySampler(
@@ -432,7 +449,6 @@ def _evaluation_worker_main(
                         policy=policy,
                         seeds=seeds,
                         episodes_per_seed=evaluation_config.episodes_per_seed,
-                        goal_config=config.rl.press.goal,
                         hold_steps=round(
                             config.rl.press.selected_stage().hold_s * config.rl.policy_rate_hz
                         ),
@@ -449,7 +465,6 @@ def _evaluation_worker_main(
                     checkpoint_path=Path(checkpoint_name),
                     policy_digest=str(policy_digest),
                     result=rollout,
-                    evaluation_config=evaluation_config,
                     source=f"fresh-{workload_role}",
                 )
                 result_queue.put(("evaluation", (evaluation, telemetry_interval)))
@@ -470,6 +485,8 @@ class _EvaluationWorker:
         *,
         config_path: Path,
         run_dir: Path,
+        flight_parameters_path: Path,
+        flight_parameters_digest: str,
         timeout_s: float,
         workload_role: str,
     ) -> None:
@@ -482,6 +499,8 @@ class _EvaluationWorker:
             kwargs={
                 "config_path": str(config_path),
                 "run_dir": str(run_dir),
+                "flight_parameters_path": str(flight_parameters_path),
+                "flight_parameters_digest": flight_parameters_digest,
                 "task_queue": self._tasks,
                 "result_queue": self._results,
                 "workload_role": workload_role,
@@ -560,7 +579,7 @@ def _report_evaluation(
     _report(
         f"evaluation phase={phase_index + 1} phase_iteration={phase_iteration} "
         f"iteration={evaluation.iteration} source={evaluation.source} "
-        f"diagnostic_cost={metrics['evaluation_diagnostic_cost']:.6f} "
+        f"longest_hover_mean_s={metrics['episode_longest_hover_duration_mean_s']:.3f} "
         f"success={metrics['success_rate']:.3f} "
         f"collision={metrics['collision_rate']:.3f} "
         f"other_flight_failure={metrics['other_flight_failure_rate']:.3f} "
@@ -713,6 +732,7 @@ def _training_report(
     telemetry_probe: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     criteria = _campaign_plateau(config=config)
+    reset_distribution = attempts[0].get("hover_reset_distribution") if attempts else None
     return {
         "schema_version": _REPORT_SCHEMA_VERSION,
         "report_kind": "campaign",
@@ -726,6 +746,7 @@ def _training_report(
         "phases": [asdict(phase) for phase in phases],
         "plateau_criteria": asdict(criteria),
         "metric_registry": metric_registry_payload(),
+        "hover_reset_distribution": reset_distribution,
         "telemetry": {
             "sample_interval_s": config.rl.training.telemetry_sample_interval_s,
             "diagnostic_gpu_utilization_target_rate": (
@@ -805,6 +826,17 @@ def _attempt_report(
     )
     payload["report_kind"] = "attempt"
     return payload
+
+
+def _final_phase_failed_to_improve(
+    *, attempt: dict[str, Any], selection: _AttemptSelection, phase_count: int
+) -> bool:
+    selected_record = next(
+        record
+        for record in attempt["evaluations"]
+        if record["policy_digest"] == selection.evaluation.policy_digest
+    )
+    return int(selected_record["phase_index"]) < phase_count - 1
 
 
 def _publish_selected(
@@ -946,6 +978,8 @@ def _run_final_test(
     config_path: Path,
     config: ExperimentConfig,
     selection: _AttemptSelection,
+    flight_parameters_path: Path,
+    flight_parameters_digest: str,
 ) -> tuple[PolicyEvaluation, dict[str, Any]]:
     """Run one fresh final test of the exact validation-selected actor."""
 
@@ -956,6 +990,8 @@ def _run_final_test(
     test_worker = _EvaluationWorker(
         config_path=config_path,
         run_dir=selection.artifact_dir,
+        flight_parameters_path=flight_parameters_path,
+        flight_parameters_digest=flight_parameters_digest,
         timeout_s=config.rl.training.evaluation_worker_timeout_s,
         workload_role="test",
     )
@@ -1136,6 +1172,13 @@ def _train_and_validate_attempt(
                 log_dir=str(run_dir / "logs" / f"attempt_{attempt_index + 1:02d}")
             )
             writer = attempt_writer
+            write_reset_scalars(
+                writer=attempt_writer,
+                summary=inputs.hover_reset_samples.summary(
+                    flight_parameters=inputs.flight_parameters
+                ),
+                step=0,
+            )
             setup_started = time.monotonic()
             _report(f"attempt setup START attempt={attempt_index + 1} seed={seed}")
             env, env_cfg = _build_env(
@@ -1145,6 +1188,7 @@ def _train_and_validate_attempt(
                 experiment_config=config,
                 controller_settings=controller_artifact.selected_settings,
                 flight_parameters=flight_parameters,
+                hover_reset_samples=inputs.hover_reset_samples,
             )
             runner: Any = None
             evaluate_candidate: Any = None
@@ -1160,6 +1204,7 @@ def _train_and_validate_attempt(
                         controller_digest=controller_digest,
                         flight_parameters=flight_parameters,
                         flight_parameters_digest=flight_parameters_digest,
+                        hover_reset_samples=inputs.hover_reset_samples,
                     )
                     if metadata["policy_interface"] != rl.PolicyInterface.PRESS.value:
                         raise ValueError("campaign requires the press deterministic evaluator")
@@ -1246,6 +1291,7 @@ def _train_and_validate_attempt(
                     "attempt_index": attempt_index,
                     "training_seed": seed,
                     "worker_pid": os.getpid(),
+                    "hover_reset_distribution": metadata["hover_reset_distribution"],
                     "evaluations": evaluation_records,
                     "phase_results": phase_results,
                     "attempted_updates": 0,
@@ -1293,6 +1339,8 @@ def _train_and_validate_attempt(
                         validation_worker = _EvaluationWorker(
                             config_path=config_path,
                             run_dir=attempt_dir,
+                            flight_parameters_path=inputs.flight_parameters_path,
+                            flight_parameters_digest=inputs.flight_parameters_digest,
                             timeout_s=training_config.evaluation_worker_timeout_s,
                             workload_role="validation",
                         )
@@ -1942,6 +1990,19 @@ def _run_policy_workflow(
             selected_attempt_index = attempt_index
             campaign_selection = selection
             break
+        if not args.procedural_smoke and _final_phase_failed_to_improve(
+            attempt=attempt,
+            selection=selection,
+            phase_count=len(phases),
+        ):
+            attempt["early_stop_reason"] = (
+                "the final refinement phase did not improve the selected earlier-phase actor"
+            )
+            _report(
+                "campaign EARLY STOP: final refinement did not improve the selected actor; "
+                "another independent seed would repeat an unpromising curriculum"
+            )
+            break
 
     if args.procedural_smoke:
         smoke_selection = _select_attempt_candidate(
@@ -2005,6 +2066,8 @@ def _run_policy_workflow(
             config_path=config_path,
             config=config,
             selection=campaign_selection,
+            flight_parameters_path=inputs.flight_parameters_path,
+            flight_parameters_digest=inputs.flight_parameters_digest,
         )
         acceptance = evaluate_press_acceptance(
             criteria=acceptance_criteria,

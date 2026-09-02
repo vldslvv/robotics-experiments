@@ -276,24 +276,11 @@ class PressApproachTerminationConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachEvaluationConfig(_FreezableConfig):
-    """Disjoint deterministic validation/test workloads and ranking costs."""
+    """Disjoint deterministic validation and test workloads."""
 
     validation_seeds: List[int]
     test_seeds: List[int]
     episodes_per_seed: int
-    collision_penalty: float
-    flight_failure_penalty: float
-    timeout_penalty: float
-    non_success_penalty: float
-    dwell_progress_weight: float
-    terminal_range_weight: float
-    trajectory_alignment_weight: float
-    relative_attitude_error_weight: float
-    velocity_tracking_weight: float
-    angular_velocity_weight: float
-    upright_error_weight: float
-    action_delta_weight: float
-    completion_time_weight: float
 
 
 @dataclass
@@ -324,7 +311,6 @@ class RlTrainingPhaseConfig(_FreezableConfig):
     learning_rate: float
     schedule: str
     entropy_coef: float
-    reset_envelope_scale: float
     range_undershoot_min_m: float | None
 
 

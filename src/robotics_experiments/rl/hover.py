@@ -8,9 +8,18 @@ from typing import Generic, TypeVar, cast
 import numpy as np
 import torch
 
-from robotics_experiments.flight_parameters import FlightParameters
+from robotics_experiments.flight_parameters import (
+    FlightParameters,
+    FlightParametersBundle,
+    load_flight_trace,
+)
 
-__all__ = ["HoverEnvelopeEvaluation", "evaluate_hover_envelope"]
+__all__ = [
+    "HoverEnvelopeEvaluation",
+    "HoverResetSamples",
+    "evaluate_hover_envelope",
+    "load_hover_reset_samples",
+]
 
 ArrayT = TypeVar("ArrayT", np.ndarray, torch.Tensor)
 
@@ -28,6 +37,118 @@ class HoverEnvelopeEvaluation(Generic[ArrayT]):
     position_utilization: ArrayT
     attitude_utilization: ArrayT
     inside: ArrayT
+
+
+@dataclass(frozen=True)
+class HoverResetSamples:
+    """Paired target-relative poses from the measured policy windows."""
+
+    position_error_enu_m: tuple[tuple[float, float, float], ...]
+    attitude_error_flu_enu_wxyz: tuple[tuple[float, float, float, float], ...]
+
+    def summary(self, *, flight_parameters: FlightParameters) -> dict[str, float]:
+        """Summarize the fixed reset population for metadata and monitoring."""
+        position = np.asarray(self.position_error_enu_m)
+        attitude = np.asarray(self.attitude_error_flu_enu_wxyz)
+        evaluated = evaluate_hover_envelope(
+            flight_parameters=flight_parameters,
+            position_error_enu_m=position,
+            attitude_error_flu_enu_wxyz=attitude,
+        )
+        return {
+            "sample_count": float(position.shape[0]),
+            "position_error_enu_x_mean_m": float(position[:, 0].mean()),
+            "position_error_enu_y_mean_m": float(position[:, 1].mean()),
+            "position_error_enu_z_mean_m": float(position[:, 2].mean()),
+            "position_envelope_utilization_mean": float(evaluated.position_utilization.mean()),
+            "position_envelope_utilization_p95": float(
+                np.percentile(evaluated.position_utilization, 95.0)
+            ),
+            "position_envelope_utilization_max": float(evaluated.position_utilization.max()),
+            "attitude_envelope_utilization_mean": float(evaluated.attitude_utilization.mean()),
+            "attitude_envelope_utilization_p95": float(
+                np.percentile(evaluated.attitude_utilization, 95.0)
+            ),
+            "attitude_envelope_utilization_max": float(evaluated.attitude_utilization.max()),
+        }
+
+
+def _normalize_quaternion(quaternion: np.ndarray, /) -> np.ndarray:
+    return quaternion / np.linalg.norm(quaternion)
+
+
+def _multiply_quaternions(first: np.ndarray, second: np.ndarray, /) -> np.ndarray:
+    aw, ax, ay, az = first
+    bw, bx, by, bz = second
+    return np.asarray(
+        (
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        )
+    )
+
+
+def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSamples:
+    """Load paired final-window pose errors from one validated bundle."""
+
+    flight_parameters = bundle.flight_parameters
+    position_errors: list[tuple[float, float, float]] = []
+    attitude_errors: list[tuple[float, float, float, float]] = []
+    for trial_index in range(1, flight_parameters.hover_trial_count + 1):
+        trace = load_flight_trace(
+            bundle.run_dir / "evidence" / f"trial-{trial_index:03d}" / "trace.json"
+        )
+        target_position = np.asarray(trace.target_position_enu_m)
+        target_attitude = _normalize_quaternion(np.asarray(trace.target_attitude_flu_enu_wxyz))
+        target_attitude_inverse = target_attitude * np.asarray((1.0, -1.0, -1.0, -1.0))
+        policy_sample_count = flight_parameters.hover.trace_statistics[
+            trial_index - 1
+        ].policy_window_sample_count
+        for position, attitude in zip(
+            trace.position_enu_m[-policy_sample_count:],
+            trace.attitude_flu_enu_wxyz[-policy_sample_count:],
+            strict=True,
+        ):
+            position_error = np.asarray(position) - target_position
+            position_errors.append(
+                (
+                    float(position_error[0]),
+                    float(position_error[1]),
+                    float(position_error[2]),
+                )
+            )
+            relative_attitude = _normalize_quaternion(
+                _multiply_quaternions(
+                    target_attitude_inverse,
+                    _normalize_quaternion(np.asarray(attitude)),
+                )
+            )
+            if relative_attitude[0] < 0.0:
+                relative_attitude = -relative_attitude
+            attitude_errors.append(
+                (
+                    float(relative_attitude[0]),
+                    float(relative_attitude[1]),
+                    float(relative_attitude[2]),
+                    float(relative_attitude[3]),
+                )
+            )
+    expected_samples = sum(
+        trace.policy_window_sample_count for trace in flight_parameters.hover.trace_statistics
+    )
+    if len(position_errors) != expected_samples:
+        raise ValueError(
+            f"hover reset sample count {len(position_errors)} does not match "
+            f"flight parameters {expected_samples}"
+        )
+    if not position_errors:
+        raise ValueError("flight parameters contain no policy-window hover reset samples")
+    return HoverResetSamples(
+        position_error_enu_m=tuple(position_errors),
+        attitude_error_flu_enu_wxyz=tuple(attitude_errors),
+    )
 
 
 def _as_array(*, values: tuple[float, ...], reference: ArrayT) -> ArrayT:

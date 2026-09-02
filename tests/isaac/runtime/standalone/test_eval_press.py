@@ -126,97 +126,42 @@ def test_approach_evaluation_aggregation() -> None:
     )
 
     common = {
-        "target_range_occupancy_rate": 0.8,
-        "target_alignment_occupancy_rate": 0.7,
-        "target_attitude_occupancy_rate": 0.9,
-        "linear_speed_threshold_occupancy_rate": 0.6,
-        "angular_speed_threshold_occupancy_rate": 0.85,
-        "contact_clear_rate": 0.95,
         "hover_envelope_occupancy_rate": 0.5,
         "hover_envelope_utilization_mean": 0.4,
         "position_envelope_utilization_mean": 0.3,
         "attitude_envelope_utilization_mean": 0.2,
-        "terminal_range_cost": 0.2,
-        "trajectory_alignment_cost": 0.3,
-        "relative_attitude_error_cost": 0.4,
-        "velocity_tracking_cost": 0.5,
-        "angular_velocity_cost": 0.6,
-        "upright_error_cost": 0.7,
-        "action_delta_cost": 0.8,
-        "completion_time_fraction": 0.5,
     }
     summary = summarize_press_approach_episodes(
         episodes=(
             PressApproachEpisodeMetrics(
                 success=True,
                 collision=False,
-                body_collision=False,
-                pusher_collision=False,
                 other_flight_failure=False,
                 range_undershoot=False,
                 timeout=False,
                 longest_hover_duration_s=30.0,
                 closest_range_m=0.405,
-                completion_time_s=1.0,
                 **common,
             ),
             PressApproachEpisodeMetrics(
                 success=False,
                 collision=True,
-                body_collision=True,
-                pusher_collision=False,
                 other_flight_failure=False,
                 range_undershoot=True,
                 timeout=False,
                 longest_hover_duration_s=6.0,
                 closest_range_m=0.39,
-                completion_time_s=None,
                 **common,
             ),
         ),
-        required_hover_duration_s=30.0,
     )
     assert summary.episodes == 2
     assert summary.success_rate == 0.5
     assert summary.collision_rate == 0.5
-    assert summary.body_collision_rate == 0.5
     assert summary.range_undershoot_rate == 0.5
     assert summary.episode_longest_hover_duration_mean_s == 18.0
     assert summary.episode_longest_hover_duration_max_s == 30.0
-    assert summary.mean_closest_range_m == pytest.approx(0.3975)
     assert summary.min_closest_range_m == pytest.approx(0.39)
-    assert summary.median_completion_time_s == 1.0
-    assert summary.mean_terminal_range_cost == pytest.approx(0.2)
-    assert summary.mean_trajectory_alignment_cost == pytest.approx(0.3)
-    assert summary.mean_relative_attitude_error_cost == pytest.approx(0.4)
-    assert summary.mean_velocity_tracking_cost == pytest.approx(0.5)
-    assert summary.mean_angular_velocity_cost == pytest.approx(0.6)
-    assert summary.mean_completion_time_fraction == pytest.approx(0.5)
-
-
-def test_trajectory_cost_tracks_full_contact_frame_target_velocity() -> None:
-    torch = pytest.importorskip("torch")
-    from robotics_experiments.workflows.isaac_lab import press_evaluation
-
-    observation = torch.zeros((1, 34))
-    observation[:, :3] = torch.tensor([[0.45, 0.03, 0.04]])
-    observation[:, 3:7] = torch.tensor([[0.0, 0.0, 0.0, 1.0]])
-    observation[:, 10:13] = torch.tensor([[0.0, 0.06, 0.08]])
-    observation[:, 19] = 1.0
-    costs = press_evaluation._trajectory_costs(  # noqa: SLF001
-        observation=observation,
-        action=torch.zeros((1, 4)),
-        goal_config=_goal(),
-    )
-
-    assert costs[2].item() == pytest.approx(0.0, abs=1.0e-6)
-    observation[:, 12] = -0.02
-    mismatched = press_evaluation._trajectory_costs(  # noqa: SLF001
-        observation=observation,
-        action=torch.zeros((1, 4)),
-        goal_config=_goal(),
-    )
-    assert mismatched[2].item() == pytest.approx(1.0)
 
 
 def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
@@ -309,7 +254,6 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         policy=FakePolicy(),
         seeds=(202,),
         episodes_per_seed=2,
-        goal_config=_goal(),
         hold_steps=100,
         flight_parameters=_FLIGHT_PARAMETERS,
         report=reports.append,
@@ -318,7 +262,6 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
     assert env.seeds == [202]
     assert result.summary.success_rate == 0.5
     assert result.summary.timeout_rate == 0.5
-    assert result.summary.median_completion_time_s == pytest.approx(0.05)
     assert len(result.hover_statistics) == 10
     assert all(statistics.maximum_absolute == 0.0 for statistics in result.hover_statistics)
     assert {reward.name for reward in result.reward_means} == set(reward_names)
@@ -346,19 +289,6 @@ def _config():
                     validation_seeds=(101, 202, 303),
                     test_seeds=(404, 505, 606),
                     episodes_per_seed=1,
-                    collision_penalty=4.0,
-                    flight_failure_penalty=3.0,
-                    timeout_penalty=2.0,
-                    non_success_penalty=1.0,
-                    dwell_progress_weight=2.0,
-                    terminal_range_weight=0.25,
-                    trajectory_alignment_weight=0.2,
-                    relative_attitude_error_weight=0.1,
-                    velocity_tracking_weight=0.2,
-                    angular_velocity_weight=0.1,
-                    upright_error_weight=0.1,
-                    action_delta_weight=0.1,
-                    completion_time_weight=0.15,
                 ),
             ),
         )
@@ -410,35 +340,16 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
             episodes=3,
             success_rate=1.0,
             collision_rate=0.0,
-            body_collision_rate=0.0,
-            pusher_collision_rate=0.0,
             other_flight_failure_rate=0.0,
             range_undershoot_rate=0.0,
             timeout_rate=0.0,
-            target_range_occupancy_rate=1.0,
-            target_alignment_occupancy_rate=1.0,
-            target_attitude_occupancy_rate=1.0,
-            linear_speed_threshold_occupancy_rate=1.0,
-            angular_speed_threshold_occupancy_rate=1.0,
-            contact_clear_rate=1.0,
             hover_envelope_occupancy_rate=1.0,
             hover_envelope_utilization_mean=0.0,
             position_envelope_utilization_mean=0.0,
             attitude_envelope_utilization_mean=0.0,
             episode_longest_hover_duration_mean_s=30.0,
             episode_longest_hover_duration_max_s=30.0,
-            required_hover_duration_s=30.0,
-            mean_closest_range_m=0.41,
             min_closest_range_m=0.405,
-            median_completion_time_s=1.0,
-            mean_terminal_range_cost=0.0,
-            mean_trajectory_alignment_cost=0.1,
-            mean_relative_attitude_error_cost=0.1,
-            mean_velocity_tracking_cost=0.1,
-            mean_angular_velocity_cost=0.1,
-            mean_upright_error_cost=0.1,
-            mean_action_delta_cost=0.1,
-            mean_completion_time_fraction=0.1,
         ),
         reward_means=(RewardMean(name="terminal_outcome", mean=1.0),),
         hover_statistics=tuple(
@@ -489,6 +400,14 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
         ),
     )
     monkeypatch.setattr(evaluator.torch.jit, "load", lambda *_args, **_kwargs: policy)
+    monkeypatch.setattr(
+        evaluator,
+        "prepare_policy_inputs",
+        lambda **_kwargs: SimpleNamespace(
+            flight_parameters=_FLIGHT_PARAMETERS,
+            hover_reset_samples="hover-reset-samples",
+        ),
+    )
     artifact_dir = tmp_path / "artifact"
     artifact_dir.mkdir()
     (artifact_dir / "policy.pt").write_bytes(policy_bytes)
@@ -541,6 +460,14 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         evaluator.torch.jit,
         "load",
         lambda *_args, **_kwargs: SimpleNamespace(eval=lambda: None),
+    )
+    monkeypatch.setattr(
+        evaluator,
+        "prepare_policy_inputs",
+        lambda **_kwargs: SimpleNamespace(
+            flight_parameters=_FLIGHT_PARAMETERS,
+            hover_reset_samples="hover-reset-samples",
+        ),
     )
     monkeypatch.setattr(
         workflow,

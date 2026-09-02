@@ -39,20 +39,7 @@ def test_press_episode_counters_exist_before_phase_configuration():
             and node.targets[0].value.id == "self"
         }
 
-    counters = {
-        "_completed_episode_count",
-        "_successful_episode_count",
-        "_collision_episode_count",
-        "_body_collision_episode_count",
-        "_pusher_collision_episode_count",
-        "_flight_failure_episode_count",
-        "_crash_episode_count",
-        "_altitude_failure_episode_count",
-        "_range_undershoot_episode_count",
-        "_relative_envelope_episode_count",
-        "_timeout_episode_count",
-    }
-    assert counters <= assigned_attributes(methods["__init__"])
+    assert "_completed_episode_count" in assigned_attributes(methods["__init__"])
     assert "_training_minimum_range_m" in assigned_attributes(methods["__init__"])
     assert "_training_minimum_range_m" in assigned_attributes(methods["configure_training_phase"])
 
@@ -164,6 +151,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
 
     contract = types.SimpleNamespace(policy_interface=PolicyInterface.PRESS)
     flight_parameters = object()
+    hover_reset_samples = object()
     calls = {}
     env_cfg = types.SimpleNamespace(scene=types.SimpleNamespace(num_envs=1))
     factory_module = types.SimpleNamespace(
@@ -192,6 +180,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
         num_envs=8,
         policy_contract=contract,
         flight_parameters=flight_parameters,
+        hover_reset_samples=hover_reset_samples,
     )
 
     assert env == "environment"
@@ -201,6 +190,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     assert calls["gym"][1]["policy_contract"] is contract
     assert calls["gym"][1]["controller_settings"] == "aligned-controller"
     assert calls["gym"][1]["flight_parameters"] is flight_parameters
+    assert calls["gym"][1]["hover_reset_samples"] is hover_reset_samples
     assert env_cfg.scene.num_envs == 8
 
 

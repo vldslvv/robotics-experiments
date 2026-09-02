@@ -83,7 +83,7 @@ if [ "${scalar_poll_count}" -lt "${SCALAR_READY_AFTER_POLLS}" ]; then
     printf '{}\\n'
     exit 0
 fi
-printf '{"train/reward/recent_100_episode_return_mean": {}}\\n'
+printf '{"train/02_progress/recent_100_episode_return_mean": {}}\\n'
 exit 0
 """,
     )

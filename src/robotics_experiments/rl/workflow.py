@@ -30,6 +30,7 @@ from robotics_experiments.controller import (
     resolve_controller_path,
 )
 from robotics_experiments.flight_parameters import FlightParameters, load_flight_parameters_bundle
+from robotics_experiments.rl.hover import HoverResetSamples, load_hover_reset_samples
 
 __all__ = ["PolicyInputs", "prepare_policy_inputs"]
 
@@ -44,6 +45,7 @@ class PolicyInputs:
     flight_parameters: FlightParameters
     flight_parameters_path: Path
     flight_parameters_digest: str
+    hover_reset_samples: HoverResetSamples
 
 
 def _file_sha256(path: Path, /) -> str:
@@ -139,6 +141,7 @@ def prepare_policy_inputs(
         flight_parameters=flight_parameters,
         flight_parameters_path=bundle.run_dir,
         flight_parameters_digest=bundle.flight_parameters_digest,
+        hover_reset_samples=load_hover_reset_samples(bundle=bundle),
     )
 
 
@@ -164,4 +167,5 @@ def _load_pinned_policy_inputs(
         flight_parameters=bundle.flight_parameters,
         flight_parameters_path=bundle.run_dir,
         flight_parameters_digest=flight_parameters_digest,
+        hover_reset_samples=load_hover_reset_samples(bundle=bundle),
     )

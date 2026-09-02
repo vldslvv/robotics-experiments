@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from robotics_experiments.config import ExperimentConfig, load_config
-from robotics_experiments.rl import POLICY_FILENAME, validate_policy_artifact
+from robotics_experiments.rl import POLICY_FILENAME, prepare_policy_inputs, validate_policy_artifact
 from robotics_experiments.rl.press import (
     create_press_acceptance_criteria,
     evaluate_press_acceptance,
@@ -59,6 +59,9 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     )
     if metadata.values.get("comparison_fingerprint") != comparison_fingerprint:
         raise ValueError("published policy does not match the selected press configuration")
+    inputs = prepare_policy_inputs(config=config, repo_root=_repo_root())
+    if inputs.flight_parameters != metadata.flight_parameters:
+        raise ValueError("configured flight parameters differ from policy metadata")
     env, env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
         experiment_config=config,
@@ -67,6 +70,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         num_envs=evaluation.episodes_per_seed,
         policy_contract=contract,
         flight_parameters=metadata.flight_parameters,
+        hover_reset_samples=inputs.hover_reset_samples,
     )
     try:
         if (
@@ -86,7 +90,6 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
             policy=policy,
             seeds=seeds,
             episodes_per_seed=evaluation.episodes_per_seed,
-            goal_config=config.rl.press.goal,
             hold_steps=round(stage.hold_s * config.rl.policy_rate_hz),
             flight_parameters=metadata.flight_parameters,
             report=_report,
@@ -101,19 +104,12 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         f"episodes={summary.episodes} "
         f"success={summary.success_rate:.3f} "
         f"collision={summary.collision_rate:.3f} "
-        f"body_collision={summary.body_collision_rate:.3f} "
-        f"pusher_collision={summary.pusher_collision_rate:.3f} "
         f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
         f"timeout={summary.timeout_rate:.3f} "
-        f"mean_closest_range_m={summary.mean_closest_range_m:.5f} "
         f"min_closest_range_m={summary.min_closest_range_m:.5f} "
-        f"median_completion_s={summary.median_completion_time_s!s} "
-        f"terminal_range_cost={summary.mean_terminal_range_cost:.5f} "
-        f"alignment_cost={summary.mean_trajectory_alignment_cost:.5f} "
-        f"velocity_tracking_cost={summary.mean_velocity_tracking_cost:.5f} "
-        f"upright_cost={summary.mean_upright_error_cost:.5f} "
-        f"action_delta_cost={summary.mean_action_delta_cost:.5f} "
-        f"completion_fraction={summary.mean_completion_time_fraction:.5f}"
+        f"longest_hover_mean_s={summary.episode_longest_hover_duration_mean_s:.3f} "
+        f"hover_occupancy_rate={summary.hover_envelope_occupancy_rate:.3f} "
+        f"hover_utilization_mean={summary.hover_envelope_utilization_mean:.3f}"
     )
     for reward in result.reward_means:
         _report(f"reward_mean {reward.name}={reward.mean:.6f}")
@@ -138,10 +134,8 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         checkpoint_path=artifact_dir / POLICY_FILENAME,
         policy_digest=digest,
         result=result,
-        evaluation_config=evaluation,
         source="independent",
     )
-    _report(f"evaluation_diagnostic_cost={evaluated.metric('evaluation_diagnostic_cost'):.6f}")
     acceptance = evaluate_press_acceptance(
         criteria=create_press_acceptance_criteria(
             config=config.rl.press.acceptance,

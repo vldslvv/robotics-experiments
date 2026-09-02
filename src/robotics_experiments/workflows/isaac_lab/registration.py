@@ -11,7 +11,7 @@ import gymnasium as gym
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.controller import ControllerSettings
 from robotics_experiments.flight_parameters import FlightParameters
-from robotics_experiments.rl import PolicyContract, PolicyInterface
+from robotics_experiments.rl import HoverResetSamples, PolicyContract, PolicyInterface
 
 __all__ = [
     "DRONE_HOVER_TASK_ID",
@@ -102,6 +102,7 @@ def make_isaac_lab_env(
     num_envs: int | None = None,
     policy_contract: PolicyContract | None = None,
     flight_parameters: FlightParameters | None = None,
+    hover_reset_samples: HoverResetSamples | None = None,
 ) -> tuple[gym.Env, object]:
     """Build a task, optionally interpreting actions through an artifact contract."""
     if not register_isaac_lab_tasks():
@@ -139,6 +140,9 @@ def make_isaac_lab_env(
     if task_id == SWITCH_PRESS_TASK_ID:
         if flight_parameters is None:
             raise ValueError("the press task requires a pinned flight parameters")
+        if hover_reset_samples is None:
+            raise ValueError("the press task requires pinned hover reset samples")
         env_kwargs["flight_parameters"] = flight_parameters
+        env_kwargs["hover_reset_samples"] = hover_reset_samples
     env = gym.make(task_id, **env_kwargs).unwrapped
     return env, env_cfg

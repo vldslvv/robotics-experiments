@@ -6,8 +6,12 @@ import numpy as np
 import pytest
 import torch
 
-from robotics_experiments.flight_parameters import evaluate_hover_pose, load_flight_parameters
-from robotics_experiments.rl import evaluate_hover_envelope
+from robotics_experiments.flight_parameters import (
+    evaluate_hover_pose,
+    load_flight_parameters,
+    load_flight_parameters_bundle,
+)
+from robotics_experiments.rl import evaluate_hover_envelope, load_hover_reset_samples
 
 _ENVELOPE = load_flight_parameters(
     Path(__file__).parents[3] / "fixtures/flight_parameters/flight_parameters.json"
@@ -57,3 +61,24 @@ def test_batched_evaluation_matches_flight_parameter_contract(backend: str) -> N
         [sample.attitude_utilization for sample in expected]
     )
     assert inside.tolist() == [sample.inside for sample in expected]
+
+
+def test_hover_resets_are_exact_paired_policy_window_samples() -> None:
+    bundle = load_flight_parameters_bundle(
+        path=Path(__file__).parents[3] / "fixtures/flight_parameters"
+    )
+    samples = load_hover_reset_samples(bundle=bundle)
+    assert samples.position_error_enu_m == ((0.0, 0.0, 0.0),)
+    assert samples.attitude_error_flu_enu_wxyz == ((1.0, 0.0, 0.0, 0.0),)
+    assert samples.summary(flight_parameters=bundle.flight_parameters) == {
+        "sample_count": 1.0,
+        "position_error_enu_x_mean_m": 0.0,
+        "position_error_enu_y_mean_m": 0.0,
+        "position_error_enu_z_mean_m": 0.0,
+        "position_envelope_utilization_mean": 0.0,
+        "position_envelope_utilization_p95": 0.0,
+        "position_envelope_utilization_max": 0.0,
+        "attitude_envelope_utilization_mean": 0.0,
+        "attitude_envelope_utilization_p95": 0.0,
+        "attitude_envelope_utilization_max": 0.0,
+    }

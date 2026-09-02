@@ -258,10 +258,6 @@ def _validate_training_phases(*, phases, path: str, range_limit_m: float) -> Non
             raise ValueError(f"{phase_path}.schedule must be 'fixed' or 'adaptive'")
         if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
             raise ValueError(f"{phase_path}.entropy_coef must be finite and non-negative")
-        if not math.isfinite(phase.reset_envelope_scale) or not (
-            0.0 < phase.reset_envelope_scale <= 1.0
-        ):
-            raise ValueError(f"{phase_path}.reset_envelope_scale must be in (0, 1]")
         if phase.range_undershoot_min_m is not None and (
             not math.isfinite(phase.range_undershoot_min_m)
             or not 0.0 < phase.range_undershoot_min_m <= range_limit_m
@@ -367,11 +363,6 @@ def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
     stage = press.selected_stage()
     if len(stage.training_hold_s) != len(stage.phases):
         raise ValueError("active press stage must provide one hold duration per training phase")
-    reset_scales = [phase.reset_envelope_scale for phase in stage.phases]
-    if not reset_scales or reset_scales != sorted(reset_scales) or reset_scales[-1] != 1.0:
-        raise ValueError(
-            "active press stage reset envelope scales must increase to the full envelope"
-        )
     if not math.isclose(
         sum(source.weight for source in stage.reset_mix), 1.0, rel_tol=0.0, abs_tol=1.0e-9
     ):
@@ -547,24 +538,6 @@ def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.acceptance.{name} must be between 0 and 1")
-    for name in (
-        "collision_penalty",
-        "flight_failure_penalty",
-        "timeout_penalty",
-        "non_success_penalty",
-        "dwell_progress_weight",
-        "terminal_range_weight",
-        "trajectory_alignment_weight",
-        "relative_attitude_error_weight",
-        "velocity_tracking_weight",
-        "angular_velocity_weight",
-        "upright_error_weight",
-        "action_delta_weight",
-        "completion_time_weight",
-    ):
-        value = getattr(evaluation, name)
-        if not math.isfinite(value) or value < 0.0:
-            raise ValueError(f"rl.press.evaluation.{name} must be finite and non-negative")
 
 
 def _validate_switches(experiment: ExperimentConfig) -> None:
