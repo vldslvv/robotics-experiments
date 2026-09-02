@@ -290,6 +290,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
     assert reward.stabilization_weight == 0.01
+    assert reward.action_effort_weight == 1.0
     assert reward.predictive_barrier_weight == 0.1
     assert reward.hold_progress_weight == 0.01
     assert reward.terminal_success_weight == 1.5

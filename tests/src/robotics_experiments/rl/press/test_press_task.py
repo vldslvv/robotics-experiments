@@ -51,6 +51,7 @@ _REWARD = PressApproachRewardConfig(
     position_progress_weight=0.1,
     stabilization_weight=0.01,
     predictive_barrier_weight=0.1,
+    action_effort_weight=1.0,
     hold_progress_weight=0.01,
     terminal_success_weight=1.5,
     terminal_failure_weight=3.0,
@@ -79,6 +80,7 @@ def _sample(
     vertical_m: float = 0.0,
     closing_speed_mps: float = 0.0,
     angular_speed_radps: float = 0.0,
+    action: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
     attitude_error_rad: float = 0.0,
     upright: float = 1.0,
     altitude_m: float = 1.0,
@@ -96,6 +98,7 @@ def _sample(
         attitude_error_flu_enu_wxyz=relative_quat_xyzw[:, [3, 0, 1, 2]],
         linear_velocity_mps=np.array([[closing_speed_mps, 0.0, 0.0]]),
         angular_velocity_radps=np.array([[angular_speed_radps, 0.0, 0.0]]),
+        normalized_action=np.array([action]),
         body_z_world_z=np.array([upright]),
         altitude_m=np.array([altitude_m]),
         body_collision_flag=np.array([body_collision]),
@@ -120,6 +123,7 @@ def _step(
     *,
     state: PressApproachState[np.ndarray] | None = None,
     sample: PressApproachInput[np.ndarray] | None = None,
+    approach_enabled: bool = True,
 ):
     return step_press_approach(
         state=_state() if state is None else state,
@@ -130,7 +134,7 @@ def _step(
         minimum_range_m=0.40,
         flight_parameters=_ENVELOPE,
         hold_steps=100,
-        approach_enabled=True,
+        approach_enabled=approach_enabled,
     )
 
 
@@ -207,6 +211,14 @@ def test_hover_reward_penalizes_current_pose_without_predictive_barrier() -> Non
     assert degraded.rewards.predictive_barrier[0] == 0.0
     assert recovered.rewards.stabilization[0] == 0.0
     assert degraded.rewards.stabilization[0] < -_REWARD.stabilization_weight
+
+
+def test_hover_penalizes_action_effort_but_approach_does_not() -> None:
+    action = (0.1, -0.2, 0.3, -0.4)
+    hover = _step(sample=_sample(range_m=0.41, action=action), approach_enabled=False)
+    approach = _step(sample=_sample(range_m=0.41, action=action), approach_enabled=True)
+    assert hover.rewards.action_effort[0] == pytest.approx(-0.075)
+    assert approach.rewards.action_effort[0] == 0.0
 
 
 def test_hold_progress_and_success_terminal_reward() -> None:

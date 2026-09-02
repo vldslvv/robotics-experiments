@@ -130,6 +130,7 @@ reward:
   position_progress_weight: 0.1
   stabilization_weight: 0.01
   predictive_barrier_weight: 0.1
+  action_effort_weight: 1.0
   hold_progress_weight: 0.01
   terminal_success_weight: 1.5
   terminal_failure_weight: 3.0

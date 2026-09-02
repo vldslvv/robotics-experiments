@@ -68,6 +68,7 @@ class PressApproachInput(Generic[ArrayT]):
     attitude_error_flu_enu_wxyz: ArrayT
     linear_velocity_mps: ArrayT
     angular_velocity_radps: ArrayT
+    normalized_action: ArrayT
     body_z_world_z: ArrayT
     altitude_m: ArrayT
     body_collision_flag: ArrayT
@@ -82,6 +83,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
     position_progress: ArrayT
     stabilization: ArrayT
     predictive_barrier: ArrayT
+    action_effort: ArrayT
     hold_progress: ArrayT
     terminal_outcome: ArrayT
 
@@ -92,6 +94,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
             self.position_progress
             + self.stabilization
             + self.predictive_barrier
+            + self.action_effort
             + self.hold_progress
             + self.terminal_outcome
         )
@@ -162,6 +165,12 @@ def _square(value: ArrayT) -> ArrayT:
     if isinstance(value, torch.Tensor):
         return value.square()
     return np.square(value)
+
+
+def _mean_last(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
+        return value.mean(dim=-1)
+    return value.mean(axis=-1)
 
 
 def _sqrt(value: ArrayT) -> ArrayT:
@@ -450,10 +459,16 @@ def step_press_approach(
     if not approach_enabled:
         stabilization = -reward_cfg.stabilization_weight * normalized_pose_error
         predictive_barrier = _zeros_like(value=normalized_position_error)
+    action_effort = _zeros_like(value=normalized_position_error)
+    if not approach_enabled:
+        action_effort = -reward_cfg.action_effort_weight * _mean_last(
+            _square(sample.normalized_action)
+        )
     rewards = PressApproachRewardTerms(
         position_progress=position_progress,
         stabilization=stabilization,
         predictive_barrier=predictive_barrier,
+        action_effort=action_effort,
         hold_progress=reward_cfg.hold_progress_weight * hold_progress_steps,
         terminal_outcome=(
             reward_cfg.terminal_success_weight * success

@@ -60,6 +60,7 @@ _TRAINING_REWARD_TERMS = (
     "position_progress",
     "stabilization",
     "predictive_barrier",
+    "action_effort",
     "hold_progress",
     "terminal_outcome",
 )
@@ -418,6 +419,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 self.drone.data.root_lin_vel_b,
             ),
             angular_velocity_radps=self.drone.data.root_ang_vel_b,
+            normalized_action=self.actions,
             body_z_world_z=body_z_world_z,
             altitude_m=self.drone.data.root_pos_w[:, 2],
             body_collision_flag=self._body_collision_latch.clone(),

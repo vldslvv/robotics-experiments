@@ -2441,3 +2441,23 @@ workloads, and acceptance unchanged. Run up to 100 updates per phase at `3e-5`,
 `1e-5`, and `3e-6`, evaluating every five updates under the existing three-check
 plateau. Advance comparison revision 27. Stop if the fresh low-rate path cannot
 produce sustained improvement in hover duration and utilization.
+
+### 79. Penalize persistent normalized hover commands
+
+Date: 2026-09-02.
+
+Campaign `press-hover-low-rate-scratch-20260902` started a fresh optimizer at
+`3e-5`. Mean episode-longest hover rose from 0.119 seconds at model zero to
+2.890 seconds at update 10, then fell to 1.882 seconds at update 15. At update
+20, the first validation seed collapsed to 0.124 seconds with 100% other flight
+failures. The campaign was interrupted during that validation. Starting Adam at
+the lower rate reduced the peak but did not change the learn-then-drift pattern,
+so optimizer history is not the cause.
+
+Add one hover-only squared normalized-action cost with weight 1.0. A compensating
+command remains favorable whenever it reduces the direct pose cost by more than
+its effort, while a persistent command that provides no pose benefit is charged
+on every step. Keep approach action effort at zero. Preserve the direct pose
+cost, 30-second hold, measured resets, fresh `3e-5` schedule, PPO settings,
+workloads, and acceptance. Advance comparison revision 28. Stop if action effort
+does not improve the update-10 hover duration or prevent the following collapse.

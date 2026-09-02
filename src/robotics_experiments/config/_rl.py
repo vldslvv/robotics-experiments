@@ -214,6 +214,7 @@ class PressApproachRewardConfig(_FreezableConfig):
     position_progress_weight: float
     stabilization_weight: float
     predictive_barrier_weight: float
+    action_effort_weight: float
     hold_progress_weight: float
     terminal_success_weight: float
     terminal_failure_weight: float
