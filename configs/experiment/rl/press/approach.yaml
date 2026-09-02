@@ -14,13 +14,13 @@ curriculum:
       training_hold_s: [30.0, 30.0, 30.0]
       episode_length_s: 40.0
       phases:
-        - max_iterations: 30
+        - max_iterations: 100
           evaluation_interval: 5
-          learning_rate: 1.0e-4
+          learning_rate: 3.0e-5
           schedule: fixed
           entropy_coef: 0.0
           range_undershoot_min_m: 0.38
-        - max_iterations: 60
+        - max_iterations: 100
           evaluation_interval: 5
           learning_rate: 1.0e-5
           schedule: fixed

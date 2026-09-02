@@ -179,17 +179,18 @@ pose-envelope utilization, requires a `0.003` improvement, and declares a
 plateau after 10 stale evaluations.
 
 Hover training uses a 40-second episode horizon; approach uses 45 seconds. The
-hover schedule runs up to 30 iterations at `1e-4`, up to 60 at `1e-5`, and up to 100
-at `3e-6`. Its phases use recovery boundaries of 0.38, 0.39, and 0.40 m. This
-ends the high-rate phase at the observed learning peak and limits actor movement
-during refinement. Every hover phase evaluates every five updates.
+hover schedule runs up to 100 iterations each at `3e-5`, `1e-5`, and `3e-6`.
+Its phases use recovery boundaries of 0.38, 0.39, and 0.40 m. Starting below
+`1e-4` keeps the fresh optimizer off the destructive high-rate update path;
+later phases retain the complete selected optimizer state. Every hover phase
+evaluates every five updates.
 
 Approach runs 50 iterations at `1e-4`, 30 at `3e-5`, and 100 at `1e-5`, with
 the strict 0.40 m recovery boundary throughout. Its broad phase evaluates every
 ten updates and both refinement phases evaluate every five. Model zero and every
 cadence-aligned phase boundary are evaluated; there is no extra boundary update.
 Hover and approach both train against the complete 30-second hold, and every
-hover phase uses the same measured reset population. Hover permits 190 attempted
+hover phase uses the same measured reset population. Hover permits 300 attempted
 PPO updates and approach
 permits 180. Training advances after a phase reaches its maximum or its plateau
 rule fires. Validation and test always sample the full pinned envelope.
@@ -332,7 +333,7 @@ trace-backed reset distribution, and every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
-metric-registry revision 18 and comparison revision 26; older report shapes are
+metric-registry revision 18 and comparison revision 27; older report shapes are
 unsupported.
 
 After selection, the exported actor is immutable. A new uncached worker runs the

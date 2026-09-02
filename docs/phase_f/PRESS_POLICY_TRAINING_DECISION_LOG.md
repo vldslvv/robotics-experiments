@@ -2419,3 +2419,25 @@ updates with five-update validation and the existing three-check plateau, so it
 can continue only while continuous hover improves. Keep the `1e-5` and `3e-6`
 refinement branches unchanged. Advance comparison revision 26. Stop if the
 single hold objective cannot improve past the current 3.333-second reference.
+
+### 78. Start the hover optimizer at a lower learning rate
+
+Date: 2026-09-02.
+
+Campaign `press-hover-full-hold-20260902` reproduced the direct-cost 3.333-second
+update-10 checkpoint exactly, showing that no early training rollout had used
+the former five-second success termination. Continuing the 30-second objective
+at `1e-4` then fell to 0.902, 0.126, and 0.126 seconds at updates 15, 20, and 25.
+The high-rate phase plateaued and restored update 10. Its first `1e-5`
+refinement seed reached only 1.607 seconds, so the campaign was interrupted
+without starting another attempt.
+
+Changing a restored optimizer's learning rate preserves Adam moments learned on
+the destructive `1e-4` path. Do not add an action penalty yet: a steady command
+may compensate controller bias, and validation does not currently identify the
+terminating flight axis. Start a fresh actor, critic, and optimizer at `3e-5`
+instead. Keep the direct pose cost, 30-second hold, measured resets, PPO batch,
+workloads, and acceptance unchanged. Run up to 100 updates per phase at `3e-5`,
+`1e-5`, and `3e-6`, evaluating every five updates under the existing three-check
+plateau. Advance comparison revision 27. Stop if the fresh low-rate path cannot
+produce sustained improvement in hover duration and utilization.

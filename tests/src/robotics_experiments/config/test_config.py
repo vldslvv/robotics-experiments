@@ -268,9 +268,9 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert stage.plateau.patience_evaluations == 10
     hover_stage = config.rl.press.curriculum.stages[0]
     assert hover_stage.training_hold_s == (30.0, 30.0, 30.0)
-    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (30, 60, 100)
+    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (100, 100, 100)
     assert tuple(phase.learning_rate for phase in hover_stage.phases) == (
-        1.0e-4,
+        3.0e-5,
         1.0e-5,
         3.0e-6,
     )
