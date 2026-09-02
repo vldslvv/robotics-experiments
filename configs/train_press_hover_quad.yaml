@@ -29,7 +29,7 @@ rl:
     lam: 0.95
     clip_param: 0.2
     value_loss_coef: 1.0
-    num_learning_epochs: 5
+    num_learning_epochs: 1
     num_mini_batches: 8
     desired_kl: 0.01
     max_grad_norm: 1.0

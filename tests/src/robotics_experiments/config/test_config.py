@@ -229,7 +229,6 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
 
     config = load_config(_ROOT / "train_press_approach_quad.yaml")
     training = config.rl.training
-    reward = config.rl.press.reward
     policy = config.rl.press.policy
 
     assert config.rl.action.action_dim == 4
@@ -278,7 +277,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert hover_stage.plateau.metric_name == "episode_longest_hover_duration_mean_s"
     assert hover_stage.plateau.direction == "maximize"
     assert hover_stage.plateau.minimum_delta == 0.10
-    assert hover_stage.plateau.patience_evaluations == 3
+    assert hover_stage.plateau.patience_evaluations == 8
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
     assert training.attempt_seeds == (42, 43, 44)
@@ -287,6 +286,15 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
     assert policy.critic.hidden_dims == (256, 256, 128)
+
+
+def test_press_hover_uses_one_ppo_epoch_per_rollout():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "train_press_hover_quad.yaml")
+    policy = config.rl.press.policy
+    reward = config.rl.press.reward
+    assert config.rl.training.num_learning_epochs == 1
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
     assert reward.stabilization_weight == 0.01

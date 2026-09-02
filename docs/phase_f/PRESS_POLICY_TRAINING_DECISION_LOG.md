@@ -2461,3 +2461,24 @@ on every step. Keep approach action effort at zero. Preserve the direct pose
 cost, 30-second hold, measured resets, fresh `3e-5` schedule, PPO settings,
 workloads, and acceptance. Advance comparison revision 28. Stop if action effort
 does not improve the update-10 hover duration or prevent the following collapse.
+
+### 80. Use one PPO epoch per hover rollout
+
+Date: 2026-09-02.
+
+Campaign `press-hover-action-effort-20260902` improved mean episode-longest
+hover to 3.413 seconds at update 10 and retained 2.660 seconds at update 15,
+compared with 2.890 and 1.882 seconds without action effort. Update 20 still
+collapsed to 0.122 seconds, but 83.67% of episodes timed out instead of all
+failing. The campaign was interrupted before another checkpoint or seed.
+
+Training actor movement rose from about 0.0012 per update near update 15 to
+0.0046 by the interrupted update 24 while the PPO surrogate remained near zero.
+The action-effort mean stayed around -0.0009 because exploration noise dominates
+the sampled action. Reduce `num_learning_epochs` from five to one so each rollout
+is optimized once before new on-policy data is collected. Preserve the action
+cost, direct pose cost, 30-second hold, measured resets, learning rates, batch,
+workloads, and acceptance. Increase hover plateau patience from three to eight
+evaluations so the smaller updates have up to 40 updates to demonstrate progress.
+Advance comparison revision 29. Stop if actor movement still accelerates without
+held-out hover improvement.

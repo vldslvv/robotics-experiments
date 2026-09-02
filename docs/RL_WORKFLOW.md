@@ -174,7 +174,7 @@ The plateau detector reads only the configured metric, direction, minimum delta,
 and patience. It never reads the PPO reward or any acceptance check. The active
 curriculum stage owns the rule. Hover maximizes the mean longest continuous
 hover duration in seconds, requires a `0.10` second improvement, and declares a
-plateau after three stale evaluations. Approach minimizes mean measured
+plateau after eight stale evaluations. Approach minimizes mean measured
 pose-envelope utilization, requires a `0.003` improvement, and declares a
 plateau after 10 stale evaluations.
 
@@ -183,7 +183,8 @@ hover schedule runs up to 100 iterations each at `3e-5`, `1e-5`, and `3e-6`.
 Its phases use recovery boundaries of 0.38, 0.39, and 0.40 m. Starting below
 `1e-4` keeps the fresh optimizer off the destructive high-rate update path;
 later phases retain the complete selected optimizer state. Every hover phase
-evaluates every five updates.
+evaluates every five updates. Hover PPO makes one optimization pass over each
+rollout so policy updates stay close to current on-policy data.
 
 Approach runs 50 iterations at `1e-4`, 30 at `3e-5`, and 100 at `1e-5`, with
 the strict 0.40 m recovery boundary throughout. Its broad phase evaluates every
@@ -334,7 +335,7 @@ trace-backed reset distribution, and every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
-metric-registry revision 18 and comparison revision 28; older report shapes are
+metric-registry revision 18 and comparison revision 29; older report shapes are
 unsupported.
 
 After selection, the exported actor is immutable. A new uncached worker runs the

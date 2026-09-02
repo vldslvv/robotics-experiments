@@ -36,7 +36,7 @@ curriculum:
         metric_name: episode_longest_hover_duration_mean_s
         direction: maximize
         minimum_delta: 0.10
-        patience_evaluations: 3
+        patience_evaluations: 8
     - name: approach
       reset_mix:
         - source: measured_navigation_handoff
