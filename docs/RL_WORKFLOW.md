@@ -98,10 +98,10 @@ The hover stage starts around the common 0.48 m press target using paired poses
 drawn directly from every final policy window in the pinned flight-parameter
 traces. Position and attitude from one measured sample always stay together;
 the reset distribution adds no synthetic noise. Its training phases require
-5, 15, then 30 continuous seconds inside that measured envelope. The approach
-stage adds measured navigation-handoff resets while retaining target-local
-envelope resets. Both remain parts of the press task; neither activates the
-switch yet.
+30 continuous seconds inside that measured envelope in every optimization
+phase. The approach stage adds measured navigation-handoff resets while
+retaining target-local envelope resets. Both remain parts of the press task;
+neither activates the switch yet.
 
 Success uses only the measured position and pose bounds: asymmetric ENU axis
 bounds, horizontal and 3D position bounds, roll/pitch/yaw bounds, tilt, and full
@@ -179,7 +179,7 @@ pose-envelope utilization, requires a `0.003` improvement, and declares a
 plateau after 10 stale evaluations.
 
 Hover training uses a 40-second episode horizon; approach uses 45 seconds. The
-hover schedule runs 10 iterations at `1e-4`, up to 60 at `1e-5`, and up to 100
+hover schedule runs up to 30 iterations at `1e-4`, up to 60 at `1e-5`, and up to 100
 at `3e-6`. Its phases use recovery boundaries of 0.38, 0.39, and 0.40 m. This
 ends the high-rate phase at the observed learning peak and limits actor movement
 during refinement. Every hover phase evaluates every five updates.
@@ -188,9 +188,9 @@ Approach runs 50 iterations at `1e-4`, 30 at `3e-5`, and 100 at `1e-5`, with
 the strict 0.40 m recovery boundary throughout. Its broad phase evaluates every
 ten updates and both refinement phases evaluate every five. Model zero and every
 cadence-aligned phase boundary are evaluated; there is no extra boundary update.
-Hover expands the continuous measured-envelope hold from 5 to 15 to 30 seconds
-while every phase uses the same measured reset population. Approach uses the
-complete 30-second hold. Hover permits 170 attempted PPO updates and approach
+Hover and approach both train against the complete 30-second hold, and every
+hover phase uses the same measured reset population. Hover permits 190 attempted
+PPO updates and approach
 permits 180. Training advances after a phase reaches its maximum or its plateau
 rule fires. Validation and test always sample the full pinned envelope.
 
@@ -332,7 +332,7 @@ trace-backed reset distribution, and every attempt, phase parent, raw
 validation metrics, exact TensorBoard step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
-metric-registry revision 18 and comparison revision 25; older report shapes are
+metric-registry revision 18 and comparison revision 26; older report shapes are
 unsupported.
 
 After selection, the exported actor is immutable. A new uncached worker runs the

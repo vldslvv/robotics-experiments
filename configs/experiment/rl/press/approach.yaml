@@ -11,10 +11,10 @@ curriculum:
         - source: pinned_flight_parameters
           weight: 1.0
       hold_s: 30.0
-      training_hold_s: [5.0, 15.0, 30.0]
+      training_hold_s: [30.0, 30.0, 30.0]
       episode_length_s: 40.0
       phases:
-        - max_iterations: 10
+        - max_iterations: 30
           evaluation_interval: 5
           learning_rate: 1.0e-4
           schedule: fixed

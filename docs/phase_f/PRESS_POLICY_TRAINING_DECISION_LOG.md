@@ -2392,3 +2392,30 @@ PPO settings, schedule, workloads, and acceptance criteria unchanged. Approach
 retains its existing staged reward. Advance comparison revision 25 and start a
 fresh campaign. Stop if direct pose cost does not reduce the persistent action
 bias and improve held-out continuous hover.
+
+### 77. Train against the complete hover hold from scratch
+
+Date: 2026-09-02.
+
+Campaign `press-hover-direct-pose-cost-20260902` improved the update-10 mean
+episode-longest hover from 2.378 to 3.333 seconds and its maximum from 6.55 to
+8.40 seconds. Measured-envelope occupancy rose to 9.53%, collision remained
+zero, 89.33% of episodes timed out, and mean pose utilization was 3.303. At a
+nominal motionless observation, vertical command fell from +0.0198 to +0.0157
+normalized, confirming that direct pose cost reduced the persistent drift.
+
+The phase-2 checkpoints at `1e-5` reached 2.949, 2.992, and 0.124 seconds. The
+phase plateaued, and the `3e-6` branch then regressed on its first validation
+seed. The campaign was interrupted without starting another attempt. The shared
+failure is now the phase objective change: the first phase terminates and pays
+success after five seconds, while later phases restore its optimizer and
+suddenly require 15 and 30 seconds. The selected actor learned the available
+five-second shortcut but not stable hover.
+
+Use the exact 30-second acceptance hold during every hover training phase. Keep
+the direct pose cost, measured reset population, PPO settings, evaluation
+workloads, and acceptance criteria unchanged. Allow the `1e-4` phase up to 30
+updates with five-update validation and the existing three-check plateau, so it
+can continue only while continuous hover improves. Keep the `1e-5` and `3e-6`
+refinement branches unchanged. Advance comparison revision 26. Stop if the
+single hold objective cannot improve past the current 3.333-second reference.
