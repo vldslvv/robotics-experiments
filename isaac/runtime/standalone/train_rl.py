@@ -730,9 +730,12 @@ def _training_report(
     acceptance_criteria: PressAcceptanceCriteria | None = None,
     active_attempt: dict[str, Any] | None = None,
     telemetry_probe: dict[str, float] | None = None,
+    hover_reset_distribution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     criteria = _campaign_plateau(config=config)
-    reset_distribution = attempts[0].get("hover_reset_distribution") if attempts else None
+    reset_distribution = hover_reset_distribution
+    if reset_distribution is None and attempts:
+        reset_distribution = attempts[0].get("hover_reset_distribution")
     return {
         "schema_version": _REPORT_SCHEMA_VERSION,
         "report_kind": "campaign",
@@ -1790,6 +1793,10 @@ def _run_policy_workflow(
     )
     telemetry_probe = probe_telemetry()
     run_dir = _make_run_dir(out_root=policy_root, run_id=os.environ.get(_RUN_ID_ENV))
+    hover_reset_distribution = {
+        "source": "flight_parameters_policy_window",
+        **inputs.hover_reset_samples.summary(flight_parameters=inputs.flight_parameters),
+    }
     attempts: list[dict[str, Any]] = []
     selections: list[tuple[int, _AttemptSelection]] = []
     worker_pids: set[int] = set()
@@ -1809,6 +1816,7 @@ def _run_policy_workflow(
             status="training",
             acceptance_criteria=acceptance_criteria,
             telemetry_probe=telemetry_probe,
+            hover_reset_distribution=hover_reset_distribution,
         ),
     )
     _report(
@@ -1862,6 +1870,7 @@ def _run_policy_workflow(
                 acceptance_criteria=acceptance_criteria,
                 active_attempt=active_attempt,
                 telemetry_probe=telemetry_probe,
+                hover_reset_distribution=hover_reset_distribution,
             ),
         )
         _report(

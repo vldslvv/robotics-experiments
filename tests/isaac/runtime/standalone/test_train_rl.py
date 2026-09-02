@@ -171,8 +171,10 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance=None,
         status="training",
         acceptance_criteria=acceptance_criteria,
+        hover_reset_distribution={"source": "flight_parameters_policy_window"},
     )
     assert report["schema_version"] == 22
+    assert report["hover_reset_distribution"] == {"source": "flight_parameters_policy_window"}
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
