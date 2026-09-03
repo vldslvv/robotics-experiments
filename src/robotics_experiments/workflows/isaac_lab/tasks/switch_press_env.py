@@ -19,7 +19,7 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg, UsdFileCfg, spawn_g
 from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
 
-from robotics_experiments.config import ExperimentConfig, RlPolicyConfig, RlTrainingPhaseConfig
+from robotics_experiments.config import ExperimentConfig, RlPolicyConfig
 from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.rl import HoverResetSamples, PolicyContract
 from robotics_experiments.rl.press import (
@@ -228,6 +228,16 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             dtype=torch.float32,
             device=self.device,
         )
+        self._hover_reset_linear_velocities = torch.as_tensor(
+            hover_reset_samples.linear_velocity_enu_mps,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._hover_reset_angular_velocities = torch.as_tensor(
+            hover_reset_samples.angular_velocity_enu_radps,
+            dtype=torch.float32,
+            device=self.device,
+        )
         self._stage = self._experiment_config.rl.press.selected_stage()
         stiffness = (
             self.switch.data.default_joint_stiffness[:, switch_joint_ids]
@@ -249,29 +259,12 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
         self._task_result: PressApproachResult[torch.Tensor] | None = None
         self._task_sample: PressApproachInput[torch.Tensor] | None = None
-        self._training_minimum_range_m = self._experiment_config.rl.press.acceptance.minimum_range_m
-        self._training_hold_steps = round(self._stage.hold_s * self.cfg.policy_rate_hz)
         self._physics_substep_index = 0
         self._body_collision_latch = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
         self._pusher_collision_latch = torch.zeros_like(self._body_collision_latch)
         self._completed_episode_count = torch.zeros((), device=self.device)
-
-    def configure_training_phase(self, phase: RlTrainingPhaseConfig, phase_number: int, /) -> None:
-        """Apply the one task-specific setting for a training phase."""
-        range_min_m = phase.range_undershoot_min_m
-        if range_min_m is None:
-            raise ValueError("press training phases require range_undershoot_min_m")
-        strict_min = self._experiment_config.rl.press.goal.range_min_m
-        if not math.isfinite(range_min_m) or not 0.0 < range_min_m <= strict_min:
-            raise ValueError(
-                f"training range undershoot minimum must be positive and at most {strict_min} m"
-            )
-        self._training_minimum_range_m = range_min_m
-        self._training_hold_steps = round(
-            self._stage.training_hold_s[phase_number - 1] * self.cfg.policy_rate_hz
-        )
 
     @property
     def press_approach_result(self):
@@ -437,9 +430,9 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             goal_cfg=press.goal,
             reward_cfg=press.reward,
             termination_cfg=press.termination,
-            minimum_range_m=self._training_minimum_range_m,
+            minimum_range_m=press.acceptance.minimum_range_m,
             flight_parameters=self._flight_parameters,
-            hold_steps=self._training_hold_steps,
+            hold_steps=round(self._stage.hold_s * self.cfg.policy_rate_hz),
             approach_enabled=self._stage.name == "approach",
         )
         result = self._task_result
@@ -483,6 +476,10 @@ class SwitchPressEnv(_FlightDirectRLEnv):
 
     def _get_observations(self) -> dict[str, torch.Tensor]:
         relative_position, relative_quat_xyzw = self._relative_switch_pose()
+        position_error_enu_m, _attitude_error_wxyz = self._hover_pose_errors(
+            relative_position=relative_position,
+            relative_quat_xyzw=relative_quat_xyzw,
+        )
         quat_wxyz = self.drone.data.root_quat_w
         attitude_xyzw = quat_wxyz[:, [1, 2, 3, 0]]
         ones = torch.ones(self.num_envs, dtype=torch.float32, device=self.device)
@@ -491,7 +488,8 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP
         )
         observations = pack_press_observation(
-            relative_switch_pos_m=relative_position,
+            position_error_enu_m=position_error_enu_m,
+            flight_parameters=self._flight_parameters,
             relative_switch_quat_xyzw=relative_quat_xyzw,
             pose_confidence=ones,
             pose_age_s=zeros,
@@ -535,6 +533,8 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
         position_error_enu_m = self._hover_reset_position_errors[hover_indices]
         hover_quat_wxyz = self._hover_reset_attitude_errors[hover_indices]
+        hover_linear_velocity = self._hover_reset_linear_velocities[hover_indices]
+        hover_angular_velocity = self._hover_reset_angular_velocities[hover_indices]
         target_range = self._experiment_config.rl.press.goal.velocity_reference.range_center_m
         contact_quat = self._contact_frame_quat()[env_ids]
         position_error_contact = math_utils.quat_apply_inverse(contact_quat, position_error_enu_m)
@@ -554,12 +554,6 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         lateral_vertical = torch.where(
             navigation_mask[:, None], navigation[1], hover_lateral_vertical
         )
-        linear_velocity_contact = torch.where(
-            navigation_mask[:, None], navigation[2], torch.zeros_like(navigation[2])
-        )
-        angular_velocity = torch.where(
-            navigation_mask[:, None], navigation[3], torch.zeros_like(navigation[3])
-        )
         relative_quat_wxyz = torch.where(navigation_mask[:, None], navigation[4], hover_quat_wxyz)
         root_state = self.drone.data.default_root_state[env_ids].clone()
         root_state[:, :3] = switch_position - torch.cat(
@@ -567,11 +561,16 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             dim=-1,
         )
         root_state[:, 3:7] = math_utils.quat_mul(contact_quat, relative_quat_wxyz)
-        root_state[:, 7:10] = math_utils.quat_apply(
-            contact_quat,
-            linear_velocity_contact,
+        root_state[:, 7:10] = torch.where(
+            navigation_mask[:, None],
+            math_utils.quat_apply(contact_quat, navigation[2]),
+            hover_linear_velocity,
         )
-        root_state[:, 10:13] = angular_velocity
+        root_state[:, 10:13] = torch.where(
+            navigation_mask[:, None],
+            navigation[3],
+            hover_angular_velocity,
+        )
         self._reset_drone(env_ids=env_ids, root_state=root_state)
         switch_joint_position = self.switch.data.default_joint_pos[env_ids].clone()
         switch_joint_velocity = self.switch.data.default_joint_vel[env_ids].clone()

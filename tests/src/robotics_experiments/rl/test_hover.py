@@ -1,5 +1,7 @@
 """Parity tests for batched measured-envelope evaluation."""
 
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -70,6 +72,8 @@ def test_hover_resets_are_exact_paired_policy_window_samples() -> None:
     samples = load_hover_reset_samples(bundle=bundle)
     assert samples.position_error_enu_m == ((0.0, 0.0, 0.0),)
     assert samples.attitude_error_flu_enu_wxyz == ((1.0, 0.0, 0.0, 0.0),)
+    assert samples.linear_velocity_enu_mps == ((0.0, 0.0, 0.0),)
+    assert samples.angular_velocity_enu_radps == ((0.0, 0.0, 0.0),)
     assert samples.summary(flight_parameters=bundle.flight_parameters) == {
         "sample_count": 1.0,
         "position_error_enu_x_mean_m": 0.0,
@@ -81,4 +85,30 @@ def test_hover_resets_are_exact_paired_policy_window_samples() -> None:
         "attitude_envelope_utilization_mean": 0.0,
         "attitude_envelope_utilization_p95": 0.0,
         "attitude_envelope_utilization_max": 0.0,
+        "linear_speed_mean_mps": 0.0,
+        "linear_speed_p95_mps": 0.0,
+        "angular_speed_mean_radps": 0.0,
+        "angular_speed_p95_radps": 0.0,
     }
+
+
+def test_hover_reset_motion_comes_from_the_same_trace(tmp_path: Path) -> None:
+    source = Path(__file__).parents[3] / "fixtures/flight_parameters"
+    bundle = load_flight_parameters_bundle(path=source)
+    trace = json.loads((source / "evidence/trial-001/trace.json").read_text())
+    trace["time_s"] = [0.0, 1.0, 2.0]
+    trace["position_enu_m"] = [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [2.0, 0.0, 1.0]]
+    trace["attitude_flu_enu_wxyz"] = [
+        [1.0, 0.0, 0.0, 0.0],
+        [float(np.cos(0.05)), 0.0, 0.0, float(np.sin(0.05))],
+        [float(np.cos(0.10)), 0.0, 0.0, float(np.sin(0.10))],
+    ]
+    trace_dir = tmp_path / "evidence/trial-001"
+    trace_dir.mkdir(parents=True)
+    (trace_dir / "trace.json").write_text(json.dumps(trace))
+
+    samples = load_hover_reset_samples(bundle=replace(bundle, run_dir=tmp_path))
+
+    assert samples.position_error_enu_m == ((2.0, 0.0, 0.0),)
+    assert samples.linear_velocity_enu_mps == ((1.0, 0.0, 0.0),)
+    assert samples.angular_velocity_enu_radps[0] == pytest.approx((0.0, 0.0, 2.0 * np.sin(0.05)))

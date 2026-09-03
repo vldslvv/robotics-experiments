@@ -2526,3 +2526,231 @@ vertical miss is a constant command bias, a reset/reference mismatch, or drift
 over time. Then make one narrow correction at that source and compare against
 the immutable update-15 actor. Do not start seed 43 or refactor away the failed
 paths until a policy passes fresh test acceptance.
+
+### 82. Give the actor the hover error and remove phase-only targets
+
+Date: 2026-09-03.
+
+The saved update-15 actor was swept over vertical target error while every other
+input stayed fixed. From -0.04 m to +0.04 m, its vertical action changed only
+from 0.017978 to 0.018013. It learned an almost constant upward command, not a
+position correction. This explains why the selected checkpoint improved the
+average hold but retained vertical RMSE and p95 failures.
+
+The pinned flight-parameter artifact already proves stable hover. Its 30 final
+policy windows contain 14,400 samples. Their pooled vertical error has 0.010201
+m RMSE and 0.018586 m p95, and the per-trace vertical drift slope ranges from
+-0.000737 to +0.000672 m/s. Use those traces as the training reset population
+and acceptance source; do not add a separate controller-policy diagnostic.
+
+The old actor input began with raw switch position in the contact frame. Replace
+those three slots with signed world-ENU target-position error, divided by the
+measured flight envelope per axis, in both training and deployment. Keep the
+34-value layout and advance its observation schema to 2. This gives the actor a
+direct, scaled signal for correcting hover error without adding another model or
+helper layer.
+
+Remove `training_hold_s`, `range_undershoot_min_m`, and the environment phase
+configuration method. Training and acceptance now share the stage's 30-second
+hold and the acceptance minimum range of 0.40 m. Use one hover phase: at most 100
+updates at `3e-5`, one PPO epoch, validation every five updates, and stop after
+three stale evaluations. Run only seed 42. Evaluation must calculate flight
+statistics only from episodes that finish the hold; partial failed episodes are
+not acceptance evidence. Advance comparison revision 30.
+
+### 83. Stop the position-error attempt at its first plateau
+
+Date: 2026-09-03.
+
+Campaign `press-hover-position-error-20260903` ran attempt 1, seed 42, with the
+schema-2 position-error observation. Model zero, updates 5, 10, and 15 had mean
+episode-longest hover durations of 0.1172, 0.1247, 0.1250, and 0.1250 seconds.
+None improved the baseline by the required 0.10 seconds. The phase stopped at
+update 15 after three stale validations; no second attempt, final test,
+publication, deployment, or integration test ran.
+
+The selected update-10 checkpoint has zero success and collision, 0.0933 other
+flight-failure rate, 0.9067 timeout rate, 0.0123 hover-envelope occupancy, and
+5.765 mean pose-envelope utilization. Flight statistics are correctly
+unavailable because no episode completed the hold. Training GPU utilization was
+about 0.76, below the diagnostic 0.95 target; validation ran at about 0.49
+because its fixed 300-episode workload cannot use the full training batch.
+
+The optimizer is active, but it is improving the wrong behavior. From model
+zero to update 15, validation reward improves from -0.0830 to -0.0582 and mean
+position utilization falls from 6.923 to 3.722, while mean attitude utilization
+rises from 0.322 to 3.351 and hover occupancy falls from 0.0163 to 0.0125. The
+critic return error falls from its update-4 peak of 0.767 to 0.227, the PPO
+surrogate stays near zero, and the actor changes by about 0.0006-0.0018 per
+update. The current stabilization cost uses the larger of position and attitude
+utilization, so it can reduce a large position error while allowing attitude to
+worsen until the two are comparable. Do not run another seed with this reward.
+The next change should make position and attitude costs independently visible to
+the reward, using the existing values rather than adding another model or
+workflow layer.
+
+### 84. Penalize position and attitude independently
+
+Date: 2026-09-03.
+
+Replace the hover stabilization cost based on the larger pose utilization with
+the sum of position and attitude utilization. Reuse the existing stabilization
+weight and values; add no new reward field or configuration. This prevents the
+optimizer from reducing position error while attitude error remains invisible
+below it. Keep observation schema 2, the measured reset population, PPO settings,
+seed 42, validation workload, plateau rule, and acceptance unchanged. Advance
+comparison revision 31 and run one controlled attempt. Stop at the existing
+three-check plateau and do not start another seed automatically.
+
+### 85. The summed pose cost works, but the reset is not a hover state
+
+Date: 2026-09-03.
+
+Campaign `press-hover-summed-pose-20260903` ran attempt 1, seed 42, and stopped
+at the update-15 plateau. Mean episode-longest hover was 0.1172 seconds at model
+zero, then 0.1252, 0.1255, and 0.1262 seconds at updates 5, 10, and 15. Update 15
+had zero success and collision, 0.0933 other flight-failure rate, 0.9067 timeout
+rate, and 0.0125 hover-envelope occupancy. No final test, publication,
+deployment, integration test, or additional attempt ran.
+
+The reward correction behaved as intended. At update 15, position utilization
+fell from 6.923 to 4.455 while attitude utilization remained 0.580 instead of
+rising to 3.351 as it did with the maximum-only cost. Total validation reward
+improved from -0.0858 to -0.0563. This still did not create a continuous hover,
+so another reward or optimizer change is not justified.
+
+The remaining mismatch is at reset. The lossless hover trace files contain a
+time series of position and attitude only. The loader samples isolated poses
+from that series, while the environment sets their linear and angular velocity
+to zero and clears controller filters, integrators, delay, and desired-attitude
+state. A measured tilted pose is therefore removed from the motion and
+controller state that produced it. The next change must address this reset
+state, and it must use the existing trace sequence rather than add synthetic
+randomization. Do not start another training run before deciding how to restore
+that missing state.
+
+### 86. Restore measured motion with every hover pose
+
+Date: 2026-09-03.
+
+Treat one hover reset as one state from one trace index. Keep the existing
+actual-minus-target ENU position and relative attitude, and derive ENU linear
+and angular velocity from neighboring samples in the same flight trial. Restore
+the four values together. Never calculate a velocity across two trials and do
+not add synthetic reset noise.
+
+The flight traces do not contain controller filters, integrators, or command
+delay. Leave that controller state uninitialized so the first controller step
+initializes its observations from the restored physical velocity and attitude.
+Keep rotor thrust initialized to the vehicle hover value. Report mean and p95
+linear and angular reset speed so the restored motion is visible in the run.
+Advance comparison revision 32, run one seed-42 campaign, and stop at the
+existing three-check plateau if continuous hover does not improve.
+
+### 87. Use pose utilization to decide whether early hover learning is moving
+
+Date: 2026-09-03.
+
+Campaign `press-hover-trace-motion-20260903` restored all four measured reset
+values and stopped at its update-15 plateau. Model-zero mean longest hover was
+0.1378 seconds, compared with 0.1172 seconds when reset motion was discarded.
+The reset change is physically coherent and did not introduce a frame error.
+Mean linear reset speed was 0.01848 m/s with p95 0.03088 m/s; mean angular
+speed was 0.003295 rad/s with p95 0.006164 rad/s.
+
+From model zero to update 15, validation mean position-envelope utilization
+improved from 6.889 to 4.444, attitude utilization improved from 0.328 to 0.261,
+total reward improved from -0.08587 to -0.05267, and other flight failures fell
+from 0.760 to 0.0867. Mean longest hover only moved from 0.1378 to 0.1593
+seconds, maximum longest hover stayed at 0.55 seconds, and envelope occupancy
+fell from 0.02075 to 0.01582. There was no success or collision. The actor
+changed by about 0.0008 to 0.0019 per update and learned the correct sign for
+position correction, but its response to position error remained much smaller
+than its constant action offset.
+
+The duration plateau rule stops before this dense pose improvement can reach
+the measured envelope. Use the existing `hover_envelope_utilization_mean` as
+the hover plateau and checkpoint-selection metric, with a 0.10 minimum
+improvement and three stale evaluations. Keep the reset population, reward,
+PPO settings, validation workload, seed, hold goal, and acceptance checks
+unchanged. Advance comparison revision 33. Stop the next campaign manually if
+pose utilization ceases to improve or continuous-hover metrics remain flat
+after pose utilization approaches the measured boundary.
+
+### 88. Preserve the update-25 hover behavior before refinement
+
+Date: 2026-09-03.
+
+Campaign `press-hover-trace-motion-util-20260903b` confirmed that the measured
+motion resets and summed pose cost can learn hover. Mean longest hover rose
+from 0.1378 seconds at model zero to 2.650 seconds at update 25, maximum longest
+hover reached 7.70 seconds, and envelope occupancy rose from 0.02075 to 0.08065.
+Mean pose utilization fell from 6.904 to 2.824. Update 30 increased mean hover
+to 3.549 seconds and occupancy to 0.10597, but pose utilization worsened to
+3.303. Update 35 then fell to 3.378 seconds, pose utilization worsened to 4.259,
+and other flight failures rose from 0.1067 to 0.3167. The campaign was stopped
+before the update-40 validation. There was no success or collision.
+
+The exported actors show a growing constant vertical command: `0.0160` at
+update 25, `0.0240` at update 30, and `0.0332` at update 35. Position-error
+response has the correct sign on the useful axes but remains much smaller than
+that constant offset. PPO updates remain active; actor relative parameter
+change is about 0.0006 to 0.0013 per update. The unchanged `3e-5` learning rate
+therefore keeps moving the useful trim past its best range.
+
+End the broad phase at update 25. Restore the complete validation-selected
+checkpoint into a second phase at `1e-5`, preserving optimizer state as the
+workflow requires. Allow at most 50 refinement updates, evaluate every five,
+and use the same pose-utilization plateau rule. Keep reset states, reward,
+workloads, PPO batch settings, and acceptance unchanged. Advance comparison
+revision 34. Stop refinement if pose utilization and continuous hover both move
+away from the update-25 parent.
+
+### 89. Stop refinement at its first improvement
+
+Date: 2026-09-03.
+
+Campaign `press-hover-trace-motion-refine-20260903` reproduced the update-25
+parent, restored its complete learner, and lowered the learning rate from
+`3e-5` to `1e-5`. After five refinement updates, mean longest hover improved
+from 2.650 to 4.281 seconds and envelope occupancy improved from 0.08065 to
+0.12401. Maximum longest hover was 6.30 seconds. Pose utilization changed from
+2.824 to 2.901, other flight failure was 0.1067, and there was no success or
+collision. This is the best broad validation result so far.
+
+Five more refinement updates collapsed: mean longest hover fell to 3.012
+seconds, pose utilization rose to 4.339, and other flight failure reached
+0.9933. The actor's centered vertical action rose from `0.0198` at the useful
+checkpoint to `0.0349` at the collapsed checkpoint. Although the configured
+learning rate remained `1e-5`, actor relative parameter change grew from about
+0.00033 at the start of refinement to about 0.00136. The campaign was stopped
+before another validation.
+
+Keep only the demonstrated schedule: 25 broad updates at `3e-5`, restore the
+best complete checkpoint, run five refinement updates at `1e-5`, then stop.
+Use mean longest hover as the plateau and selection metric with a 0.01-second
+minimum improvement. That threshold lets the broad phase reach its update-25
+breakthrough and selects the update-30 refinement actor that actually sustains
+hover longer. Keep reset states, reward, PPO batch settings, workloads, and
+acceptance unchanged. Advance comparison revision 35. Do not add another
+refinement phase until the remaining constant-action drift is addressed by a
+specific change.
+
+### 90. Make the hover stabilization cost selectable
+
+Date: 2026-09-03.
+
+Keep the summed position and attitude utilization from the successful hover
+experiments, but make its weighting selectable in the press reward config. The
+`uniform` choice retains weight 0.01 everywhere. The active
+`boundary_weighted` choice uses weight 0.01 while every measured hover-envelope
+check passes and switches to 0.03 as soon as any check fails. This deliberately
+creates a sharp cost increase at the acceptance boundary while continuing to
+penalize precise position and attitude error inside it. It never chooses the
+larger of position and attitude.
+
+Record the exact reward choice and weights in every completed campaign and
+attempt report and advance report schema 23. Keep comparison revision 35
+because evaluation and acceptance are unchanged, allowing both reward choices
+to be compared on the same workload. Do not start a training campaign as part
+of this change.

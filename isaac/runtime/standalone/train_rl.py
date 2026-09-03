@@ -81,7 +81,7 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 22
+_REPORT_SCHEMA_VERSION = 23
 
 
 def _report(message: str) -> None:
@@ -746,6 +746,7 @@ def _training_report(
         "acceptance_criteria": (
             asdict(acceptance_criteria) if acceptance_criteria is not None else None
         ),
+        "reward_configuration": asdict(config.rl.press.reward),
         "phases": [asdict(phase) for phase in phases],
         "plateau_criteria": asdict(criteria),
         "metric_registry": metric_registry_payload(),
@@ -937,16 +938,6 @@ def _select_attempt_candidate(
     return next(candidate for candidate in candidates if candidate.evaluation is selected)
 
 
-def _configure_training_environment(
-    *, env, phase: RlTrainingPhaseConfig, phase_number: int
-) -> None:
-    if phase.range_undershoot_min_m is None:
-        return
-    if not hasattr(env, "configure_training_phase"):
-        raise ValueError("task-specific training phases are unsupported by the selected task")
-    env.configure_training_phase(phase, phase_number)
-
-
 def _restore_phase_branch(
     *,
     runner,
@@ -965,10 +956,9 @@ def _restore_phase_branch(
     )
     _report(f"refinement restore COMPLETE iteration={restored_iteration}")
     training.configure_phase(runner=runner, phase=phase, phase_number=phase_number)
-    _configure_training_environment(env=env, phase=phase, phase_number=phase_number)
     _report(
-        f"refinement configuration COMPLETE learning_rate={phase.learning_rate} "
-        f"range_undershoot_min_m={phase.range_undershoot_min_m}; resetting environments"
+        f"refinement configuration COMPLETE learning_rate={phase.learning_rate}; "
+        "resetting environments"
     )
     with torch.inference_mode():
         env.reset()
@@ -1503,15 +1493,9 @@ def _train_and_validate_attempt(
                             phase=phase,
                             phase_number=phase_index + 1,
                         )
-                        _configure_training_environment(
-                            env=env,
-                            phase=phase,
-                            phase_number=phase_index + 1,
-                        )
                         _report(
                             "initial phase configuration COMPLETE "
-                            f"learning_rate={phase.learning_rate} "
-                            f"range_undershoot_min_m={phase.range_undershoot_min_m}; "
+                            f"learning_rate={phase.learning_rate}; "
                             "resetting environments"
                         )
                         with torch.inference_mode():

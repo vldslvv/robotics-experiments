@@ -11,32 +11,23 @@ curriculum:
         - source: pinned_flight_parameters
           weight: 1.0
       hold_s: 30.0
-      training_hold_s: [30.0, 30.0, 30.0]
       episode_length_s: 40.0
       phases:
-        - max_iterations: 100
+        - max_iterations: 25
           evaluation_interval: 5
           learning_rate: 3.0e-5
           schedule: fixed
           entropy_coef: 0.0
-          range_undershoot_min_m: 0.38
-        - max_iterations: 100
+        - max_iterations: 5
           evaluation_interval: 5
           learning_rate: 1.0e-5
           schedule: fixed
           entropy_coef: 0.0
-          range_undershoot_min_m: 0.39
-        - max_iterations: 100
-          evaluation_interval: 5
-          learning_rate: 3.0e-6
-          schedule: fixed
-          entropy_coef: 0.0
-          range_undershoot_min_m: 0.40
       plateau:
         metric_name: episode_longest_hover_duration_mean_s
         direction: maximize
-        minimum_delta: 0.10
-        patience_evaluations: 8
+        minimum_delta: 0.01
+        patience_evaluations: 3
     - name: approach
       reset_mix:
         - source: measured_navigation_handoff
@@ -44,7 +35,6 @@ curriculum:
         - source: pinned_flight_parameters
           weight: 0.2
       hold_s: 30.0
-      training_hold_s: [30.0, 30.0, 30.0]
       episode_length_s: 45.0
       phases:
         - max_iterations: 50
@@ -52,19 +42,16 @@ curriculum:
           learning_rate: 1.0e-4
           schedule: fixed
           entropy_coef: 0.0
-          range_undershoot_min_m: 0.40
         - max_iterations: 30
           evaluation_interval: 5
           learning_rate: 3.0e-5
           schedule: fixed
           entropy_coef: 0.0
-          range_undershoot_min_m: 0.40
         - max_iterations: 100
           evaluation_interval: 5
           learning_rate: 1.0e-5
           schedule: fixed
           entropy_coef: 0.0
-          range_undershoot_min_m: 0.40
       plateau:
         metric_name: hover_envelope_utilization_mean
         direction: minimize
@@ -127,8 +114,10 @@ goal:
     tangential_speed_max_mps: 0.10
 
 reward:
+  hover_stabilization: boundary_weighted
   position_progress_weight: 0.1
   stabilization_weight: 0.01
+  outside_envelope_weight: 0.03
   predictive_barrier_weight: 0.1
   action_effort_weight: 1.0
   hold_progress_weight: 0.01

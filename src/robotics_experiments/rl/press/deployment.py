@@ -80,7 +80,9 @@ def initial_press_approach_execution_state(
     return PressApproachExecutionState(previous_action=(0.0,) * int(action_dim))
 
 
-def _invalid_reason(*, observation: PressObservation, action_dim: int) -> Optional[str]:
+def _invalid_reason(
+    *, observation: PressObservation, observation_vector: np.ndarray, action_dim: int
+) -> Optional[str]:
     required = int(
         PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP
     )
@@ -92,8 +94,9 @@ def _invalid_reason(*, observation: PressObservation, action_dim: int) -> Option
         return "press approach requires the paired lamp to remain off"
     if np.asarray(observation.previous_action).shape != (action_dim,):
         return f"press approach previous_action must have shape ({action_dim},)"
-    vector = to_vector(observation)
-    if vector.shape != (PRESS_OBSERVATION_DIM,) or not np.all(np.isfinite(vector)):
+    if observation_vector.shape != (PRESS_OBSERVATION_DIM,) or not np.all(
+        np.isfinite(observation_vector)
+    ):
         return "press approach observation is non-finite or has the wrong schema dimension"
     return None
 
@@ -111,7 +114,30 @@ def advance_press_approach_execution(
         handoff_mode=1,
     )
     zero = np.zeros(params.action_dim, dtype=np.float64)
-    invalid = _invalid_reason(observation=observation, action_dim=params.action_dim)
+    body_to_world_wxyz = np.asarray(observation.attitude_quat_xyzw)[[3, 0, 1, 2]]
+    body_to_contact_wxyz = np.asarray(observation.relative_switch_quat_xyzw)[[3, 0, 1, 2]]
+    contact_to_world_wxyz = quat_multiply_wxyz(
+        body_to_world_wxyz,
+        quat_conjugate_wxyz(body_to_contact_wxyz),
+    )
+    position_error_contact_m = np.array(
+        [params.goal.velocity_reference.range_center_m, 0.0, 0.0],
+        dtype=np.float64,
+    ) - np.asarray(observation.relative_switch_pos_m, dtype=np.float64)
+    position_error_enu_m = rotate_vector_wxyz(
+        contact_to_world_wxyz,
+        position_error_contact_m,
+    )
+    observation_vector = to_vector(
+        obs=observation,
+        position_error_enu_m=position_error_enu_m,
+        flight_parameters=params.flight_parameters,
+    )
+    invalid = _invalid_reason(
+        observation=observation,
+        observation_vector=observation_vector,
+        action_dim=params.action_dim,
+    )
     if invalid is not None:
         return PressApproachExecutionResult(state, zero, False, invalid)
     if observation.contact_flag:
@@ -126,7 +152,6 @@ def advance_press_approach_execution(
             f"(range={switch_range_m:.4f} m, speed={linear_speed_mps:.4f} m/s)",
         )
 
-    observation_vector = to_vector(observation)
     entry_observation = (
         state.entry_observation
         if state.entry_observation
@@ -158,22 +183,9 @@ def advance_press_approach_execution(
             )
         action = np.clip(action, -1.0, 1.0)
 
-    body_to_world_wxyz = np.asarray(observation.attitude_quat_xyzw)[[3, 0, 1, 2]]
-    body_to_contact_wxyz = np.asarray(observation.relative_switch_quat_xyzw)[[3, 0, 1, 2]]
-    contact_to_world_wxyz = quat_multiply_wxyz(
-        body_to_world_wxyz,
-        quat_conjugate_wxyz(body_to_contact_wxyz),
-    )
-    position_error_contact_m = np.array(
-        [params.goal.velocity_reference.range_center_m, 0.0, 0.0],
-        dtype=np.float64,
-    ) - np.asarray(observation.relative_switch_pos_m, dtype=np.float64)
     envelope = evaluate_hover_envelope(
         flight_parameters=params.flight_parameters,
-        position_error_enu_m=rotate_vector_wxyz(
-            contact_to_world_wxyz,
-            position_error_contact_m,
-        )[None, :],
+        position_error_enu_m=position_error_enu_m[None, :],
         attitude_error_flu_enu_wxyz=body_to_contact_wxyz[None, :],
     )
     stable_goal = handoff_latched and bool(envelope.inside[0])

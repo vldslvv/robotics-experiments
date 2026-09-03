@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 
+from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
     PRESS_OBSERVATION_DIM,
@@ -21,6 +23,10 @@ from robotics_experiments.rl.press import (
 _IDENTITY_WXYZ = np.array([1.0, 0.0, 0.0, 0.0])
 # Rotation of pi about world Z (switch outward normal facing world -X).
 _Z180_WXYZ = np.array([0.0, 0.0, 0.0, 1.0])
+_ENVELOPE = load_flight_parameters(
+    Path(__file__).parents[4] / "fixtures/flight_parameters/flight_parameters.json"
+)
+_POSITION_ERROR_ENU_M = np.array([0.05, -0.02, 0.1])
 
 
 def _press_observation(**overrides: Any) -> PressObservation:
@@ -74,17 +80,29 @@ def test_contact_frame_lateral_and_vertical_offsets() -> None:
 
 
 def test_press_observation_to_vector_length_and_slots() -> None:
-    assert OBSERVATION_SCHEMA_VERSION == 1
+    assert OBSERVATION_SCHEMA_VERSION == 2
     obs = _press_observation()
-    vector = to_vector(obs)
+    vector = to_vector(
+        obs=obs,
+        position_error_enu_m=_POSITION_ERROR_ENU_M,
+        flight_parameters=_ENVELOPE,
+    )
     assert vector.shape == (PRESS_OBSERVATION_DIM,)
-    np.testing.assert_allclose(vector[0:3], [0.2, 0.0, 0.0])
+    np.testing.assert_allclose(vector[0:3], [0.5, -0.2, 1.0])
     # detection_valid occupies slot 9; flipping it changes exactly that slot.
-    flipped = to_vector(_press_observation(detection_valid=False))
+    flipped = to_vector(
+        obs=_press_observation(detection_valid=False),
+        position_error_enu_m=_POSITION_ERROR_ENU_M,
+        flight_parameters=_ENVELOPE,
+    )
     diff = np.nonzero(flipped - vector)[0]
     assert diff.tolist() == [9]
     # lamp_state occupies slot 24.
-    lamp = to_vector(_press_observation(lamp_state=1))
+    lamp = to_vector(
+        obs=_press_observation(lamp_state=1),
+        position_error_enu_m=_POSITION_ERROR_ENU_M,
+        flight_parameters=_ENVELOPE,
+    )
     assert np.nonzero(lamp - vector)[0].tolist() == [24]
 
 
@@ -104,9 +122,14 @@ def test_press_observation_torch_numpy_packing_parity() -> None:
         handoff_mode=2,
         obs_mask=7,
     )
-    expected = to_vector(obs)
+    expected = to_vector(
+        obs=obs,
+        position_error_enu_m=_POSITION_ERROR_ENU_M,
+        flight_parameters=_ENVELOPE,
+    )
     actual = pack_press_observation(
-        relative_switch_pos_m=torch.tensor(obs.relative_switch_pos_m).reshape(1, 3),
+        position_error_enu_m=torch.tensor(_POSITION_ERROR_ENU_M).reshape(1, 3),
+        flight_parameters=_ENVELOPE,
         relative_switch_quat_xyzw=torch.tensor(obs.relative_switch_quat_xyzw).reshape(1, 4),
         pose_confidence=torch.tensor([obs.pose_confidence]),
         pose_age_s=torch.tensor([obs.pose_age_s]),

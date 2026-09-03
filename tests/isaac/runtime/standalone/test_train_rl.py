@@ -32,7 +32,6 @@ def _phase(
     *,
     maximum: int = 20,
     interval: int = 10,
-    range_undershoot_min_m: float | None = None,
 ) -> RlTrainingPhaseConfig:
     return RlTrainingPhaseConfig(
         max_iterations=maximum,
@@ -40,7 +39,6 @@ def _phase(
         learning_rate=1.0e-4,
         schedule="fixed",
         entropy_coef=0.0,
-        range_undershoot_min_m=range_undershoot_min_m,
     )
 
 
@@ -101,7 +99,7 @@ def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
     config = load_config(REPO_ROOT / "configs/train_press_approach_quad.yaml")
     contract = PolicyContract(
         policy_interface=PolicyInterface.PRESS,
-        obs_schema_version=1,
+        obs_schema_version=2,
         obs_dim=34,
         policy_rate_hz=20.0,
         action_kind="velocity",
@@ -173,7 +171,18 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance_criteria=acceptance_criteria,
         hover_reset_distribution={"source": "flight_parameters_policy_window"},
     )
-    assert report["schema_version"] == 22
+    assert report["schema_version"] == 23
+    assert report["reward_configuration"] == {
+        "hover_stabilization": "boundary_weighted",
+        "position_progress_weight": 0.1,
+        "stabilization_weight": 0.01,
+        "outside_envelope_weight": 0.03,
+        "predictive_barrier_weight": 0.1,
+        "action_effort_weight": 1.0,
+        "hold_progress_weight": 0.01,
+        "terminal_success_weight": 1.5,
+        "terminal_failure_weight": 3.0,
+    }
     assert report["hover_reset_distribution"] == {"source": "flight_parameters_policy_window"}
     assert report["report_kind"] == "campaign"
     assert report["attempt_execution"] == "isolated_process"
@@ -582,7 +591,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 22,
+        "schema_version": 23,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -864,9 +873,6 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
     runner = object()
 
     class FakeEnv:
-        def configure_training_phase(self, phase, phase_number):
-            calls.append(("task_phase", phase, phase_number))
-
         def reset(self):
             calls.append(("reset", torch.is_inference_mode_enabled()))
 
@@ -886,7 +892,7 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
         "configure_phase",
         lambda **kwargs: calls.append(("configure", kwargs)),
     )
-    phase = _phase(range_undershoot_min_m=0.39)
+    phase = _phase()
     restored = train_rl._restore_phase_branch(  # noqa: SLF001
         runner=runner,
         env=FakeEnv(),
@@ -899,13 +905,11 @@ def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: 
     assert [call[0] for call in calls] == [
         "restore",
         "configure",
-        "task_phase",
         "reset",
     ]
     assert calls[0][1]["checkpoint_path"] == checkpoint
     assert calls[1][1]["phase"] is phase
     assert calls[1][1]["phase_number"] == 2
-    assert calls[-2] == ("task_phase", phase, 2)
     assert calls[-1] == ("reset", True)
 
 

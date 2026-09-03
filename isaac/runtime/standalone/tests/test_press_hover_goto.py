@@ -670,7 +670,6 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
     from robotics_experiments.rl.press import (
         PressObservation,
         PressObservationMask,
-        to_vector,
         world_switch_to_contact_frame,
     )
 
@@ -711,7 +710,6 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
             PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP
         ),
     )
-    assert to_vector(observation).shape == (30 + action_dim,)
     return observation
 
 

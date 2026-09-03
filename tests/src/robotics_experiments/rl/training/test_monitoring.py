@@ -201,10 +201,7 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
             self.writer.add_scalar("Perf/learning_time", 0.3, it)
 
     writer = _Writer()
-    phase = SimpleNamespace(
-        learning_rate=1.0e-4,
-        range_undershoot_min_m=0.38,
-    )
+    phase = SimpleNamespace(learning_rate=1.0e-4)
     policy = SimpleNamespace(actor=torch.nn.Linear(2, 2), critic=torch.nn.Linear(2, 1))
     runner = SimpleNamespace(logger=BaseLogger(), alg=SimpleNamespace(policy=policy))
     rsl_rl.configure_monitoring(runner=runner, writer=writer, phase=phase, phase_number=1)
@@ -213,18 +210,12 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
         policy.critic.weight.add_(0.2)
     runner.logger.log(it=170)
     runner.logger.writer.configure_phase(
-        phase=SimpleNamespace(
-            learning_rate=3.0e-5,
-            range_undershoot_min_m=0.39,
-        ),
+        phase=SimpleNamespace(learning_rate=3.0e-5),
         phase_number=2,
     )
     runner.logger.log(it=141)
     runner.logger.writer.configure_phase(
-        phase=SimpleNamespace(
-            learning_rate=1.0e-5,
-            range_undershoot_min_m=0.40,
-        ),
+        phase=SimpleNamespace(learning_rate=1.0e-5),
         phase_number=3,
     )
     runner.logger.log(it=141)
@@ -257,10 +248,7 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
 def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
     torch = pytest.importorskip("torch")
     writer = _Writer()
-    phase = SimpleNamespace(
-        learning_rate=1.0e-4,
-        range_undershoot_min_m=None,
-    )
+    phase = SimpleNamespace(learning_rate=1.0e-4)
     policy = SimpleNamespace(actor=torch.nn.Linear(2, 2), critic=torch.nn.Linear(2, 1))
     runner = SimpleNamespace(alg=SimpleNamespace(policy=policy))
     rsl_rl.configure_monitoring(runner=runner, writer=writer, phase=phase, phase_number=1)
@@ -282,10 +270,7 @@ def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
 def test_training_chunk_advances_when_restored_learner_iteration_repeats() -> None:
     torch = pytest.importorskip("torch")
     writer = _Writer()
-    phase = SimpleNamespace(
-        learning_rate=1.0e-4,
-        range_undershoot_min_m=None,
-    )
+    phase = SimpleNamespace(learning_rate=1.0e-4)
     policy = SimpleNamespace(actor=torch.nn.Linear(2, 2), critic=torch.nn.Linear(2, 1))
     runner = SimpleNamespace(
         current_learning_iteration=0,

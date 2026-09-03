@@ -241,7 +241,7 @@ def _validate_alignment(experiment: ExperimentConfig) -> None:
         raise ValueError("alignment.execution.gpu_sample_interval_s must be finite and positive")
 
 
-def _validate_training_phases(*, phases, path: str, range_limit_m: float) -> None:
+def _validate_training_phases(*, phases, path: str) -> None:
     if not phases:
         raise ValueError(f"{path} must contain at least one phase")
     for index, phase in enumerate(phases):
@@ -258,14 +258,6 @@ def _validate_training_phases(*, phases, path: str, range_limit_m: float) -> Non
             raise ValueError(f"{phase_path}.schedule must be 'fixed' or 'adaptive'")
         if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
             raise ValueError(f"{phase_path}.entropy_coef must be finite and non-negative")
-        if phase.range_undershoot_min_m is not None and (
-            not math.isfinite(phase.range_undershoot_min_m)
-            or not 0.0 < phase.range_undershoot_min_m <= range_limit_m
-        ):
-            raise ValueError(
-                f"{phase_path}.range_undershoot_min_m must be positive and no greater "
-                f"than {range_limit_m}"
-            )
 
 
 def _validate_plateau(*, plateau, path: str) -> None:
@@ -291,7 +283,6 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     if training.task_id == "Isaac-Switch-Press-Direct-v1":
         stage = experiment.rl.press.selected_stage()
         phases = stage.phases
-        range_limit_m = experiment.rl.press.goal.range_min_m
         if training.policy_name != f"press-{stage.name}":
             raise ValueError("press policy_name must match the active ordered stage")
         if experiment.rl.episode_length_s != stage.episode_length_s:
@@ -300,13 +291,11 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
             )
     else:
         phases = training.phases
-        range_limit_m = math.inf
     _validate_training_phases(
         phases=phases,
         path="rl.press.curriculum active stage phases"
         if training.task_id == "Isaac-Switch-Press-Direct-v1"
         else "rl.training.phases",
-        range_limit_m=range_limit_m,
     )
     if training.task_id == "Isaac-Switch-Press-Direct-v1":
         for index, curriculum_stage in enumerate(experiment.rl.press.curriculum.stages):
@@ -361,12 +350,25 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
 def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
     press = experiment.rl.press
     stage = press.selected_stage()
-    if len(stage.training_hold_s) != len(stage.phases):
-        raise ValueError("active press stage must provide one hold duration per training phase")
     if not math.isclose(
         sum(source.weight for source in stage.reset_mix), 1.0, rel_tol=0.0, abs_tol=1.0e-9
     ):
         raise ValueError("active press stage reset weights must sum to one")
+    reward = press.reward
+    if reward.hover_stabilization not in {"uniform", "boundary_weighted"}:
+        raise ValueError(
+            "unsupported rl.press.reward.hover_stabilization: " f"{reward.hover_stabilization!r}"
+        )
+    if not math.isfinite(reward.stabilization_weight) or reward.stabilization_weight <= 0.0:
+        raise ValueError("rl.press.reward.stabilization_weight must be finite and positive")
+    if (
+        not math.isfinite(reward.outside_envelope_weight)
+        or reward.outside_envelope_weight <= reward.stabilization_weight
+    ):
+        raise ValueError(
+            "rl.press.reward.outside_envelope_weight must be finite and greater than "
+            "stabilization_weight"
+        )
     handoff = press.handoff
     if not (
         math.isfinite(handoff.switch_range_min_m)
@@ -508,6 +510,8 @@ def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.press.goal.stable_steps must be positive")
     for field in fields(press.reward):
         name = field.name
+        if name == "hover_stabilization":
+            continue
         value = getattr(press.reward, name)
         if not math.isfinite(value) or value < 0.0:
             raise ValueError(

@@ -209,10 +209,12 @@ class PressNavigationNoiseConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachRewardConfig(_FreezableConfig):
-    """Magnitudes for the signed approach-stage reward contributions."""
+    """Press reward weights and the selectable hover stabilization formula."""
 
+    hover_stabilization: str
     position_progress_weight: float
     stabilization_weight: float
+    outside_envelope_weight: float
     predictive_barrier_weight: float
     action_effort_weight: float
     hold_progress_weight: float
@@ -312,7 +314,6 @@ class RlTrainingPhaseConfig(_FreezableConfig):
     learning_rate: float
     schedule: str
     entropy_coef: float
-    range_undershoot_min_m: float | None
 
 
 @dataclass
@@ -330,7 +331,6 @@ class PressCurriculumStageConfig(_FreezableConfig):
     name: str
     reset_mix: List[PressCurriculumResetSourceConfig]
     hold_s: float
-    training_hold_s: List[float]
     episode_length_s: float
     phases: List[RlTrainingPhaseConfig]
     plateau: RlPlateauCriteriaConfig

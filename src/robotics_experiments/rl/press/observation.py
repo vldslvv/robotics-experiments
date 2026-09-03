@@ -20,6 +20,7 @@ from typing import TypeVar
 import numpy as np
 import torch
 
+from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.px4_bridge import (
     normalize_quat_wxyz,
     quat_conjugate_wxyz,
@@ -160,15 +161,22 @@ class PressObservation:
     obs_mask: int
 
 
-def to_vector(obs: PressObservation) -> np.ndarray:
-    """Flatten a :class:`PressObservation` to the schema-v1 float vector.
+def to_vector(
+    *,
+    obs: PressObservation,
+    position_error_enu_m: np.ndarray,
+    flight_parameters: FlightParameters,
+) -> np.ndarray:
+    """Flatten a :class:`PressObservation` to the schema-v2 float vector.
 
-    Field order is the dataclass declaration order; bools and ints are cast to
-    float. Length is ``30 + len(previous_action)``. Swapping the pose provider
-    must never change this length or order (asserted by tests).
+    The first three values are world-ENU target-position error divided by the
+    measured hover envelope on each axis. Remaining fields follow the dataclass
+    declaration order, starting at ``relative_switch_quat_xyzw``. Bools and
+    ints are cast to float. Length is ``30 + len(previous_action)``.
     """
     return pack_press_observation(
-        relative_switch_pos_m=obs.relative_switch_pos_m,
+        position_error_enu_m=position_error_enu_m,
+        flight_parameters=flight_parameters,
         relative_switch_quat_xyzw=obs.relative_switch_quat_xyzw,
         pose_confidence=obs.pose_confidence,
         pose_age_s=obs.pose_age_s,
@@ -192,7 +200,8 @@ def to_vector(obs: PressObservation) -> np.ndarray:
 
 def pack_press_observation(
     *,
-    relative_switch_pos_m: ArrayT,
+    position_error_enu_m: ArrayT,
+    flight_parameters: FlightParameters,
     relative_switch_quat_xyzw: ArrayT,
     pose_confidence: ArrayT | float,
     pose_age_s: ArrayT | float,
@@ -213,8 +222,18 @@ def pack_press_observation(
     obs_mask: ArrayT | int,
 ) -> ArrayT:
     """Pack the press schema for either NumPy values or batched torch tensors."""
-    if isinstance(relative_switch_pos_m, torch.Tensor):
-        reference = relative_switch_pos_m
+    position_bounds = flight_parameters.hover.position_error_enu_m
+    position_scale = tuple(
+        max(abs(lower), abs(upper))
+        for lower, upper in zip(position_bounds.lower, position_bounds.upper, strict=True)
+    )
+    if isinstance(position_error_enu_m, torch.Tensor):
+        reference = position_error_enu_m
+        normalized_position_error = position_error_enu_m / torch.as_tensor(
+            position_scale,
+            dtype=reference.dtype,
+            device=reference.device,
+        )
 
         def column(value: torch.Tensor | bool | int | float) -> torch.Tensor:
             return torch.as_tensor(value, dtype=reference.dtype, device=reference.device).reshape(
@@ -223,7 +242,7 @@ def pack_press_observation(
 
         return torch.cat(
             (
-                relative_switch_pos_m,
+                normalized_position_error,
                 relative_switch_quat_xyzw,
                 column(pose_confidence),
                 column(pose_age_s),
@@ -246,8 +265,11 @@ def pack_press_observation(
             dim=-1,
         )
 
-    relative_position = np.asarray(relative_switch_pos_m, dtype=np.float64)
-    batched = relative_position.ndim == 2
+    normalized_position_error = np.asarray(position_error_enu_m, dtype=np.float64) / np.asarray(
+        position_scale,
+        dtype=np.float64,
+    )
+    batched = normalized_position_error.ndim == 2
 
     def array(value, width: int):
         result = np.asarray(value, dtype=np.float64)
@@ -256,7 +278,7 @@ def pack_press_observation(
     axis = -1 if batched else 0
     vector = np.concatenate(
         (
-            array(relative_position, 3),
+            array(normalized_position_error, 3),
             array(relative_switch_quat_xyzw, 4),
             array(pose_confidence, 1),
             array(pose_age_s, 1),

@@ -197,12 +197,6 @@ class _PresentationWriter:
             value=self._phase.learning_rate,
             step=step,
         )
-        if self._phase.range_undershoot_min_m is not None:
-            self._write(
-                tag="train/05_schedule/recovery_boundary_m",
-                value=self._phase.range_undershoot_min_m,
-                step=step,
-            )
         self._write(tag="train/05_schedule/checkpoint_update", value=learner_step, step=step)
 
     def add_scalar(self, tag: str, scalar_value, global_step: int, /, *args, **kwargs) -> None:

@@ -24,7 +24,7 @@ def _contract():
 
     return PolicyContract(
         policy_interface=PolicyInterface.PRESS,
-        obs_schema_version=1,
+        obs_schema_version=2,
         obs_dim=34,
         policy_rate_hz=20.0,
         action_kind="velocity",
@@ -178,7 +178,7 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
     class FakeEnv:
         device = "cpu"
         max_episode_length = 2
-        step_dt = 0.05
+        step_dt = 0.5
 
         def __init__(self):
             self.seeds = []
@@ -196,14 +196,15 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         def step(self, _action):
             self.step_count += 1
             first = self.step_count == 1
-            success = torch.tensor([first, False])
-            timeout = torch.tensor([False, not first])
+            finished = self.step_count == 2
+            success = torch.tensor([finished, False])
+            timeout = torch.tensor([False, finished])
             self.press_approach_result = SimpleNamespace(
                 state=SimpleNamespace(
                     closest_range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
                     normalized_pose_error=torch.tensor([0.0, 2.0]),
-                    stable_goal_steps=torch.tensor([100 if first else 0, 0]),
-                    longest_stable_goal_steps=torch.tensor([100 if first else 0, 0]),
+                    stable_goal_steps=torch.tensor([self.step_count, 0]),
+                    longest_stable_goal_steps=torch.tensor([self.step_count, 0]),
                 ),
                 range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
                 range_error_m=torch.tensor([0.0, 0.04 if first else 0.02]),
@@ -212,14 +213,14 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
                 linear_speed_mps=torch.zeros(2),
                 angular_speed_radps=torch.zeros(2),
                 contact_clear=torch.ones(2, dtype=torch.bool),
-                strict_goal=torch.tensor([first, False]),
+                strict_goal=torch.tensor([True, False]),
                 hover_evaluation=SimpleNamespace(
-                    position_error_enu_m=torch.zeros((2, 3)),
-                    horizontal_position_error_m=torch.zeros(2),
-                    position_error_m=torch.zeros(2),
-                    attitude_error_rpy_rad=torch.zeros((2, 3)),
-                    tilt_error_rad=torch.zeros(2),
-                    orientation_error_rad=torch.zeros(2),
+                    position_error_enu_m=torch.tensor([[0.0, 0.0, 0.0], [9.0, 9.0, 9.0]]),
+                    horizontal_position_error_m=torch.tensor([0.0, 9.0]),
+                    position_error_m=torch.tensor([0.0, 9.0]),
+                    attitude_error_rpy_rad=torch.tensor([[0.0, 0.0, 0.0], [9.0, 9.0, 9.0]]),
+                    tilt_error_rad=torch.tensor([0.0, 9.0]),
+                    orientation_error_rad=torch.tensor([0.0, 9.0]),
                     position_utilization=torch.tensor([0.0, 2.0]),
                     attitude_utilization=torch.zeros(2),
                 ),
@@ -254,7 +255,7 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         policy=FakePolicy(),
         seeds=(202,),
         episodes_per_seed=2,
-        hold_steps=100,
+        hold_steps=2,
         flight_parameters=_FLIGHT_PARAMETERS,
         report=reports.append,
         trace_worst_episode=True,
@@ -325,7 +326,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
     def fake_factory(**kwargs):
         factory_calls.append(kwargs)
         return env, SimpleNamespace(
-            observation_schema_version=1,
+            observation_schema_version=2,
             observation_space=34,
             policy_interface="press",
         )
@@ -437,7 +438,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: (
             env,
             SimpleNamespace(
-                observation_schema_version=1,
+                observation_schema_version=2,
                 observation_space=34,
                 policy_interface="press",
             ),

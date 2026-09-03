@@ -301,11 +301,9 @@ def _evaluate_seed(
         if result is None:
             raise RuntimeError("press approach environment did not publish a transition result")
         termination = result.termination
-        policy_window = active & (result.state.stable_goal_steps > policy_warmup_steps)
-        for name, values in _hover_signal_values(result=result).items():
-            selected = values[policy_window]
-            if selected.numel():
-                hover_samples[name].append(selected.detach().cpu().numpy())
+        if step < hold_steps:
+            for name, values in _hover_signal_values(result=result).items():
+                hover_samples[name].append(values.detach().cpu().numpy())
         current_range = result.range_m
         hover_occupancy_sums += torch.where(active, result.strict_goal.float(), 0.0)
         utilization = torch.stack(
@@ -427,13 +425,20 @@ def _evaluate_seed(
         f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
         f"timeout={summary.timeout_rate:.3f}"
     )
+    successful = success.detach().cpu().numpy()
+    successful_hover_samples = {
+        name: (np.stack(values, axis=0)[policy_warmup_steps:hold_steps, successful].reshape(-1),)
+        if bool(np.any(successful))
+        else ()
+        for name, values in hover_samples.items()
+    }
     return (
         episodes,
         {
             name: (float(value), sample_count)
             for name, value in zip(reward_names, reward_sum_values, strict=True)
         },
-        {name: tuple(values) for name, values in hover_samples.items()},
+        successful_hover_samples,
     )
 
 

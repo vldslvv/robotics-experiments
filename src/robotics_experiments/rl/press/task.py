@@ -457,7 +457,22 @@ def step_press_approach(
         normalized_predicted_undershoot
     )
     if not approach_enabled:
-        stabilization = -reward_cfg.stabilization_weight * normalized_pose_error
+        pose_utilization = (
+            envelope_evaluation.position_utilization + envelope_evaluation.attitude_utilization
+        )
+        if reward_cfg.hover_stabilization == "uniform":
+            stabilization_weight: ArrayT | Scalar = reward_cfg.stabilization_weight
+        elif reward_cfg.hover_stabilization == "boundary_weighted":
+            stabilization_weight = _where(
+                envelope_evaluation.inside,
+                reward_cfg.stabilization_weight,
+                reward_cfg.outside_envelope_weight,
+            )
+        else:
+            raise ValueError(
+                "unsupported reward_cfg.hover_stabilization: " f"{reward_cfg.hover_stabilization!r}"
+            )
+        stabilization = -stabilization_weight * pose_utilization
         predictive_barrier = _zeros_like(value=normalized_position_error)
     action_effort = _zeros_like(value=normalized_position_error)
     if not approach_enabled:

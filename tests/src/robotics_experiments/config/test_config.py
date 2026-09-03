@@ -252,7 +252,6 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     )
     assert tuple(source.weight for source in stage.reset_mix) == (0.8, 0.2)
     assert stage.hold_s == 30.0
-    assert stage.training_hold_s == (30.0, 30.0, 30.0)
     assert tuple(phase.max_iterations for phase in stage.phases) == (50, 30, 100)
     assert tuple(phase.learning_rate for phase in stage.phases) == (
         1.0e-4,
@@ -266,22 +265,16 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert stage.plateau.minimum_delta == 0.003
     assert stage.plateau.patience_evaluations == 10
     hover_stage = config.rl.press.curriculum.stages[0]
-    assert hover_stage.training_hold_s == (30.0, 30.0, 30.0)
-    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (100, 100, 100)
-    assert tuple(phase.learning_rate for phase in hover_stage.phases) == (
-        3.0e-5,
-        1.0e-5,
-        3.0e-6,
-    )
-    assert tuple(phase.evaluation_interval for phase in hover_stage.phases) == (5, 5, 5)
+    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (25, 5)
+    assert tuple(phase.learning_rate for phase in hover_stage.phases) == (3.0e-5, 1.0e-5)
+    assert tuple(phase.evaluation_interval for phase in hover_stage.phases) == (5, 5)
     assert hover_stage.plateau.metric_name == "episode_longest_hover_duration_mean_s"
     assert hover_stage.plateau.direction == "maximize"
-    assert hover_stage.plateau.minimum_delta == 0.10
-    assert hover_stage.plateau.patience_evaluations == 8
+    assert hover_stage.plateau.minimum_delta == 0.01
+    assert hover_stage.plateau.patience_evaluations == 3
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
     assert training.attempt_seeds == (42, 43, 44)
-    assert tuple(phase.range_undershoot_min_m for phase in stage.phases) == (0.40, 0.40, 0.40)
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
@@ -295,9 +288,12 @@ def test_press_hover_uses_one_ppo_epoch_per_rollout():
     policy = config.rl.press.policy
     reward = config.rl.press.reward
     assert config.rl.training.num_learning_epochs == 1
+    assert config.rl.training.attempt_seeds == (42,)
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
+    assert reward.hover_stabilization == "boundary_weighted"
     assert reward.stabilization_weight == 0.01
+    assert reward.outside_envelope_weight == 0.03
     assert reward.action_effort_weight == 1.0
     assert reward.predictive_barrier_weight == 0.1
     assert reward.hold_progress_weight == 0.01
@@ -349,6 +345,36 @@ def test_press_hover_uses_one_ppo_epoch_per_rollout():
     assert config.rl.press.evaluation.test_seeds == (404, 505, 606)
     assert config.rl.press.evaluation.episodes_per_seed == 100
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            "hover_stabilization: boundary_weighted",
+            "hover_stabilization: unknown",
+            "hover_stabilization",
+        ),
+        (
+            "outside_envelope_weight: 0.03",
+            "outside_envelope_weight: 0.005",
+            "outside_envelope_weight",
+        ),
+    ],
+)
+def test_press_rejects_invalid_hover_reward(tmp_path, old, new, message):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(
+        tmp_path,
+        "invalid_hover_reward",
+        {"x500": _vehicle(0, "/x500", 0.0)},
+    )
+    reward_config = path.parent / "experiment" / "rl" / "press" / "approach.yaml"
+    reward_config.write_text(reward_config.read_text().replace(old, new))
+
+    with pytest.raises(ValueError, match=message):
+        load_config(path)
 
 
 @pytest.mark.parametrize(
@@ -493,14 +519,7 @@ def test_policy_transfer_config_uses_distinct_entry_targets():
     hover = load_config(_ROOT / "policy_transfer_press_hover_quad.yaml")
     hover_steps = hover.vehicles["x500_01"].routine.steps
     assert hover.rl.press.selected_stage().name == "hover"
-    hover_boundaries = tuple(
-        phase.range_undershoot_min_m for phase in hover.rl.press.selected_stage().phases
-    )
-    assert hover_boundaries == (
-        0.38,
-        0.39,
-        0.40,
-    )
+    assert len(hover.rl.press.selected_stage().phases) == 2
     assert all(
         hover_steps[index]["artifact"] == ".build/training/press-hover/latest"
         for index in (7, 12, 17)
@@ -567,7 +586,6 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
                                 "learning_rate": 1.0e-4,
                                 "schedule": "unknown",
                                 "entropy_coef": 0.0,
-                                "range_undershoot_min_m": None,
                             }
                         ]
                     }
@@ -591,22 +609,6 @@ def test_task_policy_validation(tmp_path, override, match):
 
     with pytest.raises(ValueError, match=match):
         load_config(path)
-
-
-def test_active_stage_phase_validation(tmp_path):
-    from robotics_experiments.config import load_config
-
-    root = tmp_path / "configs"
-    shutil.copytree(_ROOT, root)
-    stage_path = root / "experiment/rl/press/approach.yaml"
-    stage_path.write_text(
-        stage_path.read_text().replace(
-            "range_undershoot_min_m: 0.40",
-            "range_undershoot_min_m: 0.0",
-        )
-    )
-    with pytest.raises(ValueError, match="must be positive"):
-        load_config(root / "train_press_approach_quad.yaml")
 
 
 @pytest.mark.parametrize(

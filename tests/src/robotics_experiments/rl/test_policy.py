@@ -16,6 +16,7 @@ from robotics_experiments.controller import ControllerArtifact, ControllerSettin
 from robotics_experiments.flight_parameters import FlightParameters, load_flight_parameters
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
+    HOVER_OBSERVATION_SCHEMA_VERSION,
     METADATA_FILENAME,
     POLICY_FILENAME,
     LoadedPolicy,
@@ -29,7 +30,11 @@ from robotics_experiments.rl import (
     policy_metadata,
     validate_policy_artifact,
 )
-from robotics_experiments.rl.press import PressObservation, PressObservationMask
+from robotics_experiments.rl.press import (
+    OBSERVATION_SCHEMA_VERSION,
+    PressObservation,
+    PressObservationMask,
+)
 from robotics_experiments.runtime._policy import (
     _hover_adapter,
     _press_approach_adapter,
@@ -153,13 +158,18 @@ def _metadata(
 ) -> dict:
     action_cfg = _action_cfg() if action_cfg is None else action_cfg
     obs_dim = HOVER_OBSERVATION_DIM if interface is PolicyInterface.HOVER else 34
+    obs_schema_version = (
+        HOVER_OBSERVATION_SCHEMA_VERSION
+        if interface is PolicyInterface.HOVER
+        else OBSERVATION_SCHEMA_VERSION
+    )
     return policy_metadata(
         action_cfg=action_cfg,
         controller_artifact=_controller_artifact(),
         controller_digest="digest",
         flight_parameters=_flight_parameters(),
         flight_parameters_digest="flight-parameters-digest",
-        obs_schema_version=1,
+        obs_schema_version=obs_schema_version,
         obs_dim=obs_dim,
         policy_rate_hz=rate_hz,
         policy_interface=interface,

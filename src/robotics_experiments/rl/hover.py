@@ -41,15 +41,19 @@ class HoverEnvelopeEvaluation(Generic[ArrayT]):
 
 @dataclass(frozen=True)
 class HoverResetSamples:
-    """Paired target-relative poses from the measured policy windows."""
+    """Matched pose and motion samples from the measured policy windows."""
 
     position_error_enu_m: tuple[tuple[float, float, float], ...]
     attitude_error_flu_enu_wxyz: tuple[tuple[float, float, float, float], ...]
+    linear_velocity_enu_mps: tuple[tuple[float, float, float], ...]
+    angular_velocity_enu_radps: tuple[tuple[float, float, float], ...]
 
     def summary(self, *, flight_parameters: FlightParameters) -> dict[str, float]:
         """Summarize the fixed reset population for metadata and monitoring."""
         position = np.asarray(self.position_error_enu_m)
         attitude = np.asarray(self.attitude_error_flu_enu_wxyz)
+        linear_speed = np.linalg.norm(np.asarray(self.linear_velocity_enu_mps), axis=-1)
+        angular_speed = np.linalg.norm(np.asarray(self.angular_velocity_enu_radps), axis=-1)
         evaluated = evaluate_hover_envelope(
             flight_parameters=flight_parameters,
             position_error_enu_m=position,
@@ -70,6 +74,10 @@ class HoverResetSamples:
                 np.percentile(evaluated.attitude_utilization, 95.0)
             ),
             "attitude_envelope_utilization_max": float(evaluated.attitude_utilization.max()),
+            "linear_speed_mean_mps": float(linear_speed.mean()),
+            "linear_speed_p95_mps": float(np.percentile(linear_speed, 95.0)),
+            "angular_speed_mean_radps": float(angular_speed.mean()),
+            "angular_speed_p95_radps": float(np.percentile(angular_speed, 95.0)),
         }
 
 
@@ -91,11 +99,18 @@ def _multiply_quaternions(first: np.ndarray, second: np.ndarray, /) -> np.ndarra
 
 
 def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSamples:
-    """Load paired final-window pose errors from one validated bundle."""
+    """Load complete final-window states from each validated hover trace.
+
+    Position, attitude, and derived velocity always come from the same sample
+    index. Velocity differences stay within one trial; samples from separate
+    flights are never joined.
+    """
 
     flight_parameters = bundle.flight_parameters
     position_errors: list[tuple[float, float, float]] = []
     attitude_errors: list[tuple[float, float, float, float]] = []
+    linear_velocities: list[tuple[float, float, float]] = []
+    angular_velocities: list[tuple[float, float, float]] = []
     for trial_index in range(1, flight_parameters.hover_trial_count + 1):
         trace = load_flight_trace(
             bundle.run_dir / "evidence" / f"trial-{trial_index:03d}" / "trace.json"
@@ -106,9 +121,38 @@ def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSam
         policy_sample_count = flight_parameters.hover.trace_statistics[
             trial_index - 1
         ].policy_window_sample_count
-        for position, attitude in zip(
-            trace.position_enu_m[-policy_sample_count:],
-            trace.attitude_flu_enu_wxyz[-policy_sample_count:],
+        time_s = np.asarray(trace.time_s, dtype=np.float64)
+        positions = np.asarray(trace.position_enu_m, dtype=np.float64)
+        attitudes = np.asarray(trace.attitude_flu_enu_wxyz, dtype=np.float64)
+        attitudes /= np.linalg.norm(attitudes, axis=-1, keepdims=True)
+        for sample_index in range(1, len(attitudes)):
+            if np.dot(attitudes[sample_index - 1], attitudes[sample_index]) < 0.0:
+                attitudes[sample_index] *= -1.0
+        if len(time_s) == 1:
+            trial_linear_velocities = np.zeros((1, 3), dtype=np.float64)
+            trial_angular_velocities = np.zeros((1, 3), dtype=np.float64)
+        else:
+            trial_linear_velocities = np.gradient(positions, time_s, axis=0)
+            attitude_derivatives = np.gradient(attitudes, time_s, axis=0)
+            trial_angular_velocities = np.asarray(
+                [
+                    2.0
+                    * _multiply_quaternions(
+                        derivative,
+                        attitude * np.asarray((1.0, -1.0, -1.0, -1.0)),
+                    )[1:]
+                    for derivative, attitude in zip(
+                        attitude_derivatives,
+                        attitudes,
+                        strict=True,
+                    )
+                ]
+            )
+        for position, attitude, linear_velocity, angular_velocity in zip(
+            positions[-policy_sample_count:],
+            attitudes[-policy_sample_count:],
+            trial_linear_velocities[-policy_sample_count:],
+            trial_angular_velocities[-policy_sample_count:],
             strict=True,
         ):
             position_error = np.asarray(position) - target_position
@@ -135,6 +179,20 @@ def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSam
                     float(relative_attitude[3]),
                 )
             )
+            linear_velocities.append(
+                (
+                    float(linear_velocity[0]),
+                    float(linear_velocity[1]),
+                    float(linear_velocity[2]),
+                )
+            )
+            angular_velocities.append(
+                (
+                    float(angular_velocity[0]),
+                    float(angular_velocity[1]),
+                    float(angular_velocity[2]),
+                )
+            )
     expected_samples = sum(
         trace.policy_window_sample_count for trace in flight_parameters.hover.trace_statistics
     )
@@ -148,6 +206,8 @@ def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSam
     return HoverResetSamples(
         position_error_enu_m=tuple(position_errors),
         attitude_error_flu_enu_wxyz=tuple(attitude_errors),
+        linear_velocity_enu_mps=tuple(linear_velocities),
+        angular_velocity_enu_radps=tuple(angular_velocities),
     )
 
 

@@ -1,4 +1,3 @@
-import ast
 import importlib
 import importlib.abc
 import importlib.machinery
@@ -6,42 +5,6 @@ import sys
 import types
 
 import pytest
-
-from tests.support.paths import REPO_ROOT
-
-
-def test_press_episode_counters_exist_before_phase_configuration():
-    path = (
-        REPO_ROOT
-        / "src"
-        / "robotics_experiments"
-        / "workflows"
-        / "isaac_lab"
-        / "tasks"
-        / "switch_press_env.py"
-    )
-    tree = ast.parse(path.read_text(), filename=str(path))
-    env_class = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "SwitchPressEnv"
-    )
-    methods = {node.name: node for node in env_class.body if isinstance(node, ast.FunctionDef)}
-
-    def assigned_attributes(method, /):
-        return {
-            node.targets[0].attr
-            for node in ast.walk(method)
-            if isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Attribute)
-            and isinstance(node.targets[0].value, ast.Name)
-            and node.targets[0].value.id == "self"
-        }
-
-    assert "_completed_episode_count" in assigned_attributes(methods["__init__"])
-    assert "_training_minimum_range_m" in assigned_attributes(methods["__init__"])
-    assert "_training_minimum_range_m" in assigned_attributes(methods["configure_training_phase"])
 
 
 class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):

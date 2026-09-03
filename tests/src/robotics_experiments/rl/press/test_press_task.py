@@ -48,8 +48,10 @@ _GOAL = PressApproachGoalConfig(
     ),
 )
 _REWARD = PressApproachRewardConfig(
+    hover_stabilization="boundary_weighted",
     position_progress_weight=0.1,
     stabilization_weight=0.01,
+    outside_envelope_weight=0.03,
     predictive_barrier_weight=0.1,
     action_effort_weight=1.0,
     hold_progress_weight=0.01,
@@ -124,12 +126,13 @@ def _step(
     state: PressApproachState[np.ndarray] | None = None,
     sample: PressApproachInput[np.ndarray] | None = None,
     approach_enabled: bool = True,
+    reward: PressApproachRewardConfig = _REWARD,
 ):
     return step_press_approach(
         state=_state() if state is None else state,
         sample=_sample() if sample is None else sample,
         goal_cfg=_GOAL,
-        reward_cfg=_REWARD,
+        reward_cfg=reward,
         termination_cfg=_TERMINATION,
         minimum_range_m=0.40,
         flight_parameters=_ENVELOPE,
@@ -205,12 +208,53 @@ def test_hover_reward_penalizes_current_pose_without_predictive_barrier() -> Non
         hold_steps=100,
         approach_enabled=False,
     )
+    inside = _step(sample=_sample(range_m=0.509), approach_enabled=False)
+    position_only = _step(sample=_sample(range_m=0.511), approach_enabled=False)
+    attitude_only = _step(
+        sample=_sample(range_m=0.41, attitude_error_rad=0.11),
+        approach_enabled=False,
+    )
+    both = _step(
+        sample=_sample(range_m=0.511, attitude_error_rad=0.11),
+        approach_enabled=False,
+    )
+    uniform = _step(
+        sample=_sample(range_m=0.511, attitude_error_rad=0.11),
+        approach_enabled=False,
+        reward=replace(_REWARD, hover_stabilization="uniform"),
+    )
     assert recovered.rewards.position_progress[0] == 0.0
     assert degraded.rewards.position_progress[0] == 0.0
     assert recovered.rewards.predictive_barrier[0] == 0.0
     assert degraded.rewards.predictive_barrier[0] == 0.0
     assert recovered.rewards.stabilization[0] == 0.0
     assert degraded.rewards.stabilization[0] < -_REWARD.stabilization_weight
+    assert inside.hover_evaluation.inside[0]
+    assert inside.rewards.stabilization[0] == pytest.approx(
+        -_REWARD.stabilization_weight
+        * (
+            inside.hover_evaluation.position_utilization[0]
+            + inside.hover_evaluation.attitude_utilization[0]
+        )
+    )
+    assert not both.hover_evaluation.inside[0]
+    assert both.rewards.stabilization[0] == pytest.approx(
+        -_REWARD.outside_envelope_weight
+        * (
+            both.hover_evaluation.position_utilization[0]
+            + both.hover_evaluation.attitude_utilization[0]
+        )
+    )
+    assert both.rewards.stabilization[0] == pytest.approx(
+        position_only.rewards.stabilization[0] + attitude_only.rewards.stabilization[0]
+    )
+    assert uniform.rewards.stabilization[0] == pytest.approx(
+        -_REWARD.stabilization_weight
+        * (
+            uniform.hover_evaluation.position_utilization[0]
+            + uniform.hover_evaluation.attitude_utilization[0]
+        )
+    )
 
 
 def test_hover_penalizes_action_effort_but_approach_does_not() -> None:
