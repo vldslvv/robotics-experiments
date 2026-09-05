@@ -234,40 +234,36 @@ The procedural smoke executes one update in every phase of every configured
 attempt, including full attempt teardown/recreation, and stops without using
 the reserved test seeds.
 
-Use the campaign-scoped TensorBoard log directory under
-`.build/training/press-hover/<run-id>/logs`. Each attempt is exactly one
-TensorBoard run containing its `train/`, `val/`, and `system/` metrics; the
-selected attempt also receives `test/`. The standard monitor is:
+Use the campaign-scoped Trackio database under
+`.build/training/press-hover/<run-id>/monitoring`. Each attempt is one Trackio
+run containing its `train/`, `val/`, and `system/` metrics; the selected attempt
+also receives `test/`. The standard monitor is:
 
 ```bash
-make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-hover/<run-id>/logs
+make trackio-rl \
+  RL_TRACKIO_DIR=.build/training/press-hover/<run-id>/monitoring \
+  RL_TRACKIO_PROJECT=press-hover
 ```
 
-and is served at `http://127.0.0.1:6006` by default. The training wrapper prints
-a run-scoped URL with `smoothing=0` and a filter for the primary learning and
-validation charts: training return, signed per-sample reward, all-checks pass,
-success, longest hover duration, hover-envelope occupancy and utilization,
-other flight failure, collision, minimum range, and finite traces. Set
-`RL_TENSORBOARD_PORT=<port>` when that address is occupied. The Make target
-uses the stable loader for the double-precision scalar tensors, passes
-`--reload_interval 5`, and retains up to one million scalar samples per tag.
-TensorBoard 2.21 also stores one smoothing value in browser-local global
-settings, so keep that global setting at zero. The exact selected-step values
-are recorded under each attempt's `evaluations` list in `training_report.json`.
-The wrapper keeps the live server under supervision while it waits for the
-first validation scalars; readiness is not bounded by a fixed wall-clock delay.
-All rate metrics end in `_rate` and are fractions in `[0, 1]`.
+and is served at `http://127.0.0.1:7860` by default. The training wrapper prints
+a run-scoped URL that selects the attempt, sets smoothing to zero, shows complete
+metric names, and filters for the main learning and validation charts. Set
+`RL_TRACKIO_PORT=<port>` when that address is occupied. The exact selected-step
+values are recorded under each attempt's `evaluations` list in
+`training_report.json`. The wrapper keeps the live server under supervision and
+waits until the expected attempt contains its first reset metric before reporting
+it ready. All rate metrics end in `_rate` and are fractions in `[0, 1]`.
 
-TensorBoard uses only the lowercase `train/`, `val/`, `test/`, and `system/`
+Trackio uses only the lowercase `train/`, `val/`, `test/`, and `system/`
 namespaces. Numeric group prefixes keep related charts together. Validation and
 test share one ordered registry: acceptance status, success, collision, other
 flight failure, minimum range, trace finiteness, measured-envelope occupancy and
 utilization, mean and maximum episode-longest hover duration, range undershoot,
-timeout, completed episodes, and all 40 flight-parameter statistics.
-Acceptance is report metadata, not a TensorBoard namespace. Total attempted PPO
-updates are the X coordinate and never rewind when a refinement phase restores
-an earlier learner checkpoint; `train/05_schedule/checkpoint_update` records that
-learner position separately.
+timeout, completed episodes, and all 40 flight-parameter statistics. Acceptance
+is report metadata, not a Trackio namespace. Total attempted PPO updates are the
+X coordinate and never rewind when a refinement phase restores an earlier
+learner checkpoint; `train/05_schedule/checkpoint_update` records that learner
+position separately.
 
 `system/` is diagnostic-only and cannot influence PPO, plateau progress,
 selection, retry choice, validation results, or acceptance. At the
@@ -284,11 +280,11 @@ as the measured bottleneck and never changes policy qualification.
 
 The press PPO reward has five signed contributions. Hover adds position and
 attitude utilization so both remain visible to the optimizer independently.
-Its `hover_stabilization` config selects either a `uniform` cost with weight
-0.01 everywhere or a `boundary_weighted` cost with weight 0.01 inside the
-measured hover envelope and 0.03 outside. The boundary-weighted cost changes
-weight as soon as any measured envelope check fails; it does not choose the
-larger of position and attitude. Hover also uses a squared normalized-action
+Its `hover_stabilization` config selects either an `outside_only` cost that is
+zero while every measured hover-envelope check passes and uses weight 0.03
+after any check fails, or a `boundary_weighted` cost with weight 0.01 inside
+and 0.03 outside. Neither cost chooses the larger of position and attitude.
+Hover also uses a squared normalized-action
 cost alongside hold progress and terminal outcome, and sets `position_progress`
 and `predictive_barrier` to zero. In the approach stage, `position_progress`
 rewards reduction in target error until the measured position envelope is
@@ -314,7 +310,7 @@ numerically grouped `system/` paths.
 
 PPO minimizes the clipped policy surrogate plus the configured value-loss
 coefficient times the clipped critic return error, minus the entropy
-coefficient times action-distribution entropy. TensorBoard names these
+coefficient times action-distribution entropy. Monitoring names these
 `ppo_clipped_surrogate_loss`, `critic_return_mse`, and
 `action_distribution_entropy`. Actor and critic relative parameter changes are recorded after
 every update because RSL-RL clips their combined gradient norm.
@@ -346,9 +342,9 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 23 records the prepared acceptance criteria, the
+`training_report.json` schema 24 records the prepared acceptance criteria, the
 exact reward configuration, trace-backed reset distribution, and every attempt,
-phase parent, raw validation metrics, exact TensorBoard step, telemetry summaries,
+phase parent, raw validation metrics, exact monitoring step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
 metric-registry revision 18 and comparison revision 35; older report shapes are

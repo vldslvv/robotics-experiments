@@ -80,6 +80,54 @@ def test_train_rl_rejects_invalid_policy_names(policy_name: str) -> None:
         train_rl._validate_policy_name(policy_name)  # noqa: SLF001
 
 
+@pytest.mark.parametrize("resume", ["never", "must"])
+def test_trackio_writer_preserves_metric_names_steps_and_run_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    resume: str,
+) -> None:
+    train_rl = _load_train_rl_module()
+    logged: list[tuple[dict[str, float], int]] = []
+    finished = []
+    initialized = {}
+    run = SimpleNamespace(log=lambda metrics, step: logged.append((metrics, step)))
+
+    def init(**kwargs):
+        initialized.update(kwargs)
+        return run
+
+    monkeypatch.setitem(
+        sys.modules,
+        "trackio",
+        SimpleNamespace(init=init, finish=lambda: finished.append(True)),
+    )
+    monitoring_dir = tmp_path / "monitoring"
+    writer = train_rl._TrackioWriter(  # noqa: SLF001
+        monitoring_dir=monitoring_dir,
+        project="press-hover",
+        run_name="attempt_01",
+        campaign_run_id="campaign",
+        training_seed=42,
+        resume=resume,
+    )
+    writer.add_scalar("val/02_hover/episode_longest_duration_mean_s", 4.25, 25)
+    writer.flush()
+    writer.close()
+
+    assert writer.log_dir == str(monitoring_dir)
+    assert initialized == {
+        "project": "press-hover",
+        "name": "attempt_01",
+        "config": {"campaign_run_id": "campaign", "training_seed": 42},
+        "resume": resume,
+        "embed": False,
+        "auto_log_gpu": False,
+        "auto_log_cpu": False,
+    }
+    assert logged == [({"val/02_hover/episode_longest_duration_mean_s": 4.25}, 25)]
+    assert finished == [True]
+
+
 def test_procedural_smoke_keeps_every_phase_boundary_at_one_update() -> None:
     train_rl = _load_train_rl_module()
     phases = train_rl._procedural_smoke_phases(  # noqa: SLF001
@@ -171,7 +219,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance_criteria=acceptance_criteria,
         hover_reset_distribution={"source": "flight_parameters_policy_window"},
     )
-    assert report["schema_version"] == 23
+    assert report["schema_version"] == 24
     assert report["reward_configuration"] == {
         "hover_stabilization": "boundary_weighted",
         "position_progress_weight": 0.1,
@@ -428,10 +476,10 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
         "_publish_selected",
         lambda **_kwargs: False,
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "torch.utils.tensorboard",
-        SimpleNamespace(SummaryWriter=lambda **_kwargs: SimpleNamespace(close=lambda: None)),
+    monkeypatch.setattr(
+        train_rl,
+        "_TrackioWriter",
+        lambda **_kwargs: SimpleNamespace(close=lambda: None),
     )
     monkeypatch.delenv("RL_RUN_ID", raising=False)
     train_rl._run_policy_workflow(  # noqa: SLF001
@@ -591,7 +639,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 23,
+        "schema_version": 24,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -623,7 +671,7 @@ def test_interrupt_handlers_raise_keyboard_interrupt(
             handler(0, None)  # type: ignore[operator]
 
 
-def test_training_tensorboard_metrics_are_small_and_namespaced() -> None:
+def test_training_metrics_are_small_and_namespaced() -> None:
     source = (
         REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py"
     ).read_text()

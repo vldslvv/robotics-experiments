@@ -2754,3 +2754,21 @@ attempt report and advance report schema 23. Keep comparison revision 35
 because evaluation and acceptance are unchanged, allowing both reward choices
 to be compared on the same workload. Do not start a training campaign as part
 of this change.
+
+### 91. Replace TensorBoard with Trackio
+
+Date: 2026-09-03.
+
+Use one local Trackio database inside each training campaign. Each independent
+attempt is one Trackio run, and the selected attempt receives the final-test
+metrics. Keep the existing metric names and update numbers. Disable Trackio's
+automatic hardware metrics because the training workflow already records the
+same process and GPU measurements.
+
+Remove the TensorBoard dependency and monitor command. The training wrapper
+starts Trackio after the expected attempt writes its first reset metric, prints
+a URL with zero smoothing and complete metric names, and stops the monitor when
+the workflow ends. Existing TensorBoard event files remain historical output;
+they are not converted. Rename `tensorboard_step` to `monitoring_step` and
+advance the strict training report to schema 24. `training_report.json` remains
+the exact source for validation and acceptance values.

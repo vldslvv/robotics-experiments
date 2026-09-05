@@ -97,7 +97,7 @@ class TrainingResult:
 
 
 class _PresentationWriter:
-    """Map RSL-RL logging onto the strict project TensorBoard contract."""
+    """Map RSL-RL logging onto the strict project monitoring contract."""
 
     def __init__(
         self,
@@ -265,7 +265,7 @@ class _MetricLogger:
         self._base = base
         self.writer = writer
         self._base.writer = writer
-        self._base.logger_type = "tensorboard"
+        self._base.logger_type = "trackio"
         self._base.disable_logs = False
 
     def _call_enabled(self, method, /, *args, **kwargs):
@@ -367,7 +367,7 @@ def configure_monitoring(
     phase: RlTrainingPhaseConfig,
     phase_number: int,
 ) -> None:
-    """Install the sole namespaced TensorBoard writer for one attempt."""
+    """Install the sole namespaced monitoring writer for one attempt."""
     presentation = _PresentationWriter(
         writer=writer,
         phase=phase,
@@ -378,7 +378,7 @@ def configure_monitoring(
         runner.logger = _MetricLogger(base=runner.logger, writer=presentation)
         return
     runner.writer = presentation
-    runner.logger_type = "tensorboard"
+    runner.logger_type = "trackio"
     runner.log_dir = str(writer.log_dir)
     runner.save = _ignore_internal_checkpoint
 

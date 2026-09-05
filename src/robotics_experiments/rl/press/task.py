@@ -460,8 +460,12 @@ def step_press_approach(
         pose_utilization = (
             envelope_evaluation.position_utilization + envelope_evaluation.attitude_utilization
         )
-        if reward_cfg.hover_stabilization == "uniform":
-            stabilization_weight: ArrayT | Scalar = reward_cfg.stabilization_weight
+        if reward_cfg.hover_stabilization == "outside_only":
+            stabilization_weight: ArrayT | Scalar = _where(
+                envelope_evaluation.inside,
+                0.0,
+                reward_cfg.outside_envelope_weight,
+            )
         elif reward_cfg.hover_stabilization == "boundary_weighted":
             stabilization_weight = _where(
                 envelope_evaluation.inside,

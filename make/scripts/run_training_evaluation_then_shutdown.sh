@@ -16,7 +16,7 @@ Usage:
 
 Run Make training/publication and independent-evaluation targets in that order,
 preserving console and status logs. The wrapper also serves the
-training logs through TensorBoard for the lifetime of the workflow and prints
+training metrics through Trackio for the lifetime of the workflow and prints
 its URL. A failed stage skips every later stage. Power-off after success,
 failure, or a handled interrupt is disabled by default and must be requested
 with --shutdown.
@@ -139,16 +139,16 @@ status_log="${log_dir}/${run_id}.status"
 train_status="not-run"
 eval_status="not-run"
 sudo_keeper_pid=""
-tensorboard_monitor_pid=""
+trackio_monitor_pid=""
 sudo_validated=false
-tensorboard_host="127.0.0.1"
-tensorboard_port="${RL_TENSORBOARD_PORT:-6006}"
-tensorboard_base_url="http://${tensorboard_host}:${tensorboard_port}/"
-tensorboard_primary_filter='^(train/01_reset/(sample_count|position_envelope_utilization_(mean|p95|max)|attitude_envelope_utilization_(mean|p95|max))|train/02_progress/(recent_100_episode_return_mean|hover_envelope_occupancy_rate|episode_longest_hover_duration_mean_s|hover_envelope_utilization_mean)|train/03_reward/per_step_mean|train/05_schedule/recovery_boundary_m|val/01_acceptance/(all_checks_passed|success_rate|collision_rate|flight_failure_rate|minimum_closest_range_m|all_traces_finite)|val/02_hover/(envelope_occupancy_rate|episode_longest_duration_mean_s|episode_longest_duration_max_s|envelope_utilization_mean|position_envelope_utilization_mean|attitude_envelope_utilization_mean)|val/03_outcome/range_undershoot_rate)$'
-tensorboard_url="${tensorboard_base_url}?smoothing=0&tagFilter=${tensorboard_primary_filter}"
-tensorboard_container_name="vv-rl-tensorboard.${artifact_run_id}"
-tensorboard_logdir=".build/training/${policy_name}/${artifact_run_id}/logs"
-tensorboard_ready_file="${log_dir}/${run_id}.tensorboard-ready"
+trackio_host="127.0.0.1"
+trackio_port="${RL_TRACKIO_PORT:-7860}"
+trackio_base_url="http://${trackio_host}:${trackio_port}/"
+trackio_primary_filter='^(train/02_progress/(recent_100_episode_return_mean|hover_envelope_occupancy_rate|episode_longest_hover_duration_mean_s|hover_envelope_utilization_mean)|train/03_reward/per_step_mean|train/04_optimization/(actor_relative_parameter_change|critic_return_mse|ppo_clipped_surrogate_loss)|val/01_acceptance/(all_checks_passed|success_rate|collision_rate|flight_failure_rate|minimum_closest_range_m|all_traces_finite)|val/02_hover/(envelope_occupancy_rate|episode_longest_duration_mean_s|episode_longest_duration_max_s|envelope_utilization_mean|position_envelope_utilization_mean|attitude_envelope_utilization_mean)|val/03_outcome/range_undershoot_rate)$'
+trackio_url="${trackio_base_url}?project=${policy_name}&runs=attempt_01&smoothing=0&accordion=hidden&metric_filter=${trackio_primary_filter}"
+trackio_container_name="vv-rl-trackio.${artifact_run_id}"
+trackio_dir=".build/training/${policy_name}/${artifact_run_id}/monitoring"
+trackio_ready_file="${log_dir}/${run_id}.trackio-ready"
 shutdown_mode="disabled"
 if [ "${shutdown_requested}" = true ]; then
     shutdown_mode="enabled"
@@ -193,12 +193,12 @@ finish_run() {
 
     set +e
     trap - EXIT HUP INT TERM
-    if [ -n "${tensorboard_monitor_pid}" ]; then
-        kill "${tensorboard_monitor_pid}" 2>/dev/null
-        docker stop "${tensorboard_container_name}" >/dev/null 2>&1
-        wait "${tensorboard_monitor_pid}" 2>/dev/null
+    if [ -n "${trackio_monitor_pid}" ]; then
+        kill "${trackio_monitor_pid}" 2>/dev/null
+        docker stop "${trackio_container_name}" >/dev/null 2>&1
+        wait "${trackio_monitor_pid}" 2>/dev/null
     fi
-    rm -f "${tensorboard_ready_file}"
+    rm -f "${trackio_ready_file}"
     if [ -n "${sudo_keeper_pid}" ]; then
         kill "${sudo_keeper_pid}" 2>/dev/null
         wait "${sudo_keeper_pid}" 2>/dev/null
@@ -235,16 +235,15 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-serve_tensorboard_when_ready() {
-    local environment=""
+serve_trackio_when_ready() {
+    local metrics=""
     local server_pid=""
-    local scalar_tags=""
 
     trap 'if [ -n "${server_pid}" ]; then kill "${server_pid}" 2>/dev/null; fi; exit 0' HUP INT TERM
-    until find "${tensorboard_logdir}" \
-        -maxdepth 2 \
+    until find "${trackio_dir}" \
+        -maxdepth 1 \
         -type f \
-        -name 'events.out.tfevents.*' \
+        -name '*.db' \
         -size +0c \
         -print \
         -quit \
@@ -252,44 +251,41 @@ serve_tensorboard_when_ready() {
         grep -q .; do
         sleep 1
     done
-    make tensorboard-rl \
-        "RL_TENSORBOARD_CONTAINER_NAME=${tensorboard_container_name}" \
-        "RL_TENSORBOARD_HOST=${tensorboard_host}" \
-        "RL_TENSORBOARD_LOGDIR=${tensorboard_logdir}" \
-        "RL_TENSORBOARD_PORT=${tensorboard_port}" \
+    make trackio-rl \
+        "RL_TRACKIO_CONTAINER_NAME=${trackio_container_name}" \
+        "RL_TRACKIO_DIR=${trackio_dir}" \
+        "RL_TRACKIO_HOST=${trackio_host}" \
+        "RL_TRACKIO_PORT=${trackio_port}" \
+        "RL_TRACKIO_PROJECT=${policy_name}" \
         >>"${console_log}" 2>&1 &
     server_pid=$!
     while true; do
         if ! kill -0 "${server_pid}" 2>/dev/null; then
-            printf 'ERROR: TensorBoard exited before becoming ready; see %s\n' \
+            printf 'ERROR: Trackio exited before becoming ready; see %s\n' \
                 "${console_log}" |
                 tee -a "${console_log}" >&2
             return 1
         fi
-        if curl --fail --silent --output /dev/null "${tensorboard_base_url}"; then
-            environment="$(
+        if curl --fail --silent --output /dev/null "${trackio_base_url}version"; then
+            metrics="$(
                 curl --fail --silent \
-                    "${tensorboard_base_url}data/environment" ||
+                    --request POST \
+                    --header 'Content-Type: application/json' \
+                    --data "{\"project\":\"${policy_name}\",\"run\":\"attempt_01\"}" \
+                    "${trackio_base_url}api/get_metrics_for_run" ||
                     true
             )"
-            scalar_tags="$(
-                curl --fail --silent \
-                    "${tensorboard_base_url}data/plugin/scalars/tags" ||
-                    true
-            )"
-            if [[ "${environment}" == *'"data_location":'*"${tensorboard_logdir}"'"'* ]] &&
-                [[ "${scalar_tags}" == *\"* ]]; then
-                printf '[%s] TensorBoard URL: %s (run: %s/%s; scalar data loaded)\n' \
+            if [[ "${metrics}" == *'"train/01_reset/sample_count"'* ]]; then
+                printf '[%s] Trackio URL: %s (run: %s/attempt_01; metrics loaded)\n' \
                     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                    "${tensorboard_url}" \
-                    "${policy_name}" \
-                    "${artifact_run_id}" |
+                    "${trackio_url}" \
+                    "${policy_name}" |
                     tee -a "${console_log}"
-                printf '[%s] TensorBoard opens the primary learning and validation charts with Smoothing=0; exact selected-step values are in %s/training_report.json\n' \
+                printf '[%s] Trackio opens complete metric names with smoothing=0; exact selected-step values are in %s/training_report.json\n' \
                     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     ".build/training/${policy_name}/${artifact_run_id}" |
                     tee -a "${console_log}"
-                : >"${tensorboard_ready_file}"
+                : >"${trackio_ready_file}"
                 wait "${server_pid}"
                 return $?
             fi
@@ -328,8 +324,8 @@ printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s eval_target=
     "${shutdown_mode}" |
     tee -a "${console_log}"
 
-serve_tensorboard_when_ready &
-tensorboard_monitor_pid=$!
+serve_trackio_when_ready &
+trackio_monitor_pid=$!
 
 if [ "${shutdown_requested}" = true ]; then
     sudo -v
@@ -344,15 +340,15 @@ train_status="${stage_status}"
 if [ "${train_status}" -ne 0 ]; then
     exit "${train_status}"
 fi
-while [ ! -f "${tensorboard_ready_file}" ]; do
-    if ! kill -0 "${tensorboard_monitor_pid}" 2>/dev/null; then
+while [ ! -f "${trackio_ready_file}" ]; do
+    if ! kill -0 "${trackio_monitor_pid}" 2>/dev/null; then
         set +e
-        wait "${tensorboard_monitor_pid}"
-        tensorboard_status=$?
+        wait "${trackio_monitor_pid}"
+        trackio_status=$?
         set -e
-        tensorboard_monitor_pid=""
-        if [ "${tensorboard_status}" -ne 0 ]; then
-            exit "${tensorboard_status}"
+        trackio_monitor_pid=""
+        if [ "${trackio_status}" -ne 0 ]; then
+            exit "${trackio_status}"
         fi
         break
     fi

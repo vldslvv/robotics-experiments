@@ -136,8 +136,11 @@ def test_isaac_lab_uses_pinned_minimal_dependencies() -> None:
 
     assert requirements
     assert all("==" in requirement for requirement in requirements)
+    assert "trackio==0.37.0" in requirements
+    assert not any(requirement.startswith("tensorboard==") for requirement in requirements)
     assert "TERM=xterm ./isaaclab.sh --install" not in dockerfile
     assert "-e source/isaaclab_contrib" in dockerfile
     assert (
         "import flatdict, gymnasium, isaaclab, isaaclab_contrib, isaaclab_rl, rsl_rl" in dockerfile
     )
+    assert "rsl_rl, trackio" in dockerfile

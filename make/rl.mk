@@ -8,11 +8,11 @@ TRAIN_ARGS ?=
 EVAL_PRESS_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/eval_press.py
 EVAL_PRESS_LOG = /isaac-sim/.nvidia-omniverse/logs/eval_press.log
 EVAL_ARGS ?=
-RL_TENSORBOARD_HOST ?= 127.0.0.1
-RL_TENSORBOARD_PORT ?= 6006
-RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
-RL_TENSORBOARD_LOGDIR ?= .build/training
-RL_TENSORBOARD_SCALAR_SAMPLES ?= 1000000
+RL_TRACKIO_HOST ?= 127.0.0.1
+RL_TRACKIO_PORT ?= 7860
+RL_TRACKIO_CONTAINER_NAME ?= vv-rl-trackio
+RL_TRACKIO_DIR ?= .build/training
+RL_TRACKIO_PROJECT ?=
 PRESS_NAVIGATION_MEASUREMENT_RUNS ?= 10
 PRESS_NAVIGATION_POSITION_MARGIN_M ?= 0.005
 PRESS_NAVIGATION_ROTATION_MARGIN_RAD ?= 0.004363323129985824
@@ -52,21 +52,21 @@ eval-press: generate-drone-usd
 
 # The training wrapper runs this foreground server in the existing Isaac Lab
 # image and stops its named container on exit.
-.PHONY: tensorboard-rl
-tensorboard-rl:
+.PHONY: trackio-rl
+trackio-rl:
+	@mkdir -p '$(RL_TRACKIO_DIR)'
 	@docker run --rm \
 	    --network=host \
-	    --name '$(RL_TENSORBOARD_CONTAINER_NAME)' \
+	    --name '$(RL_TRACKIO_CONTAINER_NAME)' \
 	    -v '$(CURDIR):$(ISAAC_PROJECT_DIR):ro' \
+	    -v '$(CURDIR)/$(RL_TRACKIO_DIR):$(ISAAC_PROJECT_DIR)/$(RL_TRACKIO_DIR):rw' \
+	    -e 'TRACKIO_DIR=$(ISAAC_PROJECT_DIR)/$(RL_TRACKIO_DIR)' \
+	    -e 'RL_TRACKIO_PROJECT=$(RL_TRACKIO_PROJECT)' \
+	    -e 'RL_TRACKIO_HOST=$(RL_TRACKIO_HOST)' \
+	    -e 'RL_TRACKIO_PORT=$(RL_TRACKIO_PORT)' \
 	    --entrypoint /isaac-sim/python.sh \
 	    '$(ISAAC_LAB_IMAGE)' \
-	    -m tensorboard.main \
-	    --logdir '$(ISAAC_PROJECT_DIR)/$(RL_TENSORBOARD_LOGDIR)' \
-	    --host '$(RL_TENSORBOARD_HOST)' \
-	    --port '$(RL_TENSORBOARD_PORT)' \
-	    --reload_interval 5 \
-	    --samples_per_plugin 'scalars=$(RL_TENSORBOARD_SCALAR_SAMPLES)' \
-	    --load_fast=false
+	    -c "import os, trackio; trackio.show(project=os.environ.get('RL_TRACKIO_PROJECT') or None, open_browser=False, block_thread=True, host=os.environ['RL_TRACKIO_HOST'], server_port=int(os.environ['RL_TRACKIO_PORT']))"
 
 .PHONY: test-integration-press-hover-goto
 test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)

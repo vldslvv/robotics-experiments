@@ -25,9 +25,9 @@ def _run_wrapper(
     eval_exit: int = 0,
     shutdown: bool = False,
     shutdown_exit: int = 0,
-    stale_tensorboard: bool = False,
-    scalar_ready_after_polls: int = 1,
-    tensorboard_port: int | None = None,
+    stale_trackio: bool = False,
+    metrics_ready_after_polls: int = 1,
+    trackio_port: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -63,31 +63,26 @@ exit 0
         path=fake_bin / "curl",
         body="""#!/usr/bin/env bash
 printf 'curl\\n' >>"${WRAPPER_CALLS}"
-if [[ "$*" == *data/environment* ]]; then
-    if [ "${STALE_TENSORBOARD}" = true ]; then
-        printf '{"data_location": "/fake/.build/training/press/stale/logs"}\\n'
-    else
-        logdir="$(
-            sed -n 's/.*RL_TENSORBOARD_LOGDIR=\\([^ ]*\\).*/\\1/p' \
-                "${WRAPPER_CALLS}" |
-                tail -n 1
-        )"
-        printf '{"data_location": "/fake/%s"}\\n' "${logdir}"
-    fi
+if [[ "$*" == *version* ]]; then
+    printf '{"version": "0.37.0"}\\n'
     exit 0
 fi
-scalar_poll_count="$(cat "${SCALAR_POLL_COUNT}" 2>/dev/null || printf '0')"
-scalar_poll_count="$((scalar_poll_count + 1))"
-printf '%s\\n' "${scalar_poll_count}" >"${SCALAR_POLL_COUNT}"
-if [ "${scalar_poll_count}" -lt "${SCALAR_READY_AFTER_POLLS}" ]; then
-    printf '{}\\n'
+metrics_poll_count="$(cat "${METRICS_POLL_COUNT}" 2>/dev/null || printf '0')"
+metrics_poll_count="$((metrics_poll_count + 1))"
+printf '%s\\n' "${metrics_poll_count}" >"${METRICS_POLL_COUNT}"
+if [ "${metrics_poll_count}" -lt "${METRICS_READY_AFTER_POLLS}" ]; then
+    printf '[]\\n'
     exit 0
 fi
-printf '{"train/02_progress/recent_100_episode_return_mean": {}}\\n'
+if [ "${STALE_TRACKIO}" = true ]; then
+    printf '["train/unrelated"]\\n'
+else
+    printf '["train/01_reset/sample_count"]\\n'
+fi
 exit 0
 """,
     )
-    if scalar_ready_after_polls > 1:
+    if metrics_ready_after_polls > 1:
         _write_executable(
             path=fake_bin / "sleep",
             body="""#!/usr/bin/env bash
@@ -108,8 +103,8 @@ exit 0
         path=fake_bin / "make",
         body="""#!/usr/bin/env bash
 printf 'make %s\\n' "$*" >>"${WRAPPER_CALLS}"
-if [ "$1" = "tensorboard-rl" ]; then
-    if [ "${STALE_TENSORBOARD}" = true ]; then
+if [ "$1" = "trackio-rl" ]; then
+    if [ "${STALE_TRACKIO}" = true ]; then
         sleep 2
         exit 1
     fi
@@ -127,16 +122,16 @@ if [ "$1" = "train-test" ]; then
                 ;;
         esac
     done
-    mkdir -p ".build/training/press/${artifact_id}/logs"
-    printf 'event-data\\n' \
-        >".build/training/press/${artifact_id}/logs/events.out.tfevents.test"
+    mkdir -p ".build/training/press/${artifact_id}/monitoring"
+    printf 'trackio-data\\n' \
+        >".build/training/press/${artifact_id}/monitoring/press.db"
     for _ in {1..300}; do
         if grep -q '^curl$' "${WRAPPER_CALLS}"; then
             break
         fi
         sleep 0.01
     done
-    if [ "${STALE_TENSORBOARD}" = true ]; then
+    if [ "${STALE_TRACKIO}" = true ]; then
         sleep 3
     fi
     exit "${TRAIN_EXIT}"
@@ -150,16 +145,16 @@ exit "${EVAL_EXIT}"
         {
             "PATH": f"{fake_bin}:{env['PATH']}",
             "EVAL_EXIT": str(eval_exit),
-            "SCALAR_POLL_COUNT": str(tmp_path / "scalar-polls"),
-            "SCALAR_READY_AFTER_POLLS": str(scalar_ready_after_polls),
+            "METRICS_POLL_COUNT": str(tmp_path / "metrics-polls"),
+            "METRICS_READY_AFTER_POLLS": str(metrics_ready_after_polls),
             "SHUTDOWN_EXIT": str(shutdown_exit),
-            "STALE_TENSORBOARD": str(stale_tensorboard).lower(),
+            "STALE_TRACKIO": str(stale_trackio).lower(),
             "TRAIN_EXIT": str(train_exit),
             "WRAPPER_CALLS": str(calls),
         }
     )
-    if tensorboard_port is not None:
-        env["RL_TENSORBOARD_PORT"] = str(tensorboard_port)
+    if trackio_port is not None:
+        env["RL_TRACKIO_PORT"] = str(trackio_port)
     command = [
         "bash",
         str(_SCRIPT),
@@ -200,7 +195,7 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
     call_lines = [line for line in calls.splitlines() if line.startswith("make ")]
     assert [line.split()[1] for line in call_lines] == [
         "train-test",
-        "tensorboard-rl",
+        "trackio-rl",
         "eval-test",
     ]
     artifact_ids = {
@@ -210,14 +205,15 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
         if part.startswith("RL_RUN_ID=")
     }
     assert len(artifact_ids) == 1
-    assert "RL_TENSORBOARD_HOST=127.0.0.1" in call_lines[1]
-    assert "RL_TENSORBOARD_PORT=6006" in call_lines[1]
-    tensorboard_logdir = next(
-        part.removeprefix("RL_TENSORBOARD_LOGDIR=")
+    assert "RL_TRACKIO_HOST=127.0.0.1" in call_lines[1]
+    assert "RL_TRACKIO_PORT=7860" in call_lines[1]
+    assert "RL_TRACKIO_PROJECT=press" in call_lines[1]
+    trackio_dir = next(
+        part.removeprefix("RL_TRACKIO_DIR=")
         for part in call_lines[1].split()
-        if part.startswith("RL_TENSORBOARD_LOGDIR=")
+        if part.startswith("RL_TRACKIO_DIR=")
     )
-    assert tensorboard_logdir == f".build/training/press/{artifact_ids.pop()}/logs"
+    assert trackio_dir == f".build/training/press/{artifact_ids.pop()}/monitoring"
     assert "TRAIN_ARGS=--iterations 3" in call_lines[0]
     assert "EVAL_ARGS=--episodes 4" in call_lines[2]
     assert "sudo " not in calls
@@ -229,37 +225,41 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
     console = next((tmp_path / "logs").glob("*.console.log")).read_text(encoding="utf-8")
     assert "shutdown=disabled" in console
     assert (
-        "TensorBoard URL: http://127.0.0.1:6006/?smoothing=0&tagFilter=" in console
-        and "scalar data loaded" in console
+        "Trackio URL: http://127.0.0.1:7860/?project=press&runs=attempt_01" in console
+        and "metrics loaded" in console
     )
     assert (
-        "TensorBoard URL: http://127.0.0.1:6006/?smoothing=0&tagFilter=" in result.stdout
-        and "scalar data loaded" in result.stdout
+        "Trackio URL: http://127.0.0.1:7860/?project=press&runs=attempt_01" in result.stdout
+        and "metrics loaded" in result.stdout
     )
-    assert "primary learning and validation charts with Smoothing=0" in console
+    assert "smoothing=0&accordion=hidden&metric_filter=" in console
+    assert "complete metric names with smoothing=0" in console
+    assert "train/01_reset" not in next(
+        line for line in console.splitlines() if "Trackio URL:" in line
+    )
     assert "training_report.json" in console
     assert "unbound variable" not in result.stderr
 
 
-def test_wrapper_uses_requested_tensorboard_port(tmp_path: Path) -> None:
-    result = _run_wrapper(tmp_path=tmp_path, train_exit=0, tensorboard_port=6008)
+def test_wrapper_uses_requested_trackio_port(tmp_path: Path) -> None:
+    result = _run_wrapper(tmp_path=tmp_path, train_exit=0, trackio_port=7868)
 
     assert result.returncode == 0
     calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
-    assert "RL_TENSORBOARD_PORT=6008" in calls
-    assert "TensorBoard URL: http://127.0.0.1:6008/?smoothing=0&tagFilter=" in result.stdout
+    assert "RL_TRACKIO_PORT=7868" in calls
+    assert "Trackio URL: http://127.0.0.1:7868/?project=press" in result.stdout
 
 
-def test_wrapper_waits_for_first_slow_validation_scalars(tmp_path: Path) -> None:
+def test_wrapper_waits_for_first_slow_metrics(tmp_path: Path) -> None:
     result = _run_wrapper(
         tmp_path=tmp_path,
         train_exit=0,
-        scalar_ready_after_polls=35,
+        metrics_ready_after_polls=35,
     )
 
     assert result.returncode == 0
-    assert int((tmp_path / "scalar-polls").read_text(encoding="utf-8")) >= 35
-    assert "scalar data loaded" in result.stdout
+    assert int((tmp_path / "metrics-polls").read_text(encoding="utf-8")) >= 35
+    assert "metrics loaded" in result.stdout
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:
@@ -276,21 +276,20 @@ def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:
     assert "shutdown=enabled shutdown_exit=0" in status
 
 
-def test_wrapper_rejects_scalar_data_from_another_tensorboard_run(
+def test_wrapper_rejects_metrics_from_another_trackio_run(
     tmp_path: Path,
 ) -> None:
     result = _run_wrapper(
         tmp_path=tmp_path,
         train_exit=0,
-        stale_tensorboard=True,
+        stale_trackio=True,
     )
 
     assert result.returncode != 0
     calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
     assert "make train-test " in calls
     assert "make eval-test " not in calls
-    assert "data_location" not in result.stdout
-    assert "TensorBoard URL:" not in result.stdout
+    assert "Trackio URL:" not in result.stdout
 
 
 @pytest.mark.parametrize("shutdown", [False, True])

@@ -33,15 +33,18 @@ def test_rl_targets_are_defined_only_in_rl_makefile() -> None:
     assert definitions == {target: ["rl.mk"] for target in _MOVED_TARGETS}
 
 
-def test_tensorboard_uses_five_second_reload_and_preserves_scalar_points() -> None:
+def test_trackio_uses_the_campaign_database_and_does_not_open_a_browser() -> None:
     makefile = (REPO_ROOT / "make" / "rl.mk").read_text()
-    tensorboard = makefile.split("tensorboard-rl:", maxsplit=1)[1].split(
+    trackio = makefile.split("trackio-rl:", maxsplit=1)[1].split(
         ".PHONY: test-integration-press-hover-goto", maxsplit=1
     )[0]
-    assert "--reload_interval 5" in tensorboard
-    assert "--samples_per_plugin 'scalars=$(RL_TENSORBOARD_SCALAR_SAMPLES)'" in tensorboard
-    assert "--load_fast=false" in tensorboard
-    assert "RL_TENSORBOARD_SCALAR_SAMPLES ?= 1000000" in makefile
+    assert "TRACKIO_DIR=$(ISAAC_PROJECT_DIR)/$(RL_TRACKIO_DIR)" in trackio
+    assert "trackio.show(" in trackio
+    assert "open_browser=False" in trackio
+    assert "block_thread=True" in trackio
+    assert "RL_TRACKIO_PORT ?= 7860" in makefile
+    assert "tensorboard-rl" not in makefile
+    assert "RL_TENSORBOARD" not in makefile
 
 
 def test_root_makefile_includes_rl_makefile_and_training_makefile_is_removed() -> None:

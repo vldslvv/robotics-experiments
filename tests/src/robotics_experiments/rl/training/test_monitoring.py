@@ -205,6 +205,7 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
     policy = SimpleNamespace(actor=torch.nn.Linear(2, 2), critic=torch.nn.Linear(2, 1))
     runner = SimpleNamespace(logger=BaseLogger(), alg=SimpleNamespace(policy=policy))
     rsl_rl.configure_monitoring(runner=runner, writer=writer, phase=phase, phase_number=1)
+    assert runner.logger._base.logger_type == "trackio"  # noqa: SLF001
     with torch.no_grad():
         policy.actor.weight.add_(0.1)
         policy.critic.weight.add_(0.2)

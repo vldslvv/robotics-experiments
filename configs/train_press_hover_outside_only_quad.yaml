@@ -1,0 +1,9 @@
+defaults:
+  - train_press_hover_quad
+  - _self_
+
+# Controlled comparison: change only the hover stabilization reward.
+rl:
+  press:
+    reward:
+      hover_stabilization: outside_only

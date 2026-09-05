@@ -218,10 +218,15 @@ def test_hover_reward_penalizes_current_pose_without_predictive_barrier() -> Non
         sample=_sample(range_m=0.511, attitude_error_rad=0.11),
         approach_enabled=False,
     )
-    uniform = _step(
+    outside_only_inside = _step(
+        sample=_sample(range_m=0.509),
+        approach_enabled=False,
+        reward=replace(_REWARD, hover_stabilization="outside_only"),
+    )
+    outside_only_failed = _step(
         sample=_sample(range_m=0.511, attitude_error_rad=0.11),
         approach_enabled=False,
-        reward=replace(_REWARD, hover_stabilization="uniform"),
+        reward=replace(_REWARD, hover_stabilization="outside_only"),
     )
     assert recovered.rewards.position_progress[0] == 0.0
     assert degraded.rewards.position_progress[0] == 0.0
@@ -248,11 +253,12 @@ def test_hover_reward_penalizes_current_pose_without_predictive_barrier() -> Non
     assert both.rewards.stabilization[0] == pytest.approx(
         position_only.rewards.stabilization[0] + attitude_only.rewards.stabilization[0]
     )
-    assert uniform.rewards.stabilization[0] == pytest.approx(
-        -_REWARD.stabilization_weight
+    assert outside_only_inside.rewards.stabilization[0] == 0.0
+    assert outside_only_failed.rewards.stabilization[0] == pytest.approx(
+        -_REWARD.outside_envelope_weight
         * (
-            uniform.hover_evaluation.position_utilization[0]
-            + uniform.hover_evaluation.attitude_utilization[0]
+            outside_only_failed.hover_evaluation.position_utilization[0]
+            + outside_only_failed.hover_evaluation.attitude_utilization[0]
         )
     )
 

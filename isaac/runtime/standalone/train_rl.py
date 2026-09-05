@@ -81,7 +81,58 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 23
+_REPORT_SCHEMA_VERSION = 24
+
+
+class _TrackioWriter:
+    """Write one campaign attempt to its local Trackio database."""
+
+    def __init__(
+        self,
+        *,
+        monitoring_dir: Path,
+        project: str,
+        run_name: str,
+        campaign_run_id: str,
+        training_seed: int,
+        resume: str,
+    ) -> None:
+        monitoring_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["TRACKIO_DIR"] = str(monitoring_dir)
+        import trackio
+
+        self.log_dir = str(monitoring_dir)
+        self._finish = trackio.finish
+        self._run = trackio.init(
+            project=project,
+            name=run_name,
+            config={
+                "campaign_run_id": campaign_run_id,
+                "training_seed": training_seed,
+            },
+            resume=resume,
+            embed=False,
+            auto_log_gpu=False,
+            auto_log_cpu=False,
+        )
+
+    def add_scalar(
+        self,
+        tag: str,
+        scalar_value: Any,
+        global_step: int,
+        /,
+        *args,
+        **kwargs,
+    ) -> None:
+        del args, kwargs
+        self._run.log({tag: float(scalar_value)}, step=int(global_step))
+
+    def flush(self) -> None:
+        """Allow Trackio's live background writer to flush its queue."""
+
+    def close(self) -> None:
+        self._finish()
 
 
 def _report(message: str) -> None:
@@ -1026,8 +1077,8 @@ def _record_final_test(
     selected_policy = selection.artifact_dir / POLICY_FILENAME
     attempt_dir = selection.artifact_dir.parents[1]
     attempt_record = attempts[selected_attempt_index]
-    tensorboard_step = int(attempt_record["attempted_updates"])
-    telemetry_interval["tensorboard_step"] = tensorboard_step
+    monitoring_step = int(attempt_record["attempted_updates"])
+    telemetry_interval["monitoring_step"] = monitoring_step
     _record_telemetry(
         path=attempt_dir / _TELEMETRY_FILENAME,
         interval=telemetry_interval,
@@ -1058,18 +1109,18 @@ def _record_final_test(
         role="test",
         evaluation=test_evaluation,
         all_checks_passed=acceptance.passed,
-        step=tensorboard_step,
+        step=monitoring_step,
     )
     write_system_scalars(
         writer=writer,
         role="test",
         summary=telemetry_summary,
-        step=tensorboard_step,
+        step=monitoring_step,
     )
     attempt_record["telemetry"]["summaries"].append(
         {
             "role": "test",
-            "tensorboard_step": tensorboard_step,
+            "monitoring_step": monitoring_step,
             **_telemetry_report_summary(
                 summary=telemetry_summary,
                 target_rate=config.rl.training.gpu_utilization_target_rate,
@@ -1134,8 +1185,6 @@ def _train_and_validate_attempt(
         f"(policy={training_config.policy_name}, seeds={attempt_seeds}, device={device}, "
         f"start=scratch-neutral-output) -> {run_dir}"
     )
-    from torch.utils.tensorboard import SummaryWriter
-
     writer = None
     validation_worker: _EvaluationWorker | None = None
     metadata: dict[str, Any] | None = None
@@ -1161,8 +1210,13 @@ def _train_and_validate_attempt(
                     "training_seed": seed,
                 },
             )
-            attempt_writer = SummaryWriter(
-                log_dir=str(run_dir / "logs" / f"attempt_{attempt_index + 1:02d}")
+            attempt_writer = _TrackioWriter(
+                monitoring_dir=run_dir / "monitoring",
+                project=training_config.policy_name,
+                run_name=f"attempt_{attempt_index + 1:02d}",
+                campaign_run_id=run_dir.name,
+                training_seed=seed,
+                resume="never",
             )
             writer = attempt_writer
             write_reset_scalars(
@@ -1343,8 +1397,8 @@ def _train_and_validate_attempt(
                         artifact_dir=artifact_dir,
                         policy_digest=policy_digest,
                     )
-                    tensorboard_step = training.monitoring_step(runner=runner)
-                    telemetry_interval["tensorboard_step"] = tensorboard_step
+                    monitoring_step = training.monitoring_step(runner=runner)
+                    telemetry_interval["monitoring_step"] = monitoring_step
                     _record_telemetry(
                         path=attempt_dir / _TELEMETRY_FILENAME,
                         interval=telemetry_interval,
@@ -1355,12 +1409,12 @@ def _train_and_validate_attempt(
                         writer=writer,
                         role="val",
                         summary=telemetry_summary,
-                        step=tensorboard_step,
+                        step=monitoring_step,
                     )
                     attempt_record["telemetry"]["summaries"].append(
                         {
                             "role": "val",
-                            "tensorboard_step": tensorboard_step,
+                            "monitoring_step": monitoring_step,
                             **_telemetry_report_summary(
                                 summary=telemetry_summary,
                                 target_rate=training_config.gpu_utilization_target_rate,
@@ -1395,14 +1449,14 @@ def _train_and_validate_attempt(
                             validation=validation,
                         )
                     )
-                    tensorboard_step = training.monitoring_step(runner=runner)
-                    evaluation_records[-1]["tensorboard_step"] = tensorboard_step
+                    monitoring_step = training.monitoring_step(runner=runner)
+                    evaluation_records[-1]["monitoring_step"] = monitoring_step
                     write_evaluation_scalars(
                         writer=writer,
                         role="val",
                         evaluation=evaluation,
                         all_checks_passed=validation.passed,
-                        step=tensorboard_step,
+                        step=monitoring_step,
                     )
                     writer.flush()
 
@@ -1528,8 +1582,8 @@ def _train_and_validate_attempt(
                                     * int(env.num_envs)
                                 )
                             )
-                        tensorboard_step = training.monitoring_step(runner=runner)
-                        telemetry_interval["tensorboard_step"] = tensorboard_step
+                        monitoring_step = training.monitoring_step(runner=runner)
+                        telemetry_interval["monitoring_step"] = monitoring_step
                         _record_telemetry(
                             path=attempt_dir / _TELEMETRY_FILENAME,
                             interval=telemetry_interval,
@@ -1540,12 +1594,12 @@ def _train_and_validate_attempt(
                             writer=writer,
                             role="train",
                             summary=telemetry_summary,
-                            step=tensorboard_step,
+                            step=monitoring_step,
                         )
                         attempt_record["telemetry"]["summaries"].append(
                             {
                                 "role": "train",
-                                "tensorboard_step": tensorboard_step,
+                                "monitoring_step": monitoring_step,
                                 **_telemetry_report_summary(
                                     summary=telemetry_summary,
                                     target_rate=training_config.gpu_utilization_target_rate,
@@ -2049,10 +2103,13 @@ def _run_policy_workflow(
     metadata_payload = json.loads((campaign_selection.artifact_dir / METADATA_FILENAME).read_text())
     if not isinstance(metadata_payload, dict):
         raise ValueError("selected attempt metadata is not an object")
-    from torch.utils.tensorboard import SummaryWriter
-
-    writer = SummaryWriter(
-        log_dir=str(run_dir / "logs" / f"attempt_{selected_attempt_index + 1:02d}")
+    writer = _TrackioWriter(
+        monitoring_dir=run_dir / "monitoring",
+        project=config.rl.training.policy_name,
+        run_name=f"attempt_{selected_attempt_index + 1:02d}",
+        campaign_run_id=run_dir.name,
+        training_seed=int(attempts[selected_attempt_index]["training_seed"]),
+        resume="must",
     )
     try:
         test_evaluation, telemetry_interval = _run_final_test(

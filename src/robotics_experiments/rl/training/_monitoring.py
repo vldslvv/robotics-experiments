@@ -43,7 +43,7 @@ class _ScalarWriter(Protocol):
 
 @dataclass(frozen=True)
 class MetricSpec:
-    """One semantic report metric and its stable TensorBoard presentation."""
+    """One semantic report metric and its stable monitoring presentation."""
 
     raw_name: str | None
     suffix: str
@@ -190,7 +190,7 @@ def write_evaluation_scalars(
 ) -> tuple[str, ...]:
     """Write one validation or test record through the shared registry."""
     if role not in {"val", "test"}:
-        raise ValueError("evaluation TensorBoard role must be 'val' or 'test'")
+        raise ValueError("evaluation monitoring role must be 'val' or 'test'")
     names = tuple(metric.name for metric in evaluation.metrics)
     if names != evaluation_metric_names():
         raise ValueError(f"evaluation metric contract mismatch: {names!r}")

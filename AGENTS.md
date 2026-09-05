@@ -287,12 +287,11 @@ the current contents and the intended home for that kind of code.
   match the exact flight-parameters fingerprint; a consumer must not resolve a
   newer artifact implicitly after recording provenance.
 - When launching an RL training run for the user, provide a run-scoped
-  monitoring path (TensorBoard by default) and report the local URL and log
-  directory. Keep monitoring available while the run is active unless the user
-  asks otherwise. TensorBoard smoothing is one browser-global setting: require
-  zero smoothing for every metric namespace so raw validation, acceptance, and
-  training values remain visible; `training_report.json` is the exact
-  validation-value audit source.
+  Trackio database and report the local URL and monitoring directory. Keep
+  monitoring available while the run is active unless the user asks otherwise.
+  Use zero smoothing and show complete metric names so raw validation,
+  acceptance, and training values remain visible; `training_report.json` is the
+  exact validation-value audit source.
 - When operating an RL training run for the user, actively inspect validation
   and acceptance progress while it runs. Do not merely wait for the configured
   budget to expire. Interrupt a campaign once its validation checkpoints and
