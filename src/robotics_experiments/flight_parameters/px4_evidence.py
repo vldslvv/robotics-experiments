@@ -472,6 +472,8 @@ def verify_px4_hover_evidence(
         flight_parameters_id=raw.flight_parameters_id,
         campaign_run_id=raw.campaign_run_id,
         trial_index=raw.trial_index,
+        set_name=raw.set_name,
+        seed=raw.seed,
         source_backend=raw.source_backend,
         state_source=raw.state_source,
         config_fingerprint=raw.config_fingerprint,
@@ -486,6 +488,10 @@ def verify_px4_hover_evidence(
         time_s=tuple(index / config.hover.sample_rate_hz for index in range(len(indices))),
         position_enu_m=tuple(raw.position_enu_m[index] for index in indices),
         attitude_flu_enu_wxyz=tuple(raw.attitude_flu_enu_wxyz[index] for index in indices),
+        linear_velocity_enu_mps=tuple(raw.linear_velocity_enu_mps[index] for index in indices),
+        angular_velocity_enu_radps=tuple(
+            raw.angular_velocity_enu_radps[index] for index in indices
+        ),
         completed=True,
         failure_reason="",
     )

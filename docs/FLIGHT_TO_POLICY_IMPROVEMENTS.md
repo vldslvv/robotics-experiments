@@ -1,6 +1,6 @@
 # Flight-to-policy improvements
 
-Stages 1 and 3 improve experiment traceability, evaluation correctness, and
+Stages 1, 3, and 4 improve experiment traceability, evaluation correctness, and
 configuration for a small number of consecutive policy runs. The implemented
 behavior is described below; impacts are expectations, not measured improvements
 in policy performance.
@@ -29,5 +29,20 @@ and the existing validation-selection and final-test publication rules.
 The change does not alter the campaign driver or its stopping rules. PPO phases,
 reset mixtures, acceptance thresholds, comparison mechanics, and sensor noise
 retain their existing behavior. Controller fitting and policy training remain
-separate sequential activities. Later stages are deferred.
+separate sequential activities. Stages 5 and 6 are deferred.
 The detailed current contract is in [RL workflow](RL_WORKFLOW.md).
+
+Stage 4 implements recording and dataset separation:
+
+| Change | Implemented behavior | Expected impact |
+| --- | --- | --- |
+| Record complete hover motion | Raw and verified traces retain pose plus directly measured ENU linear/angular velocity from the same snapshot. Reset loading reads those values directly. | Removes velocity estimation from pose differences and preserves the measured motion at reset. PPO observations and rollout storage retain their existing format. |
+| Assign complete flights to three sets | YAML lists define 30 fitting, 10 validation, and 10 acceptance hover flights, plus one complete general controller-response flight per set. Each recorder uses the same behavior and cadence for all sets, with distinct recorded seeds. | Provides held-out evidence without changing how a set is captured. Hover capture grows from 30 to 50 flights and response capture from one to three complete suites. Actual runtime remains unmeasured. |
+| Keep held-out recordings out of derivation | Bounds and acceptance limits use the 30 fitting hover flights; resets use only their policy windows. Alignment preparation uses the single fitting response flight. All sets retain their original evidence and statistics. | Preserves the reference sample count and prevents held-out measurements from influencing current training inputs or thresholds. Stage 5 still needs to consume the independent sets for controller selection and final qualification. |
+| Validate motion and set metadata | Strict loaders reject missing/misaligned/non-finite motion arrays. Campaign derivation requires every configured flight and set/seed assignment; bundle validation checks recorded identities and file hashes. | Invalid or misassigned evidence raises an error before publication or consumption. Old artifacts require a fresh capture; they are never migrated or overwritten. |
+
+Host checks cover recording and angular-frame conversion across all three sets,
+verified-window sample pairing, direct reset velocities, held-out exclusion,
+set/seed validation, and immutable bundle publication. Live capture and GPU
+validation are deferred until the operator resolves the driver issue; no driver
+failure or performance improvement has been observed by these host checks.

@@ -129,6 +129,18 @@ def _evidence_fingerprint(fingerprints: tuple[str, ...], /) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _set_name(value: Any, /) -> str:
+    if value not in ("fit", "validation", "acceptance"):
+        raise ValueError("set_name must be fit, validation, or acceptance")
+    return value
+
+
+def _seed(value: Any, /) -> int:
+    if type(value) is not int or not 0 <= value < 2**32:
+        raise ValueError("seed must be an integer in [0, 2**32)")
+    return value
+
+
 def flight_trace_from_payload(value: Any, /) -> FlightTrace:
     """Validate an in-memory exact trace-v1 payload."""
 
@@ -139,6 +151,8 @@ def flight_trace_from_payload(value: Any, /) -> FlightTrace:
     time = payload["time_s"]
     positions = payload["position_enu_m"]
     attitudes = payload["attitude_flu_enu_wxyz"]
+    linear = payload["linear_velocity_enu_mps"]
+    angular = payload["angular_velocity_enu_radps"]
     if not isinstance(time, list) or not time:
         raise ValueError("flight trace time_s must be a non-empty list")
     time_values = tuple(_finite(item, f"time_s[{index}]") for index, item in enumerate(time))
@@ -146,9 +160,10 @@ def flight_trace_from_payload(value: Any, /) -> FlightTrace:
         later <= earlier for earlier, later in zip(time_values, time_values[1:], strict=False)
     ):
         raise ValueError("flight trace timestamps must start at zero and increase")
-    if not isinstance(positions, list) or not isinstance(attitudes, list):
-        raise ValueError("flight trace samples must be lists")
-    if len(time_values) != len(positions) or len(time_values) != len(attitudes):
+    if any(
+        not isinstance(samples, list) or len(samples) != len(time_values)
+        for samples in (positions, attitudes, linear, angular)
+    ):
         raise ValueError("flight trace sample arrays must have equal lengths")
     completed = payload["completed"]
     if type(completed) is not bool:
@@ -170,6 +185,8 @@ def flight_trace_from_payload(value: Any, /) -> FlightTrace:
         flight_parameters_id=_string(payload["flight_parameters_id"], "flight_parameters_id"),
         campaign_run_id=_string(payload["campaign_run_id"], "campaign_run_id"),
         trial_index=_integer(payload["trial_index"], "trial_index", positive=True),
+        set_name=_set_name(payload["set_name"]),
+        seed=_seed(payload["seed"]),
         source_backend=_string(payload["source_backend"], "source_backend"),
         state_source=_string(payload["state_source"], "state_source"),
         config_fingerprint=_string(payload["config_fingerprint"], "config_fingerprint"),
@@ -193,6 +210,13 @@ def flight_trace_from_payload(value: Any, /) -> FlightTrace:
             _quaternion(item, f"attitude_flu_enu_wxyz[{index}]")
             for index, item in enumerate(attitudes)
         ),
+        linear_velocity_enu_mps=tuple(
+            _vector(item, f"linear_velocity_enu_mps[{index}]") for index, item in enumerate(linear)
+        ),
+        angular_velocity_enu_radps=tuple(
+            _vector(item, f"angular_velocity_enu_radps[{index}]")
+            for index, item in enumerate(angular)
+        ),
         completed=completed,
         failure_reason=failure_reason,
     )
@@ -208,6 +232,8 @@ def raw_flight_trace_from_payload(value: Any, /) -> RawFlightTrace:
     raw_time = payload["time_us"]
     positions = payload["position_enu_m"]
     attitudes = payload["attitude_flu_enu_wxyz"]
+    linear = payload["linear_velocity_enu_mps"]
+    angular = payload["angular_velocity_enu_radps"]
     if not isinstance(raw_time, list) or not raw_time:
         raise ValueError("raw flight trace time_us must be a non-empty list")
     time_us = tuple(
@@ -215,9 +241,10 @@ def raw_flight_trace_from_payload(value: Any, /) -> RawFlightTrace:
     )
     if any(later <= earlier for earlier, later in zip(time_us, time_us[1:], strict=False)):
         raise ValueError("raw flight trace timestamps must increase")
-    if not isinstance(positions, list) or not isinstance(attitudes, list):
-        raise ValueError("raw flight trace samples must be lists")
-    if len(time_us) != len(positions) or len(time_us) != len(attitudes):
+    if any(
+        not isinstance(samples, list) or len(samples) != len(time_us)
+        for samples in (positions, attitudes, linear, angular)
+    ):
         raise ValueError("raw flight trace sample arrays must have equal lengths")
     completed = _boolean(payload["completed"], "completed")
     failure_reason = _string(payload["failure_reason"], "failure_reason", allow_empty=True)
@@ -229,6 +256,8 @@ def raw_flight_trace_from_payload(value: Any, /) -> RawFlightTrace:
         flight_parameters_id=_string(payload["flight_parameters_id"], "flight_parameters_id"),
         campaign_run_id=_string(payload["campaign_run_id"], "campaign_run_id"),
         trial_index=_integer(payload["trial_index"], "trial_index", positive=True),
+        set_name=_set_name(payload["set_name"]),
+        seed=_seed(payload["seed"]),
         source_backend=_string(payload["source_backend"], "source_backend"),
         state_source=_string(payload["state_source"], "state_source"),
         config_fingerprint=_string(payload["config_fingerprint"], "config_fingerprint"),
@@ -250,6 +279,13 @@ def raw_flight_trace_from_payload(value: Any, /) -> RawFlightTrace:
         attitude_flu_enu_wxyz=tuple(
             _quaternion(item, f"attitude_flu_enu_wxyz[{index}]")
             for index, item in enumerate(attitudes)
+        ),
+        linear_velocity_enu_mps=tuple(
+            _vector(item, f"linear_velocity_enu_mps[{index}]") for index, item in enumerate(linear)
+        ),
+        angular_velocity_enu_radps=tuple(
+            _vector(item, f"angular_velocity_enu_radps[{index}]")
+            for index, item in enumerate(angular)
         ),
         completed=completed,
         failure_reason=failure_reason,
@@ -490,6 +526,8 @@ def _hover_trace_statistics(value: Any, name: str, /) -> HoverTraceStatistics:
         raise ValueError(f"{name} policy window must exclude a non-empty warmup")
     return HoverTraceStatistics(
         trial_index=_integer(payload["trial_index"], f"{name}.trial_index", positive=True),
+        set_name=_set_name(payload["set_name"]),
+        seed=_seed(payload["seed"]),
         full_window_sample_count=full_count,
         policy_window_start_s=_finite(
             payload["policy_window_start_s"], f"{name}.policy_window_start_s", positive=True
@@ -512,6 +550,8 @@ def _response_trace(value: Any, name: str, /) -> ResponseTraceEvidence:
     _exact_dataclass(payload, ResponseTraceEvidence, name)
     return ResponseTraceEvidence(
         repetition=_integer(payload["repetition"], f"{name}.repetition", positive=True),
+        set_name=_set_name(payload["set_name"]),
+        seed=_seed(payload["seed"]),
         profile_count=_integer(payload["profile_count"], f"{name}.profile_count", positive=True),
         reference_path=_relative_path(payload["reference_path"], f"{name}.reference_path"),
         reference_sha256=_digest(payload["reference_sha256"], f"{name}.reference_sha256"),
@@ -579,6 +619,12 @@ def flight_parameters_from_payload(value: Any, /) -> FlightParameters:
         _response_trace(item, f"response.traces[{index}]")
         for index, item in enumerate(raw_response_traces)
     )
+    for items in (hover.trace_statistics, response_traces):
+        if {item.set_name for item in items} != {"fit", "validation", "acceptance"}:
+            raise ValueError("flight evidence must include fit, validation, and acceptance sets")
+    seeds = tuple(item.seed for item in (*hover.trace_statistics, *response_traces))
+    if len(set(seeds)) != len(seeds):
+        raise ValueError("flight evidence must use distinct seeds for every flight")
     response_repetitions = _integer(
         response_payload["repetitions"], "response.repetitions", positive=True
     )
@@ -785,6 +831,12 @@ def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
             raise ValueError(f"flight parameters trial {trial_index} ULog digest mismatch")
         if trace.verification_fingerprint != verification.verification_fingerprint:
             raise ValueError(f"flight parameters trial {trial_index} verification link mismatch")
+        statistics = flight_parameters.hover.trace_statistics[trial_index - 1]
+        if (raw.set_name, raw.seed) != (trace.set_name, trace.seed) or (
+            trace.set_name,
+            trace.seed,
+        ) != (statistics.set_name, statistics.seed):
+            raise ValueError(f"flight parameters trial {trial_index} set or seed mismatch")
         verification_fingerprints.append(verification.verification_fingerprint)
     response_fingerprints: list[str] = []
     for trace in flight_parameters.response.traces:
@@ -800,6 +852,14 @@ def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
                     f"for {relative}"
                 )
             response_fingerprints.append(expected_digest)
+        reference = _object(
+            json.loads((bundle / trace.reference_path).read_text()), "response reference"
+        )
+        if (reference.get("set_name"), reference.get("seed")) != (trace.set_name, trace.seed):
+            raise ValueError(f"response repetition {trace.repetition} set or seed mismatch")
+        samples = reference.get("traces")
+        if not isinstance(samples, list) or len(samples) != trace.profile_count:
+            raise ValueError(f"response repetition {trace.repetition} profile count mismatch")
     if flight_parameters.evidence_fingerprint != _evidence_fingerprint(
         tuple(verification_fingerprints) + tuple(response_fingerprints)
     ):

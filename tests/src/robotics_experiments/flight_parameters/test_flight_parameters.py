@@ -23,6 +23,7 @@ from robotics_experiments.flight_parameters import (
     validate_flight_parameters_bundle,
     write_flight_parameters,
 )
+from robotics_experiments.flight_parameters._artifact import raw_flight_trace_from_payload
 from robotics_experiments.flight_parameters._models import RawFlightTrace
 from robotics_experiments.flight_parameters.px4_evidence import (
     ParsedPx4HoverLog,
@@ -41,9 +42,18 @@ source_backend: px4-sitl
 state_source: simulator-ground-truth
 experiment_config: configs/flight_parameters_x500_hover.yaml
 vehicle: x500_01
+sets:
+  fit:
+    hover_seeds: {list(range(1, repetitions + 1))}
+    response_seeds: [100]
+  validation:
+    hover_seeds: [201]
+    response_seeds: [200]
+  acceptance:
+    hover_seeds: [301]
+    response_seeds: [300]
 hover:
   kind: hover
-  repetitions: {repetitions}
   mode_transition_timeout_s: 15.0
   mode_report_max_age_s: 2.5
   settle_s: 2.0
@@ -53,7 +63,6 @@ hover:
   target_yaw_rad: 0.0
 response:
   kind: controller-response
-  repetitions: 1
   experiment_config: configs/alignment_px4_x500_velocity.yaml
   definition: configs/alignment/controllers/px4_sitl_x500_velocity.yaml
 policy_warmup_s: 0.5
@@ -69,12 +78,16 @@ execution:
 
 def _trace(*, config, index: int, x: float, yaw: float = 0.0) -> FlightTrace:
     attitude = (math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0))
+    trials = tuple((group.name, seed) for group in config.sets for seed in group.hover_seeds)
+    set_name, seed = trials[index - 1]
     return FlightTrace(
         artifact_kind="robotics-experiments-flight-parameters-trace",
         schema_version=1,
         flight_parameters_id=config.flight_parameters_id,
         campaign_run_id="run-1",
         trial_index=index,
+        set_name=set_name,
+        seed=seed,
         source_backend=config.source_backend,
         state_source=config.state_source,
         config_fingerprint=config.config_fingerprint,
@@ -89,20 +102,24 @@ def _trace(*, config, index: int, x: float, yaw: float = 0.0) -> FlightTrace:
         time_s=(0.0, 0.5),
         position_enu_m=((x, 0.0, 2.5), (x + 0.01, -0.02, 2.51)),
         attitude_flu_enu_wxyz=(attitude, attitude),
+        linear_velocity_enu_mps=((0.3, 0.2, 0.1),) * 2,
+        angular_velocity_enu_radps=((0.1, 0.2, 0.3),) * 2,
         completed=True,
         failure_reason="",
     )
 
 
-def _response_trace() -> ResponseTraceEvidence:
+def _response_trace(repetition: int = 1, /) -> ResponseTraceEvidence:
     return ResponseTraceEvidence(
-        repetition=1,
+        repetition=repetition,
+        set_name=("fit", "validation", "acceptance")[repetition - 1],
+        seed=100 * repetition,
         profile_count=1,
-        reference_path="response/repetition-001/flight_parameters_response.json",
+        reference_path=f"response/repetition-{repetition:03d}/flight_parameters_response.json",
         reference_sha256="b" * 64,
-        ulog_path="response/repetition-001/flight_parameters.ulg",
+        ulog_path=f"response/repetition-{repetition:03d}/flight_parameters.ulg",
         ulog_sha256="c" * 64,
-        bridge_log_path="response/repetition-001/flight_parameters_bridge.log",
+        bridge_log_path=f"response/repetition-{repetition:03d}/flight_parameters_bridge.log",
         bridge_log_sha256="d" * 64,
     )
 
@@ -175,6 +192,8 @@ def _raw(config) -> RawFlightTrace:
         flight_parameters_id=config.flight_parameters_id,
         campaign_run_id="run-1",
         trial_index=1,
+        set_name="fit",
+        seed=1,
         source_backend=config.source_backend,
         state_source=config.state_source,
         config_fingerprint=config.config_fingerprint,
@@ -187,6 +206,8 @@ def _raw(config) -> RawFlightTrace:
         time_us=times,
         position_enu_m=tuple((0.0, 0.0, 2.5) for _ in times),
         attitude_flu_enu_wxyz=tuple((1.0, 0.0, 0.0, 0.0) for _ in times),
+        linear_velocity_enu_mps=tuple((float(index), 0.1, 0.2) for index in range(len(times))),
+        angular_velocity_enu_radps=tuple((0.3, float(index), 0.4) for index in range(len(times))),
         completed=True,
         failure_reason="",
     )
@@ -194,12 +215,17 @@ def _raw(config) -> RawFlightTrace:
 
 def _flight_parameters(tmp_path: Path):
     config = _config(tmp_path)
-    traces = (_trace(config=config, index=1, x=-0.02), _trace(config=config, index=2, x=0.03))
+    traces = (
+        _trace(config=config, index=1, x=-0.02),
+        _trace(config=config, index=2, x=0.03),
+        _trace(config=config, index=3, x=10.0),
+        _trace(config=config, index=4, x=20.0),
+    )
     return derive_flight_parameters(
         config=config,
         run_id="run-1",
         traces=traces,
-        response_traces=(_response_trace(),),
+        response_traces=tuple(_response_trace(index) for index in (1, 2, 3)),
         source_commit="abc123",
         source_dirty=False,
         created_at_utc="2026-08-21T12:00:00Z",
@@ -230,7 +256,9 @@ def test_config_is_strict_and_fingerprinted(tmp_path: Path) -> None:
 def test_production_hover_campaign_uses_independent_thirty_second_trials() -> None:
     config = load_flight_parameters_config(REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml")
 
-    assert config.hover.repetitions == 30
+    assert tuple(group.name for group in config.sets) == ("fit", "validation", "acceptance")
+    assert tuple(len(group.hover_seeds) for group in config.sets) == (30, 10, 10)
+    assert tuple(len(group.response_seeds) for group in config.sets) == (1, 1, 1)
     assert config.hover.mode_transition_timeout_s == 15.0
     assert config.hover.mode_report_max_age_s == 2.5
     assert config.hover.settle_s == 6.0
@@ -260,6 +288,14 @@ def test_px4_verification_selects_only_auto_loiter_samples(tmp_path: Path) -> No
     assert trace.measurement_end_us == 16_000_000
     assert trace.target_position_enu_m == pytest.approx((0.0, 0.0, 2.5))
     assert len(trace.time_s) == 2
+    assert trace.linear_velocity_enu_mps == (
+        _raw(config).linear_velocity_enu_mps[10],
+        _raw(config).linear_velocity_enu_mps[11],
+    )
+    assert trace.angular_velocity_enu_radps == (
+        _raw(config).angular_velocity_enu_radps[10],
+        _raw(config).angular_velocity_enu_radps[11],
+    )
 
 
 def test_px4_verification_rejects_takeoff_or_navigation_during_measurement(
@@ -316,10 +352,10 @@ def test_derivation_uses_all_extrema_and_authored_margins(tmp_path: Path) -> Non
     assert position.observed_max == pytest.approx((0.04, 0.0, 0.01))
     assert position.lower == pytest.approx((-0.025, -0.025, -0.005))
     assert position.upper == pytest.approx((0.045, 0.005, 0.015))
-    assert flight_parameters.hover_trial_count == 2
-    assert flight_parameters.hover_sample_count == 4
+    assert flight_parameters.hover_trial_count == 4
+    assert flight_parameters.hover_sample_count == 8
     assert len(flight_parameters.artifact_fingerprint) == 64
-    assert len(flight_parameters.hover.trace_statistics) == 2
+    assert len(flight_parameters.hover.trace_statistics) == 4
     assert flight_parameters.hover.trace_statistics[0].policy_window_sample_count == 1
     position_limit = next(
         item for item in flight_parameters.hover.acceptance_limits if item.name == "position_error"
@@ -332,12 +368,12 @@ def test_derivation_uses_all_extrema_and_authored_margins(tmp_path: Path) -> Non
 
 def test_derivation_rejects_incomplete_campaign(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    with pytest.raises(ValueError, match="requires 2 traces"):
+    with pytest.raises(ValueError, match="requires 4 traces"):
         derive_flight_parameters(
             config=config,
             run_id="run-1",
             traces=(_trace(config=config, index=1, x=0.0),),
-            response_traces=(_response_trace(),),
+            response_traces=tuple(_response_trace(index) for index in (1, 2, 3)),
             source_commit="abc123",
             source_dirty=False,
             created_at_utc="2026-08-21T12:00:00Z",
@@ -359,48 +395,65 @@ def test_orientation_is_quaternion_sign_invariant_and_wraps_yaw(tmp_path: Path) 
 
 def test_bundle_manifest_and_atomic_latest(tmp_path: Path) -> None:
     config = _config(tmp_path, repetitions=1)
-    raw = _raw(config)
     root = tmp_path / "flight-parameters" / config.flight_parameters_id
     run_dir = root / "run-1"
-    evidence = run_dir / "evidence" / "trial-001"
-    evidence.mkdir(parents=True)
-    raw_path = evidence / "raw_trace.json"
-    raw_path.write_text(json.dumps(asdict(raw), allow_nan=False), encoding="utf-8")
-    ulog_path = evidence / "flight.ulg"
-    ulog_path.write_bytes(b"synthetic ulog evidence")
-    evidence.joinpath("bridge.log").write_text("bridge evidence\n", encoding="utf-8")
-    verification, trace = verify_px4_hover_evidence(
-        config=config,
-        raw=raw,
-        log=_parsed_log(),
-        raw_trace_sha256=hashlib.sha256(raw_path.read_bytes()).hexdigest(),
-        ulog_sha256=hashlib.sha256(ulog_path.read_bytes()).hexdigest(),
-    )
-    evidence.joinpath("hover_verification.json").write_text(
-        json.dumps(asdict(verification), allow_nan=False), encoding="utf-8"
-    )
-    evidence.joinpath("trace.json").write_text(
-        json.dumps(asdict(trace), allow_nan=False), encoding="utf-8"
-    )
-    response_dir = run_dir / "response/repetition-001"
-    response_dir.mkdir(parents=True)
-    response_reference = response_dir / "flight_parameters_response.json"
-    response_ulog = response_dir / "flight_parameters.ulg"
-    response_bridge = response_dir / "flight_parameters_bridge.log"
-    response_reference.write_text('{"schema_version":1,"traces":[{}]}\n', encoding="utf-8")
-    response_ulog.write_bytes(b"response ulog")
-    response_bridge.write_text("response bridge\n", encoding="utf-8")
-    response_trace = replace(
-        _response_trace(),
-        reference_sha256=hashlib.sha256(response_reference.read_bytes()).hexdigest(),
-        ulog_sha256=hashlib.sha256(response_ulog.read_bytes()).hexdigest(),
-        bridge_log_sha256=hashlib.sha256(response_bridge.read_bytes()).hexdigest(),
-    )
+    traces = []
+    response_traces = []
+    for index, group in enumerate(config.sets, start=1):
+        raw = replace(
+            _raw(config), trial_index=index, set_name=group.name, seed=group.hover_seeds[0]
+        )
+        evidence = run_dir / "evidence" / f"trial-{index:03d}"
+        evidence.mkdir(parents=True)
+        raw_path = evidence / "raw_trace.json"
+        raw_path.write_text(json.dumps(asdict(raw), allow_nan=False), encoding="utf-8")
+        ulog_path = evidence / "flight.ulg"
+        ulog_path.write_text("synthetic ulog evidence")
+        evidence.joinpath("bridge.log").write_text("bridge evidence\n", encoding="utf-8")
+        verification, trace = verify_px4_hover_evidence(
+            config=config,
+            raw=raw,
+            log=_parsed_log(),
+            raw_trace_sha256=hashlib.sha256(raw_path.read_bytes()).hexdigest(),
+            ulog_sha256=hashlib.sha256(ulog_path.read_bytes()).hexdigest(),
+        )
+        evidence.joinpath("hover_verification.json").write_text(
+            json.dumps(asdict(verification), allow_nan=False), encoding="utf-8"
+        )
+        evidence.joinpath("trace.json").write_text(
+            json.dumps(asdict(trace), allow_nan=False), encoding="utf-8"
+        )
+        traces.append(trace)
+        response = _response_trace(index)
+        response_reference = run_dir / response.reference_path
+        response_reference.parent.mkdir(parents=True)
+        response_ulog = run_dir / response.ulog_path
+        response_bridge = run_dir / response.bridge_log_path
+        response_reference.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "set_name": group.name,
+                    "seed": group.response_seeds[0],
+                    "traces": [{}],
+                }
+            )
+        )
+        response_ulog.write_text("response ulog")
+        response_bridge.write_text("response bridge\n", encoding="utf-8")
+        response_traces.append(
+            replace(
+                response,
+                reference_sha256=hashlib.sha256(response_reference.read_bytes()).hexdigest(),
+                ulog_sha256=hashlib.sha256(response_ulog.read_bytes()).hexdigest(),
+                bridge_log_sha256=hashlib.sha256(response_bridge.read_bytes()).hexdigest(),
+            )
+        )
     flight_parameters = derive_flight_parameters(
         config=config,
         run_id="run-1",
-        traces=(trace,),
-        response_traces=(response_trace,),
+        traces=tuple(traces),
+        response_traces=tuple(response_traces),
         source_commit="abc123",
         source_dirty=False,
         created_at_utc="2026-08-21T12:00:00Z",
@@ -433,3 +486,78 @@ def test_failed_trace_requires_a_reason(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="failed traces require one"):
         flight_trace_from_payload(payload)
+
+
+@pytest.mark.parametrize("field", ["linear_velocity_enu_mps", "angular_velocity_enu_radps"])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        None,
+        [],
+        [[1.0, 2.0]],
+        [[math.nan, 0.0, 0.0]] * 2,
+        [[math.inf, 0.0, 0.0]] * 2,
+        [[-math.inf, 0.0, 0.0]] * 2,
+    ],
+)
+@pytest.mark.parametrize("raw", [False, True])
+def test_motion_samples_reject_invalid_values(tmp_path: Path, field, invalid, raw) -> None:
+    config = _config(tmp_path)
+    trace = _raw(config) if raw else _trace(config=config, index=1, x=0.0)
+    payload = json.loads(json.dumps(asdict(trace)))
+    if invalid is None:
+        del payload[field]
+    else:
+        payload[field] = invalid
+        if raw and len(invalid) == 2:
+            payload[field] = invalid[:1] * len(payload["time_us"])
+    loader = raw_flight_trace_from_payload if raw else flight_trace_from_payload
+    with pytest.raises(ValueError):
+        loader(payload)
+
+
+@pytest.mark.parametrize("replacement", ["[]", "[1]", "[true]", "[-1]", "[4294967296]"])
+def test_config_rejects_empty_reused_or_invalid_flight_seeds(tmp_path: Path, replacement) -> None:
+    _config(tmp_path)
+    path = tmp_path / "flight.yaml"
+    path.write_text(path.read_text().replace("hover_seeds: [201]", f"hover_seeds: {replacement}"))
+    with pytest.raises(ValueError, match="seed"):
+        load_flight_parameters_config(path)
+
+
+def test_held_out_hover_flights_do_not_expand_reference_limits(tmp_path: Path) -> None:
+    artifact = _flight_parameters(tmp_path)
+    assert artifact.hover.position_error_enu_m.observed_max[0] == pytest.approx(0.04)
+    held_out = artifact.hover.trace_statistics[2:]
+    assert all(
+        next(signal for signal in trace.policy_window if signal.name == "position_error").maximum
+        > 9.0
+        for trace in held_out
+    )
+    assert (
+        next(
+            signal for signal in artifact.hover.acceptance_limits if signal.name == "position_error"
+        ).maximum
+        < 0.1
+    )
+
+
+@pytest.mark.parametrize("kind", ["hover", "response"])
+def test_derivation_rejects_wrong_set_assignment(tmp_path: Path, kind) -> None:
+    config = _config(tmp_path)
+    traces = tuple(_trace(config=config, index=index, x=0.0) for index in (1, 2, 3, 4))
+    responses = tuple(_response_trace(index) for index in (1, 2, 3))
+    if kind == "hover":
+        traces = (replace(traces[0], set_name="acceptance"), *traces[1:])
+    else:
+        responses = (replace(responses[0], seed=999), *responses[1:])
+    with pytest.raises(ValueError, match="configured flight sets and seeds"):
+        derive_flight_parameters(
+            config=config,
+            run_id="run-1",
+            traces=traces,
+            response_traces=responses,
+            source_commit="test",
+            source_dirty=False,
+            created_at_utc="2026-09-11T12:00:00Z",
+        )

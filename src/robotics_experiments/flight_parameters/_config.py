@@ -15,6 +15,7 @@ from omegaconf import OmegaConf
 from robotics_experiments.flight_parameters._models import (
     FlightExecutionConfig,
     FlightParametersConfig,
+    FlightSetConfig,
     HoverConfig,
     ResponseConfig,
 )
@@ -95,6 +96,7 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
             "state_source",
             "experiment_config",
             "vehicle",
+            "sets",
             "hover",
             "response",
             "policy_warmup_s",
@@ -112,12 +114,32 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
         raise ValueError(
             "flight config currently supports only state_source 'simulator-ground-truth'"
         )
+    sets_payload = _object(payload["sets"], "sets")
+    _exact(sets_payload, {"fit", "validation", "acceptance"}, "sets")
+    flight_sets = []
+    used_seeds: set[int] = set()
+    for name in ("fit", "validation", "acceptance"):
+        item = _object(sets_payload[name], f"sets.{name}")
+        _exact(item, {"hover_seeds", "response_seeds"}, f"sets.{name}")
+        seeds_by_kind = {}
+        for kind in ("hover_seeds", "response_seeds"):
+            values = item[kind]
+            if not isinstance(values, list) or not values:
+                raise ValueError(f"sets.{name}.{kind} must be a non-empty seed list")
+            for seed in values:
+                if type(seed) is not int or not 0 <= seed < 2**32:
+                    raise ValueError(f"sets.{name}.{kind} seeds must be integers in [0, 2**32)")
+                if seed in used_seeds:
+                    raise ValueError("flight sets must use distinct seeds for every flight")
+                used_seeds.add(seed)
+            seeds_by_kind[kind] = tuple(values)
+        flight_sets.append(FlightSetConfig(name=name, **seeds_by_kind))
+    sets = tuple(flight_sets)
     scenario_payload = _object(payload["hover"], "flight parameters hover")
     _exact(
         scenario_payload,
         {
             "kind",
-            "repetitions",
             "mode_transition_timeout_s",
             "mode_report_max_age_s",
             "settle_s",
@@ -132,7 +154,6 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
         raise ValueError("flight parameters currently supports only hover kind 'hover'")
     hover = HoverConfig(
         kind="hover",
-        repetitions=_positive_integer(scenario_payload["repetitions"], "scenario.repetitions"),
         mode_transition_timeout_s=_finite(
             scenario_payload["mode_transition_timeout_s"],
             "scenario.mode_transition_timeout_s",
@@ -161,14 +182,13 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
     response_payload = _object(payload["response"], "flight parameters response")
     _exact(
         response_payload,
-        {"kind", "repetitions", "experiment_config", "definition"},
+        {"kind", "experiment_config", "definition"},
         "flight parameters response",
     )
     if response_payload["kind"] != "controller-response":
         raise ValueError("flight parameters supports only response kind 'controller-response'")
     response = ResponseConfig(
         kind="controller-response",
-        repetitions=_positive_integer(response_payload["repetitions"], "response.repetitions"),
         experiment_config=_string(
             response_payload["experiment_config"], "response.experiment_config"
         ),
@@ -196,6 +216,7 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
         state_source="simulator-ground-truth",
         experiment_config=_string(payload["experiment_config"], "experiment_config"),
         vehicle=_string(payload["vehicle"], "vehicle"),
+        sets=sets,
         hover=hover,
         response=response,
         policy_warmup_s=policy_warmup_s,
@@ -211,6 +232,7 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
     return FlightParametersConfig(
         **{
             **fingerprint_payload,
+            "sets": sets,
             "hover": hover,
             "response": response,
             "execution": execution,

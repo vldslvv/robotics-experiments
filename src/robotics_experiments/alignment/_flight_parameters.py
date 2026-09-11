@@ -109,11 +109,12 @@ def prepare_alignment_reference(
     """Validate sufficient response evidence and stage it without transforming samples."""
 
     bundle = load_flight_parameters_bundle(path=flight_parameters_artifact)
-    if bundle.flight_parameters.response.repetitions != 1:
-        raise ValueError(
-            "alignment requires exactly one complete flight parameters response repetition"
-        )
-    evidence = bundle.flight_parameters.response.traces[0]
+    fitting = tuple(
+        trace for trace in bundle.flight_parameters.response.traces if trace.set_name == "fit"
+    )
+    if len(fitting) != 1:
+        raise ValueError("alignment requires exactly one complete fitting response repetition")
+    evidence = fitting[0]
     source_reference = bundle.run_dir / evidence.reference_path
     _validated_payload(
         path=source_reference,

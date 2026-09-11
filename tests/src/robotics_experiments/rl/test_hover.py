@@ -103,6 +103,8 @@ def test_hover_reset_motion_comes_from_the_same_trace(tmp_path: Path) -> None:
         [float(np.cos(0.05)), 0.0, 0.0, float(np.sin(0.05))],
         [float(np.cos(0.10)), 0.0, 0.0, float(np.sin(0.10))],
     ]
+    trace["linear_velocity_enu_mps"] = [[3.0, 4.0, 5.0], [6.0, 7.0, 8.0], [9.0, 10.0, 11.0]]
+    trace["angular_velocity_enu_radps"] = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]]
     trace_dir = tmp_path / "evidence/trial-001"
     trace_dir.mkdir(parents=True)
     (trace_dir / "trace.json").write_text(json.dumps(trace))
@@ -110,5 +112,5 @@ def test_hover_reset_motion_comes_from_the_same_trace(tmp_path: Path) -> None:
     samples = load_hover_reset_samples(bundle=replace(bundle, run_dir=tmp_path))
 
     assert samples.position_error_enu_m == ((2.0, 0.0, 0.0),)
-    assert samples.linear_velocity_enu_mps == ((1.0, 0.0, 0.0),)
-    assert samples.angular_velocity_enu_radps[0] == pytest.approx((0.0, 0.0, 2.0 * np.sin(0.05)))
+    assert samples.linear_velocity_enu_mps == ((9.0, 10.0, 11.0),)
+    assert samples.angular_velocity_enu_radps[0] == pytest.approx((0.7, 0.8, 0.9))

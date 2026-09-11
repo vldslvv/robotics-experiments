@@ -101,9 +101,8 @@ def _multiply_quaternions(first: np.ndarray, second: np.ndarray, /) -> np.ndarra
 def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSamples:
     """Load complete final-window states from each validated hover trace.
 
-    Position, attitude, and derived velocity always come from the same sample
-    index. Velocity differences stay within one trial; samples from separate
-    flights are never joined.
+    Position, attitude, and recorded world velocities come from the same sample
+    index in fitting flights. Validation and acceptance flights remain held out.
     """
 
     flight_parameters = bundle.flight_parameters
@@ -111,43 +110,22 @@ def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSam
     attitude_errors: list[tuple[float, float, float, float]] = []
     linear_velocities: list[tuple[float, float, float]] = []
     angular_velocities: list[tuple[float, float, float]] = []
-    for trial_index in range(1, flight_parameters.hover_trial_count + 1):
+    for statistics in flight_parameters.hover.trace_statistics:
+        if statistics.set_name != "fit":
+            continue
+        trial_index = statistics.trial_index
         trace = load_flight_trace(
             bundle.run_dir / "evidence" / f"trial-{trial_index:03d}" / "trace.json"
         )
         target_position = np.asarray(trace.target_position_enu_m)
         target_attitude = _normalize_quaternion(np.asarray(trace.target_attitude_flu_enu_wxyz))
         target_attitude_inverse = target_attitude * np.asarray((1.0, -1.0, -1.0, -1.0))
-        policy_sample_count = flight_parameters.hover.trace_statistics[
-            trial_index - 1
-        ].policy_window_sample_count
-        time_s = np.asarray(trace.time_s, dtype=np.float64)
+        policy_sample_count = statistics.policy_window_sample_count
         positions = np.asarray(trace.position_enu_m, dtype=np.float64)
         attitudes = np.asarray(trace.attitude_flu_enu_wxyz, dtype=np.float64)
         attitudes /= np.linalg.norm(attitudes, axis=-1, keepdims=True)
-        for sample_index in range(1, len(attitudes)):
-            if np.dot(attitudes[sample_index - 1], attitudes[sample_index]) < 0.0:
-                attitudes[sample_index] *= -1.0
-        if len(time_s) == 1:
-            trial_linear_velocities = np.zeros((1, 3), dtype=np.float64)
-            trial_angular_velocities = np.zeros((1, 3), dtype=np.float64)
-        else:
-            trial_linear_velocities = np.gradient(positions, time_s, axis=0)
-            attitude_derivatives = np.gradient(attitudes, time_s, axis=0)
-            trial_angular_velocities = np.asarray(
-                [
-                    2.0
-                    * _multiply_quaternions(
-                        derivative,
-                        attitude * np.asarray((1.0, -1.0, -1.0, -1.0)),
-                    )[1:]
-                    for derivative, attitude in zip(
-                        attitude_derivatives,
-                        attitudes,
-                        strict=True,
-                    )
-                ]
-            )
+        trial_linear_velocities = np.asarray(trace.linear_velocity_enu_mps, dtype=np.float64)
+        trial_angular_velocities = np.asarray(trace.angular_velocity_enu_radps, dtype=np.float64)
         for position, attitude, linear_velocity, angular_velocity in zip(
             positions[-policy_sample_count:],
             attitudes[-policy_sample_count:],
@@ -194,7 +172,9 @@ def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSam
                 )
             )
     expected_samples = sum(
-        trace.policy_window_sample_count for trace in flight_parameters.hover.trace_statistics
+        trace.policy_window_sample_count
+        for trace in flight_parameters.hover.trace_statistics
+        if trace.set_name == "fit"
     )
     if len(position_errors) != expected_samples:
         raise ValueError(

@@ -670,6 +670,7 @@ def test_alignment_references_immutable_flight_parameter_inputs(
     response_dir.mkdir(parents=True)
     evidence = SimpleNamespace(
         repetition=1,
+        set_name="fit",
         profile_count=len(definition.profiles),
         reference_path="response/repetition-001/flight_parameters_response.json",
         ulog_path="response/repetition-001/flight_parameters.ulg",
@@ -689,7 +690,14 @@ def test_alignment_references_immutable_flight_parameter_inputs(
             flight_parameters=SimpleNamespace(
                 run_id="20260821T180358Z",
                 artifact_fingerprint="fingerprint",
-                response=SimpleNamespace(repetitions=1, traces=(evidence,)),
+                response=SimpleNamespace(
+                    repetitions=3,
+                    traces=(
+                        SimpleNamespace(set_name="acceptance"),
+                        evidence,
+                        SimpleNamespace(set_name="validation"),
+                    ),
+                ),
             ),
         ),
     )

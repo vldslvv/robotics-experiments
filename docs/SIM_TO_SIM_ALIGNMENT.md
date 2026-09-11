@@ -5,6 +5,14 @@ PX4 SITL for identical physical commands. It is upstream of reinforcement
 learning. Waypoint navigation, policy rewards, policy actions, and domain
 randomization are not fitting inputs.
 
+Flight-parameter bundles contain independently captured fitting, validation, and
+acceptance flights. Reference preparation currently selects exactly one complete
+`fit` response flight and retains its existing internal profile splits. Hover
+bounds come only from fitting flights. The separate validation and acceptance
+recordings are reserved for Stage 5; current controller qualification does not
+yet consume them. See [flight parameters](FLIGHT_PARAMETERS.md) for capture and
+set ownership.
+
 ## Architecture and contracts
 
 `robotics_experiments.controller` owns the immutable `ControllerSettings`, the

@@ -108,6 +108,7 @@ def _run_response_repetition(
     config: FlightParametersConfig,
     run_id: str,
     repetition: int,
+    config_path: Path,
     response_dir: Path,
 ) -> ResponseTraceEvidence:
     subprocess.run(
@@ -115,6 +116,8 @@ def _run_response_repetition(
             "make",
             "test-integration-flight-parameters-response-sample",
             f"HYDRA_CONFIG={config.response.experiment_config}",
+            f"FLIGHT_CONFIG={config_path}",
+            f"FLIGHT_PARAMETERS_RESPONSE_REPETITION={repetition}",
             f"FLIGHT_PARAMETERS_RESPONSE_DEFINITION={config.response.definition}",
             f"FLIGHT_PARAMETERS_RESPONSE_DIR={response_dir}",
             f"PX4_TEST_CONTAINER_NAME=flight-parameters-{run_id}-response-{repetition:03d}",
@@ -149,6 +152,8 @@ def _run_response_repetition(
         raise ValueError("flight-parameters response capture produced no traces")
     return ResponseTraceEvidence(
         repetition=repetition,
+        set_name=payload["set_name"],
+        seed=payload["seed"],
         profile_count=len(traces),
         reference_path=reference_path.relative_to(response_dir.parents[1]).as_posix(),
         reference_sha256=_sha256(reference_path),
@@ -179,51 +184,47 @@ def main() -> None:
     evidence_dir = run_dir / "evidence"
     evidence_dir.mkdir(exist_ok=resume)
 
-    trials = tuple(range(1, config.hover.repetitions + 1))
+    trials = tuple(range(1, sum(len(group.hover_seeds) for group in config.sets) + 1))
     pending_trials = tuple(
         index for index in trials if not _trial_is_complete(evidence_dir / f"trial-{index:03d}")
     )
-    if config.execution.worker_count == 1:
-        for index in pending_trials:
-            _run_trial(
-                repo_root=repo_root,
-                config_path=config_path,
-                config=config,
-                run_id=run_id,
-                trial_index=index,
-                trial_dir=evidence_dir / f"trial-{index:03d}",
-            )
-    else:
-        with ThreadPoolExecutor(max_workers=config.execution.worker_count) as executor:
-            for offset in range(0, len(pending_trials), config.execution.worker_count):
-                futures = [
-                    executor.submit(
-                        _run_trial,
-                        repo_root=repo_root,
-                        config_path=config_path,
-                        config=config,
-                        run_id=run_id,
-                        trial_index=index,
-                        trial_dir=evidence_dir / f"trial-{index:03d}",
-                    )
-                    for index in pending_trials[offset : offset + config.execution.worker_count]
-                ]
-                for future in futures:
-                    future.result()
-
-    traces = tuple(
-        load_flight_trace(evidence_dir / f"trial-{index:03d}" / "trace.json") for index in trials
-    )
-    response_traces = tuple(
-        _run_response_repetition(
-            repo_root=repo_root,
-            config=config,
-            run_id=run_id,
-            repetition=repetition,
-            response_dir=run_dir / "response" / f"repetition-{repetition:03d}",
+    with ThreadPoolExecutor(max_workers=config.execution.worker_count) as executor:
+        for offset in range(0, len(pending_trials), config.execution.worker_count):
+            futures = [
+                executor.submit(
+                    _run_trial,
+                    repo_root=repo_root,
+                    config_path=config_path,
+                    config=config,
+                    run_id=run_id,
+                    trial_index=index,
+                    trial_dir=evidence_dir / f"trial-{index:03d}",
+                )
+                for index in pending_trials[offset : offset + config.execution.worker_count]
+            ]
+            for future in futures:
+                future.result()
+        traces = tuple(
+            load_flight_trace(evidence_dir / f"trial-{index:03d}" / "trace.json")
+            for index in trials
         )
-        for repetition in range(1, config.response.repetitions + 1)
-    )
+        repetitions = tuple(range(1, sum(len(group.response_seeds) for group in config.sets) + 1))
+        response_results: list[ResponseTraceEvidence] = []
+        for offset in range(0, len(repetitions), config.execution.worker_count):
+            response_futures = [
+                executor.submit(
+                    _run_response_repetition,
+                    repo_root=repo_root,
+                    config=config,
+                    config_path=config_path,
+                    run_id=run_id,
+                    repetition=repetition,
+                    response_dir=run_dir / "response" / f"repetition-{repetition:03d}",
+                )
+                for repetition in repetitions[offset : offset + config.execution.worker_count]
+            ]
+            response_results.extend(future.result() for future in response_futures)
+        response_traces = tuple(response_results)
     commit, dirty = _source_provenance(repo_root)
     flight_parameters = derive_flight_parameters(
         config=config,

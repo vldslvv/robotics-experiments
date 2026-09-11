@@ -1,6 +1,7 @@
 """Host tests for flight-parameters response preconditioning and frame conversion."""
 
 import importlib.util
+import json
 import sys
 from dataclasses import replace
 from types import ModuleType, SimpleNamespace
@@ -16,7 +17,9 @@ from robotics_experiments.px4_bridge import VehicleState
 from tests.support.paths import REPO_ROOT
 
 
-def _load_script(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+def _load_script(
+    monkeypatch: pytest.MonkeyPatch, name: str = "flight_parameters_capture_response", /
+) -> ModuleType:
     scenario = ModuleType("_px4_takeoff_scenario")
     scenario.Px4TakeoffScenarioOptions = object  # type: ignore[attr-defined]  # dynamic fake
     scenario.run_px4_takeoff_scenario = (  # type: ignore[attr-defined]  # dynamic fake
@@ -29,8 +32,8 @@ def _load_script(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     )
     monkeypatch.setitem(sys.modules, "_px4_takeoff_scenario", scenario)
     monkeypatch.setitem(sys.modules, "_runtime", runtime)
-    path = REPO_ROOT / "isaac/runtime/standalone/tests/flight_parameters_capture_response.py"
-    spec = importlib.util.spec_from_file_location("flight_parameters_capture_response", path)
+    path = REPO_ROOT / f"isaac/runtime/standalone/tests/{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
@@ -187,10 +190,17 @@ def test_capture_reports_preconditioning_timeout(monkeypatch: pytest.MonkeyPatch
     assert failed.failure_reason == "alignment profile 'yaw' did not stabilize within 12.0s"
 
 
-def test_capture_seeds_sensor_noise_before_starting_scenario(
+@pytest.mark.parametrize(("repetition", "seed"), [(1, 1101), (2, 2101), (3, 3101)])
+def test_capture_uses_configured_flight_seed_before_starting_scenario(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    repetition,
+    seed,
 ):
+    monkeypatch.setenv(
+        "FLIGHT_PARAMETERS_CONFIG", str(REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml")
+    )
+    monkeypatch.setenv("FLIGHT_PARAMETERS_RESPONSE_REPETITION", str(repetition))
     module = _load_script(monkeypatch)
     config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
     seeds: list[int] = []
@@ -204,7 +214,7 @@ def test_capture_seeds_sensor_noise_before_starting_scenario(
         run_dir=tmp_path,
     )
 
-    assert seeds == [42]
+    assert seeds == [seed]
 
 
 def test_capture_deploys_the_policy_plant_pusher(
@@ -312,3 +322,77 @@ def test_capture_checks_ctbr_roll_pitch_and_yaw_response_signs(
     module._assert_rotational_response_sign(  # noqa: SLF001 - focused validation test
         samples=samples
     )
+
+
+@pytest.mark.parametrize(
+    ("trial", "set_name", "seed"),
+    [(1, "fit", 1001), (31, "validation", 2001), (41, "acceptance", 3001)],
+)
+def test_hover_records_the_same_snapshot_and_world_velocities_in_every_set(
+    monkeypatch,
+    tmp_path,
+    trial,
+    set_name,
+    seed,
+):
+    module = _load_script(monkeypatch, "flight_parameters_capture")
+    config = load_config(REPO_ROOT / "configs/flight_parameters_x500_hover.yaml")
+    monkeypatch.setenv(
+        "FLIGHT_PARAMETERS_CONFIG", str(REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml")
+    )
+    monkeypatch.setenv("FLIGHT_PARAMETERS_RUN_ID", "capture-test")
+    monkeypatch.setenv("FLIGHT_PARAMETERS_TRIAL_INDEX", str(trial))
+    trial_dir = tmp_path / "trial"
+    trial_dir.mkdir()
+    monkeypatch.setenv("FLIGHT_PARAMETERS_TRIAL_DIR", str(trial_dir))
+    debug_log = tmp_path / "bridge.log"
+    debug_log.write_text("test bridge")
+    seeds = []
+    monkeypatch.setattr(module.np.random, "seed", seeds.append)
+    monkeypatch.setattr(module, "Px4TakeoffScenarioOptions", lambda **kwargs: kwargs)
+    status = SimpleNamespace(sim_time_us=1_000_000, debug_log_path=debug_log)
+    flight_runtime = ModuleType("robotics_experiments.runtime")
+    monkeypatch.setattr(
+        flight_runtime, "read_bridge_host_status", lambda **_kwargs: status, raising=False
+    )
+    monkeypatch.setitem(sys.modules, "robotics_experiments.runtime", flight_runtime)
+    attitude = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)])
+
+    def read_state(time_us):
+        t = time_us / 1_000_000
+        return VehicleState(
+            position_enu=np.array([t, 0.0, 2.5]),
+            orientation_flu_enu_wxyz=attitude,
+            linear_velocity_enu=np.array([2.0, t, 4.0]),
+            angular_velocity_flu=np.array([t, 0.0, 2.0]),
+            sim_time_us=time_us,
+        )
+
+    fleet = SimpleNamespace(
+        flying=[
+            SimpleNamespace(
+                driver=SimpleNamespace(routine_state=SimpleNamespace(cursor=2)),
+                spawned=SimpleNamespace(
+                    host=object(), observer=SimpleNamespace(read_state=read_state)
+                ),
+            )
+        ]
+    )
+
+    def run_scenario(context, options):
+        assert seeds == [seed]
+        for index in range(1020):
+            status.sim_time_us = 1_000_000 + index * 50_000
+            options["routine_tick_hook"](fleet)
+        options["post_routine_hook"](context, fleet)
+
+    monkeypatch.setattr(module, "run_px4_takeoff_scenario", run_scenario)
+    module._run(context=SimpleNamespace(config=config))  # noqa: SLF001 - exercises recorder through its host callback boundary
+    payload = json.loads((trial_dir / "raw_trace.json").read_text())
+    assert (payload["set_name"], payload["seed"]) == (set_name, seed)
+    assert len(payload["time_us"]) == 1020
+    for index in (0, 100, 1019):
+        t = payload["time_us"][index] / 1_000_000
+        assert payload["position_enu_m"][index] == [t, 0.0, 2.5]
+        assert payload["linear_velocity_enu_mps"][index] == [2.0, t, 4.0]
+        assert payload["angular_velocity_enu_radps"][index] == pytest.approx([0.0, t, 2.0])

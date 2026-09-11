@@ -105,6 +105,8 @@ def _trace_statistics(
     signals = _trace_signal_values(trace=trace)
     return HoverTraceStatistics(
         trial_index=trace.trial_index,
+        set_name=trace.set_name,
+        seed=trace.seed,
         full_window_sample_count=len(trace.time_s),
         policy_window_start_s=config.policy_warmup_s,
         policy_window_sample_count=len(trace.time_s) - warmup_samples,
@@ -146,12 +148,15 @@ def _validate_traces(
     *, config: FlightParametersConfig, run_id: str, traces: tuple[FlightTrace, ...]
 ) -> None:
     hover = config.hover
-    if len(traces) != hover.repetitions:
-        raise ValueError(f"hover campaign requires {hover.repetitions} traces, got {len(traces)}")
+    expected = tuple((group.name, seed) for group in config.sets for seed in group.hover_seeds)
+    if len(traces) != len(expected):
+        raise ValueError(f"hover campaign requires {len(expected)} traces, got {len(traces)}")
+    if tuple((trace.set_name, trace.seed) for trace in traces) != expected:
+        raise ValueError("hover traces must match configured flight sets and seeds")
     expected_samples = round(hover.measure_s * hover.sample_rate_hz)
     if expected_samples <= 1:
         raise ValueError("hover campaign measurement must contain at least two samples")
-    expected_indices = tuple(range(1, hover.repetitions + 1))
+    expected_indices = tuple(range(1, len(expected) + 1))
     if tuple(trace.trial_index for trace in traces) != expected_indices:
         raise ValueError("hover traces must use every ordered trial index exactly once")
     first = traces[0]
@@ -206,15 +211,22 @@ def derive_flight_parameters(
     if type(source_dirty) is not bool:
         raise ValueError("source_dirty must be boolean")
     _validate_traces(config=config, run_id=run_id, traces=traces)
-    if len(response_traces) != config.response.repetitions or tuple(
-        trace.repetition for trace in response_traces
-    ) != tuple(range(1, config.response.repetitions + 1)):
+    expected_response = tuple(
+        (group.name, seed) for group in config.sets for seed in group.response_seeds
+    )
+    if tuple((trace.set_name, trace.seed) for trace in response_traces) != expected_response:
+        raise ValueError("response traces must match configured flight sets and seeds")
+    if tuple(trace.repetition for trace in response_traces) != tuple(
+        range(1, len(expected_response) + 1)
+    ):
         raise ValueError("response traces must cover every configured ordered repetition")
     positions: list[np.ndarray] = []
     attitudes: list[np.ndarray] = []
     tilts: list[float] = []
     orientations: list[float] = []
     for trace in traces:
+        if trace.set_name != "fit":
+            continue
         target_position = np.asarray(trace.target_position_enu_m, dtype=np.float64)
         target_attitude = trace.target_attitude_flu_enu_wxyz
         positions.extend(
@@ -245,7 +257,10 @@ def derive_flight_parameters(
             values=np.asarray(orientations), margin=config.attitude_margin_rad
         ),
         trace_statistics=trace_statistics,
-        acceptance_limits=_acceptance_limits(config=config, traces=trace_statistics),
+        acceptance_limits=_acceptance_limits(
+            config=config,
+            traces=tuple(trace for trace in trace_statistics if trace.set_name == "fit"),
+        ),
     )
     first = traces[0]
     evidence_fingerprint = _evidence_fingerprint(
@@ -262,7 +277,7 @@ def derive_flight_parameters(
     )
     response = ResponseParameters(
         kind=config.response.kind,
-        repetitions=config.response.repetitions,
+        repetitions=len(response_traces),
         traces=response_traces,
     )
     flight_parameters = FlightParameters(

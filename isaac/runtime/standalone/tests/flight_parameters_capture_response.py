@@ -26,6 +26,7 @@ from robotics_experiments.commanding import (
     VelocitySetpoint,
 )
 from robotics_experiments.config import ExperimentConfig
+from robotics_experiments.flight_parameters import load_flight_parameters_config
 from robotics_experiments.px4_bridge import (
     body_velocity_flu_from_state,
     world_enu_to_body_flu,
@@ -411,6 +412,8 @@ def _write_capture(
     definition: ControllerDefinition,
     run_dir: Path,
     state: _ProbeState,
+    set_name: str,
+    seed: int,
 ) -> None:
     if not state.complete or len(state.initials) != len(definition.profiles):
         raise AssertionError("PX4 alignment probe adapter did not complete every profile")
@@ -462,6 +465,8 @@ def _write_capture(
         json.dumps(
             {
                 "schema_version": 1,
+                "set_name": set_name,
+                "seed": seed,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
                 "image": os.environ.get(
@@ -479,7 +484,13 @@ def _write_capture(
 
 
 def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir: Path) -> None:
-    np.random.seed(context.config.alignment.capture.sensor_seed)
+    config = load_flight_parameters_config(os.environ["FLIGHT_PARAMETERS_CONFIG"])
+    repetition = int(os.environ["FLIGHT_PARAMETERS_RESPONSE_REPETITION"])
+    trials = tuple((group.name, seed) for group in config.sets for seed in group.response_seeds)
+    if not 1 <= repetition <= len(trials):
+        raise ValueError("response repetition is outside configured flight sets")
+    set_name, seed = trials[repetition - 1]
+    np.random.seed(seed)
 
     def post_routine(_context: SceneTestContext, fleet) -> None:
         state = fleet.flying[0].driver.routine_state.last_policy_state
@@ -498,6 +509,8 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
             definition=definition,
             run_dir=run_dir,
             state=state,
+            set_name=set_name,
+            seed=seed,
         )
 
     run_px4_takeoff_scenario(

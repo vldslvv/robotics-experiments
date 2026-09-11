@@ -247,9 +247,11 @@ rule fires. Validation and test always sample the full pinned envelope.
 
 Each measured hover reset is one complete state from one trace index: ENU
 position error, relative attitude, ENU linear velocity, and ENU angular
-velocity. Linear and angular velocity are calculated from neighboring samples
-in that same flight trace before the final policy window is selected. A
-difference never crosses from one trial to another. The environment restores
+velocity. Both velocities are recorded directly from the simulator snapshot
+alongside pose, then selected using the same final-window sample indices.
+Only fitting flights populate resets; recorded validation and acceptance flights
+remain held out. Policy validation and final test continue to use their separate
+configured evaluation seeds. The environment restores
 all four values together; it does not replace measured motion with zero. The
 trace does not contain controller filters, integrators, or command-delay state,
 so those start uninitialized and initialize from the restored physical state on

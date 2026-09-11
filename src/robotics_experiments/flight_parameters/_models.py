@@ -16,7 +16,6 @@ class HoverConfig:
     """One repeated task-neutral hover measurement."""
 
     kind: str
-    repetitions: int
     mode_transition_timeout_s: float
     mode_report_max_age_s: float
     settle_s: float
@@ -38,9 +37,17 @@ class ResponseConfig:
     """Repeated general controller-response collection."""
 
     kind: str
-    repetitions: int
     experiment_config: str
     definition: str
+
+
+@dataclass(frozen=True)
+class FlightSetConfig:
+    """Independent complete flights assigned before capture."""
+
+    name: str
+    hover_seeds: tuple[int, ...]
+    response_seeds: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -53,6 +60,7 @@ class FlightParametersConfig:
     state_source: str
     experiment_config: str
     vehicle: str
+    sets: tuple[FlightSetConfig, ...]
     hover: HoverConfig
     response: ResponseConfig
     policy_warmup_s: float
@@ -64,13 +72,15 @@ class FlightParametersConfig:
 
 @dataclass(frozen=True)
 class FlightTrace:
-    """Backend-neutral pose samples from one complete flight trial."""
+    """Backend-neutral pose and velocity samples from one complete flight trial."""
 
     artifact_kind: str
     schema_version: int
     flight_parameters_id: str
     campaign_run_id: str
     trial_index: int
+    set_name: str
+    seed: int
     source_backend: str
     state_source: str
     config_fingerprint: str
@@ -85,19 +95,23 @@ class FlightTrace:
     time_s: tuple[float, ...]
     position_enu_m: tuple[Vector3, ...]
     attitude_flu_enu_wxyz: tuple[Quaternion, ...]
+    linear_velocity_enu_mps: tuple[Vector3, ...]
+    angular_velocity_enu_radps: tuple[Vector3, ...]
     completed: bool
     failure_reason: str
 
 
 @dataclass(frozen=True)
 class RawFlightTrace:
-    """Timestamped simulator pose evidence captured before PX4 verification."""
+    """Timestamped simulator pose and velocity evidence before PX4 verification."""
 
     artifact_kind: str
     schema_version: int
     flight_parameters_id: str
     campaign_run_id: str
     trial_index: int
+    set_name: str
+    seed: int
     source_backend: str
     state_source: str
     config_fingerprint: str
@@ -110,6 +124,8 @@ class RawFlightTrace:
     time_us: tuple[int, ...]
     position_enu_m: tuple[Vector3, ...]
     attitude_flu_enu_wxyz: tuple[Quaternion, ...]
+    linear_velocity_enu_mps: tuple[Vector3, ...]
+    angular_velocity_enu_radps: tuple[Vector3, ...]
     completed: bool
     failure_reason: str
 
@@ -225,6 +241,8 @@ class HoverTraceStatistics:
     """Full-window and policy-window statistics for one hover repetition."""
 
     trial_index: int
+    set_name: str
+    seed: int
     full_window_sample_count: int
     policy_window_start_s: float
     policy_window_sample_count: int
@@ -237,6 +255,8 @@ class ResponseTraceEvidence:
     """Lossless files for one general controller-response repetition."""
 
     repetition: int
+    set_name: str
+    seed: int
     profile_count: int
     reference_path: str
     reference_sha256: str

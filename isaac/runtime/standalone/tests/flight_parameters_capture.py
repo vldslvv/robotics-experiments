@@ -1,4 +1,4 @@
-"""Capture raw task-neutral PX4 SITL pose evidence for flight parameters."""
+"""Capture raw task-neutral PX4 SITL motion evidence for flight parameters."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from _px4_takeoff_scenario import (
     Px4TakeoffScenarioOptions,
     run_px4_takeoff_scenario,
@@ -20,6 +21,7 @@ from _runtime import SceneTestContext, run_scene_test
 
 from robotics_experiments.flight_parameters import load_flight_parameters_config
 from robotics_experiments.px4_bridge import VehicleState
+from robotics_experiments.px4_bridge.frames import rotate_vector_wxyz
 
 _TEST_NAME = "flight_parameters_capture"
 _CONFIG_ENV = "FLIGHT_PARAMETERS_CONFIG"
@@ -61,6 +63,11 @@ def _run(*, context: SceneTestContext) -> None:
     run_id = os.environ[_RUN_ID_ENV]
     trial_index = int(os.environ[_TRIAL_INDEX_ENV])
     trial_dir = Path(os.environ[_TRIAL_DIR_ENV])
+    trials = tuple((group.name, seed) for group in config.sets for seed in group.hover_seeds)
+    if not 1 <= trial_index <= len(trials):
+        raise ValueError("hover trial index is outside configured flight sets")
+    set_name, seed = trials[trial_index - 1]
+    np.random.seed(seed)
     if tuple(context.config.vehicles) != (config.vehicle,):
         raise ValueError(
             f"flight parameter experiment must contain only vehicle {config.vehicle!r}"
@@ -81,6 +88,8 @@ def _run(*, context: SceneTestContext) -> None:
     expected_samples = round(expected_hold_s * config.hover.sample_rate_hz)
     positions: list[tuple[float, float, float]] = []
     attitudes: list[tuple[float, float, float, float]] = []
+    linear_velocities: list[tuple[float, float, float]] = []
+    angular_velocities: list[tuple[float, float, float]] = []
     times_us: list[int] = []
     capture_start_us: int | None = None
 
@@ -110,6 +119,10 @@ def _run(*, context: SceneTestContext) -> None:
         times_us.append(sim_time_us)
         positions.append(_float3(state.position_enu))
         attitudes.append(_float4(state.orientation_flu_enu_wxyz))
+        linear_velocities.append(_float3(state.linear_velocity_enu))
+        angular_velocities.append(
+            _float3(rotate_vector_wxyz(state.orientation_flu_enu_wxyz, state.angular_velocity_flu))
+        )
 
     def post_routine(_context: SceneTestContext, fleet) -> None:
         if len(times_us) != expected_samples:
@@ -138,6 +151,8 @@ def _run(*, context: SceneTestContext) -> None:
             "flight_parameters_id": config.flight_parameters_id,
             "campaign_run_id": run_id,
             "trial_index": trial_index,
+            "set_name": set_name,
+            "seed": seed,
             "source_backend": config.source_backend,
             "state_source": config.state_source,
             "config_fingerprint": config.config_fingerprint,
@@ -159,6 +174,8 @@ def _run(*, context: SceneTestContext) -> None:
             "time_us": times_us,
             "position_enu_m": positions,
             "attitude_flu_enu_wxyz": attitudes,
+            "linear_velocity_enu_mps": linear_velocities,
+            "angular_velocity_enu_radps": angular_velocities,
             "completed": True,
             "failure_reason": "",
         }

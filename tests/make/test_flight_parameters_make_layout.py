@@ -94,3 +94,31 @@ def test_alignment_input_failure_is_clean_and_creates_no_run(tmp_path: Path) -> 
     assert result.stderr.startswith("alignment input artifact validation failed:")
     assert "Traceback" not in result.stderr
     assert not run_dir.exists()
+
+
+def test_response_sample_routes_flight_config_and_repetition() -> None:
+    result = subprocess.run(
+        [
+            "make",
+            "-n",
+            "-o",
+            "generate-drone-usd",
+            "test-integration-flight-parameters-response-sample",
+            "HYDRA_CONFIG=configs/alignment_px4_x500_velocity.yaml",
+            "FLIGHT_PARAMETERS_RESPONSE_REPETITION=2",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "FLIGHT_PARAMETERS_RESPONSE_REPETITION='2'" in result.stdout
+    assert (
+        "FLIGHT_PARAMETERS_CONFIG='/isaac-sim/proj/configs/flight/holybro_x500_v2_hover.yaml'"
+        in result.stdout
+    )
+    runner = (REPO_ROOT / "make/scripts/run_px4_integration_test.sh").read_text()
+    assert (
+        '-e "FLIGHT_PARAMETERS_RESPONSE_REPETITION=${FLIGHT_PARAMETERS_RESPONSE_REPETITION}"'
+        in runner
+    )
