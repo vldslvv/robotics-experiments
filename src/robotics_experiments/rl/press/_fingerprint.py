@@ -39,7 +39,7 @@ def _press_comparison_fingerprint(
         "airframe": vehicle.spawn.usd_path,
         "lab_vehicle": asdict(config.rl.lab_vehicle),
         "physics_hz": config.sim.physics_hz,
-        "episode_length_s": config.rl.episode_length_s,
+        "episode_length_s": config.rl.press.selected_stage().episode_length_s,
         "task_id": config.rl.training.task_id,
         "policy_interface": contract.policy_interface.value,
         "curriculum_stage": contract.curriculum_stage,

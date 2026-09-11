@@ -7,6 +7,7 @@ defaults:
 # steps), so the physics cadence stays single-sourced on sim.physics_hz.
 num_envs: 16
 env_spacing: 4.0
+# Standalone drone-hover timeout; press stages own their episode durations.
 episode_length_s: 5.0
 policy_rate_hz: 20.0
 
@@ -32,6 +33,7 @@ training:
   task_id: Isaac-Drone-Hover-Direct-v1
   vehicle_id: 0
   policy_name: hover
+  # Standalone drone-hover schedule; press uses the selected curriculum stage.
   phases:
     - max_iterations: 1500
       evaluation_interval: 200
@@ -55,7 +57,7 @@ training:
   num_mini_batches: 4
   desired_kl: 0.01
   max_grad_norm: 1.0
-  attempt_seeds: [42, 43, 44]
+  attempt_seeds: [42]
 
 # Hover task definition and task-owned ActorCritic topology.
 hover:

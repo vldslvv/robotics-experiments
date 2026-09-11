@@ -96,6 +96,13 @@ scratch. A later entry restores the complete accepted checkpoint published as
 mixture, hold duration, episode duration, PPO phases, and plateau rule. The
 current order is `hover`, then `approach`.
 
+Author press episode duration only in the selected
+`rl.press.curriculum.stages[].episode_length_s` entry. Both the environment and
+comparison record read that value. `rl.episode_length_s`, `rl.training.phases`,
+and `rl.training.plateau` belong to the separate standalone drone-hover task;
+press experiments use their stage's duration, phases, and plateau rule.
+Shared PPO parameters, rollout length, and attempt seeds remain in `rl.training`.
+
 The hover stage starts around the common 0.48 m press target using paired poses
 drawn directly from every final policy window in the pinned flight-parameter
 traces. Position and attitude from one measured sample always stay together;
@@ -156,10 +163,14 @@ Every `make train-rl` invocation owns one campaign ID and tries the configured
 Isaac process, environment, actor, critic, runner, and optimizer. The campaign
 coordinator never owns a training environment: a completed worker exits before
 the next seed starts, making simulator and GPU cleanup an operating-system
-process boundary. The general training config uses seeds 42, 43, and 44. The
-current controlled hover experiment uses only seed 42 and requires diagnosis
-before another seed is added. A campaign stops after the first completed attempt
-with a validation-passing checkpoint. Apart from
+process boundary. Shipped training configs use one attempt seed, `[42]`, authored
+in Hydra. Checkpoints are selected on the fixed validation workload with seeds
+101, 202, and 303. The selected actor is frozen and tested once on separate
+acceptance seeds 404, 505, and 606, with 100 episodes per seed. Qualification
+applies to that actor, not to training repeatability across initializations.
+Failure requires diagnosis before another campaign; final-test results never
+select a replacement checkpoint. A campaign stops after the first completed
+attempt with a validation-passing checkpoint. Apart from
 the preceding ordered press stage, external checkpoint initialization, process
 resume, actor-only copy, and post-run fine-tuning remain unsupported.
 
@@ -411,7 +422,7 @@ checkpoint paths, iterations, actor digests, seeds and results.
 The experiment record supports comparing a small number of consecutive policy
 runs. Training does not collect Git commits, working-tree state or container
 identity. Keep the checkout and configuration fixed during a campaign. See
-[stage 1 improvements](FLIGHT_TO_POLICY_IMPROVEMENTS.md) for the changes and
+[flight-to-policy improvements](FLIGHT_TO_POLICY_IMPROVEMENTS.md) for the changes and
 expected impact.
 
 After selection, the exported actor is immutable. A new uncached worker runs the

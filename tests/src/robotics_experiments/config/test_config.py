@@ -5,6 +5,7 @@ from typing import get_type_hints
 
 import pytest
 
+from robotics_experiments.config import load_config
 from tests.support.paths import REPO_ROOT
 
 _ROOT = REPO_ROOT / "configs"
@@ -99,6 +100,7 @@ def test_default_experiment_has_only_global_root_config():
 
     config = load_config(_ROOT / "takeoff_quad.yaml")
     assert config.switches.spawn_seed == 0
+    assert config.rl.training.attempt_seeds == (42,)
     assert set(vars(config)) - {"_config_frozen"} == {
         "sim",
         "switches",
@@ -224,6 +226,29 @@ def test_bridge_rejects_negative_magnetometer_noise_scale(tmp_path):
         load_config(path)
 
 
+@pytest.mark.parametrize("stage_name", ["hover", "approach"])
+def test_press_episode_duration_comes_from_selected_hydra_stage(*, tmp_path, stage_name: str):
+    root = tmp_path / "configs"
+    shutil.copytree(_ROOT, root)
+    path = root / f"train_press_{stage_name}_quad.yaml"
+    original = load_config(_ROOT / path.name)
+    duration = original.rl.press.selected_stage().episode_length_s
+    curriculum_path = root / "experiment" / "rl" / "press" / "approach.yaml"
+    curriculum_path.write_text(
+        curriculum_path.read_text().replace(
+            f"episode_length_s: {duration}", "episode_length_s: 50.0"
+        )
+    )
+
+    config = load_config(path)
+    assert config.rl.press.selected_stage().episode_length_s == 50.0
+    assert config.rl.episode_length_s == original.rl.episode_length_s
+    assert config.rl.training.attempt_seeds == (42,)
+    assert config.rl.press.evaluation.validation_seeds == (101, 202, 303)
+    assert config.rl.press.evaluation.test_seeds == (404, 505, 606)
+    assert config.rl.press.evaluation.episodes_per_seed == 100
+
+
 def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     from robotics_experiments.config import load_config
 
@@ -238,7 +263,6 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.inputs.flight_parameters_artifact.endswith("/latest")
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
-    assert config.rl.episode_length_s == 45.0
     assert training.policy_name == "press-approach"
     assert tuple(stage.name for stage in config.rl.press.curriculum.stages) == (
         "hover",
@@ -246,6 +270,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     )
     stage = config.rl.press.selected_stage()
     assert stage.name == "approach"
+    assert stage.episode_length_s == 45.0
     assert tuple(source.source for source in stage.reset_mix) == (
         "measured_navigation_handoff",
         "pinned_flight_parameters",
@@ -274,7 +299,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert hover_stage.plateau.patience_evaluations == 5
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
-    assert training.attempt_seeds == (42, 43, 44)
+    assert training.attempt_seeds == (42,)
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
@@ -292,6 +317,7 @@ def test_press_hover_uses_one_ppo_epoch_per_rollout():
     assert config.rl.training.num_steps_per_env == 256
     assert config.rl.training.num_mini_batches == 8
     assert config.rl.training.attempt_seeds == (42,)
+    assert config.rl.press.selected_stage().episode_length_s == 40.0
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
     assert reward.hover_stabilization == "uniform"
@@ -398,8 +424,8 @@ def test_press_rejects_invalid_hover_reward(tmp_path, old, new, message):
     [
         (
             "train_press_approach_quad.yaml",
-            "attempt_seeds: [42, 43, 44]",
-            "attempt_seeds: [42, 42, 44]",
+            "attempt_seeds: [42]",
+            "attempt_seeds: [42, 42]",
             "attempt_seeds must be nonempty and unique",
         ),
         (

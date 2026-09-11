@@ -356,7 +356,8 @@ class RlTrainingConfig(_FreezableConfig):
         policy_name: Required artifact namespace under ``.build/training``;
             completed runs publish their selected artifacts to that namespace's
             ``latest`` symlink.
-        phases: Ordered curriculum phases executed by each fresh attempt.
+        phases: Standalone drone-hover phases; press uses its selected stage.
+        plateau: Standalone drone-hover stopping rule; press uses its selected stage.
         telemetry_sample_interval_s: Diagnostic hardware sampling cadence.
         gpu_utilization_target_rate: Diagnostic GPU-utilization target in [0, 1].
         num_steps_per_env: On-policy rollout length per env per iteration.
@@ -449,7 +450,7 @@ class RlConfig(_FreezableConfig):
         press: Press-task-specific config and policy topology.
         num_envs: Number of parallel cloned envs.
         env_spacing: Distance between cloned env origins, meters.
-        episode_length_s: Episode timeout, seconds.
+        episode_length_s: Standalone drone-hover timeout, seconds; press uses its stage.
         policy_rate_hz: Exact-average RL policy decision rate.
     """
 

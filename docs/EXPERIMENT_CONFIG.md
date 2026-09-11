@@ -116,7 +116,13 @@ must be positive, the activation must be non-empty, initial noise must be
 finite and non-negative, and the output initialization is
 `scratch-neutral-output`.
 
-`rl.press.curriculum_stage` is required and currently accepts only `approach`.
+`rl.press.curriculum.active_stage` selects `hover` or `approach` from the ordered
+`rl.press.curriculum.stages` list. Each stage owns its hold duration, episode
+duration, reset mixture, training phases, and plateau rule. Press experiments
+author episode duration only in that stage's `episode_length_s`; the environment
+and comparison record use the selected value. `rl.episode_length_s` applies only
+to the separate standalone drone-hover task.
+
 `handoff` owns the single actor-entry envelope used by both Lab reset and live
 deployment. `navigation_noise` records the accepted, repo-relative production
 waypoint measurement summary, independent sample count, explicit position and
@@ -125,17 +131,17 @@ lateral/vertical error, and maximum full quaternion-geodesic attitude error.
 Configuration requires at least ten samples and the handoff pose bounds to
 cover those observations plus their margins;
 `make measure-press-navigation-handoff` refreshes the raw evidence after sensor,
-estimator, controller, route, or scene changes. `goal` owns the 100-sample
-range/alignment/full-attitude/linear-speed/angular-speed predicate and
-three-axis velocity reference, including its positive-motion alignment gate;
-`reward` owns the position-progress/stabilization stage transition, one
-predictive range-undershoot barrier, strict hold, and the terminal outcome;
+estimator, controller, route, or scene changes. `goal` owns the target pose and
+three-axis velocity reference; hover success uses the measured position and
+attitude envelope for the stage's hold duration. `reward` owns position progress,
+stabilization, the predictive range-undershoot barrier, hold progress, and terminal
+outcomes;
 `reset` owns only the physical scene;
 `termination` owns contact
 sensing and production flight envelopes, including a range-undershoot limit
-equal to the strict goal minimum; and `evaluation` owns disjoint validation/test
-seeds, 100 episodes per seed, cost weights, and the 95% success and 1%
-maximum-contact gates. Training-attempt, validation, and test seed sets must be
+equal to the acceptance minimum range; `evaluation` owns disjoint validation/test
+seeds and 100 episodes per seed; and `acceptance` owns the minimum success rate,
+maximum collision rate, and minimum range. Training-attempt, validation, and test seed sets must be
 nonempty, internally unique, and mutually disjoint; the final test set contains
 exactly three seeds. Independent reset
 velocity/range tunables are intentionally absent so training and deployment
@@ -143,25 +149,22 @@ cannot resolve different entry bounds. Invalid or uncovered navigation
 measurements, handoff/goal/velocity-reference bounds, negative or non-finite
 reward weights, invalid rates, and unknown stages fail during `load_config`.
 
-`rl.training` owns the ordered phases in each PPO attempt, rollout settings,
-task selection, artifact namespace, ordered `attempt_seeds`, and
-`controller_artifact`. Its `flight_parameters_artifact` resolves the matching
-task-neutral schema-1 evidence bundle required before training. Each phase owns its iteration count, checkpoint cadence,
-learning rate, schedule, entropy, and optional training-only range-undershoot
-recovery limit. Press recovery limits are positive, no greater than the strict
-range minimum, nondecreasing across phases, and equal to the strict range
-minimum in the final phase. They change only episode termination; every phase
-uses the same full handoff reset distribution and strict 100-sample goal.
-The campaign
-coordinator starts every attempt in a distinct Isaac process and waits for that
-process to exit before considering the next seed. Each later phase restores the
+`rl.training` owns shared PPO parameters, rollout settings, task selection,
+artifact namespace, and `attempt_seeds`. Shipped configs author `[42]`: one
+training attempt whose checkpoints are evaluated across multiple validation
+seeds. Its `phases` and `plateau` fields apply to the standalone drone-hover task;
+press uses the selected curriculum stage. Each phase owns its maximum iteration
+count, validation cadence, learning rate, schedule, and entropy coefficient.
+The campaign coordinator starts each attempt in a distinct Isaac process.
+Each later phase restores the
 attempt-wide validation-selected actor, critic, optimizer, and iteration before
 applying its configuration and resetting the environments. External checkpoint
 initialization and process resume are unsupported. The
-controller artifact defaults to
+controller artifact at `rl.inputs.controller_artifact` defaults to
 `.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
 constructed. `CONTROLLER_ARTIFACT` or the training CLI override selects an exact
-run for reproduction.
+run for reproduction. `rl.inputs.flight_parameters_artifact` selects the matching
+task-neutral schema-1 evidence bundle required before training.
 
 `rl.action` is task-neutral and contains only normalized action kind,
 dimension, and scales. Controller gains, command delay, maximum tilt, and
@@ -169,12 +172,15 @@ thruster response are not Hydra RL tunables; they are complete
 `ControllerSettings` loaded from the controller artifact and embedded in policy metadata.
 New campaigns capture both the task contract and alignment provenance before
 PPO, validate every checkpoint on seeds 101/202/303, and test the first eligible
-attempt's immutable selected actor on seeds 404/505/606. `rl.press.evaluation`
-owns the held-out cost weights, both workload seed sets, workload size, and gate
-thresholds. Accepted campaigns automatically advance `latest`, and comparable
+attempt's immutable selected actor on seeds 404/505/606. Acceptance pools the
+final-test episodes and requires every configured acceptance criterion and
+measured flight-parameter statistic to pass. A failed final test ends the
+campaign without retrying another checkpoint. Accepted campaigns automatically advance `latest`, and comparable
 `best` advances only after the fresh test passes. An explicit operator deployment
 may instead assign `latest` to a strict diagnostic candidate without changing
 `best` or its recorded qualification status. Only an accepted actor is exported
 as a campaign publication.
-`configs/train_press_approach_quad.yaml` selects the press task, the
-`press-approach` artifact namespace, 15-second episodes, and its PPO settings.
+`configs/train_press_hover_quad.yaml` selects the `hover` stage and `press-hover`
+artifact namespace; its stage authors 40-second episodes.
+`configs/train_press_approach_quad.yaml` selects the `approach` stage and
+`press-approach` namespace; its stage authors 45-second episodes.

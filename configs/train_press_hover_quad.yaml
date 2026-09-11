@@ -8,7 +8,6 @@ scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
   num_envs: 4096
-  episode_length_s: 40.0
   action:
     max_body_velocity_mps: 0.5
   press:

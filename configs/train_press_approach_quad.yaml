@@ -8,7 +8,6 @@ scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
   num_envs: 32768
-  episode_length_s: 45.0
   action:
     max_body_velocity_mps: 0.5
   press:
@@ -33,7 +32,7 @@ rl:
     num_mini_batches: 8
     desired_kl: 0.01
     max_grad_norm: 1.0
-    attempt_seeds: [42, 43, 44]
+    attempt_seeds: [42]
 
 vehicles:
   x500_01:

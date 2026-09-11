@@ -158,11 +158,12 @@ def test_evaluation_rejects_non_finite_aggregates(*, field: str, value: float) -
         )
 
 
-def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None:
+@pytest.mark.parametrize("stage_name", ["hover", "approach"])
+def test_comparison_fingerprint_tracks_effective_press_settings(*, stage_name: str) -> None:
     from robotics_experiments.config import load_config
     from robotics_experiments.rl import PolicyContract, PolicyInterface
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    config = load_config(REPO_ROOT / "configs" / f"train_press_{stage_name}_quad.yaml")
     contract = PolicyContract(
         policy_interface=PolicyInterface.PRESS,
         obs_schema_version=1,
@@ -174,7 +175,7 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
         hover_thrust_normalized=0.57,
-        curriculum_stage="approach",
+        curriculum_stage=stage_name,
     )
     fingerprint = _press_comparison_fingerprint(
         config=config,
@@ -195,6 +196,25 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         config=config,
         contract=contract,
         flight_parameters_fingerprint="envelope-b",
+    )
+    assert fingerprint == _press_comparison_fingerprint(
+        config=replace(config, rl=replace(config.rl, episode_length_s=50.0)),
+        contract=contract,
+        flight_parameters_fingerprint="envelope-a",
+    )
+    curriculum = replace(
+        config.rl.press.curriculum,
+        stages=[
+            replace(stage, episode_length_s=50.0) if stage.name == stage_name else stage
+            for stage in config.rl.press.curriculum.stages
+        ],
+    )
+    assert fingerprint != _press_comparison_fingerprint(
+        config=replace(
+            config, rl=replace(config.rl, press=replace(config.rl.press, curriculum=curriculum))
+        ),
+        contract=contract,
+        flight_parameters_fingerprint="envelope-a",
     )
 
 

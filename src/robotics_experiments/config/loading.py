@@ -285,10 +285,6 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
         phases = stage.phases
         if training.policy_name != f"press-{stage.name}":
             raise ValueError("press policy_name must match the active ordered stage")
-        if experiment.rl.episode_length_s != stage.episode_length_s:
-            raise ValueError(
-                "rl.episode_length_s must match the active press curriculum episode_length_s"
-            )
     else:
         phases = training.phases
     _validate_training_phases(
