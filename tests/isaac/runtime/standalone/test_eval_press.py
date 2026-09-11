@@ -17,6 +17,7 @@ from robotics_experiments.flight_parameters import (
     summarize_signal,
 )
 from tests.support.paths import REPO_ROOT
+from tests.support.press_evaluation_fakes import PressEvaluationEnv, ZeroPressPolicy
 
 _FLIGHT_PARAMETERS = load_flight_parameters(
     REPO_ROOT / "tests/fixtures/flight_parameters/flight_parameters.json"
@@ -170,7 +171,6 @@ def test_approach_evaluation_aggregation() -> None:
 
 @pytest.mark.parametrize("success_ends", [(60, 60), (64, 72), (60, 72), (0, 0)])
 def test_seed_rollout_reseeds_and_uses_each_successful_hold_window(*, success_ends) -> None:
-    torch = pytest.importorskip("torch")
     from robotics_experiments.rl.press import PressApproachRewardTerms
     from robotics_experiments.workflows.isaac_lab import evaluate_press_approach_policy
 
@@ -179,93 +179,11 @@ def test_seed_rollout_reseeds_and_uses_each_successful_hold_window(*, success_en
     hold_steps = 60
     warmup_steps = 12
 
-    class FakePolicy:
-        def __call__(self, observation, /):
-            return torch.zeros((observation.shape[0], 4))
-
-    class FakeEnv:
-        device = "cpu"
-        max_episode_length = 80
-        step_dt = 0.5
-
-        def __init__(self):
-            self.seeds = []
-            self.step_count = 0
-            self.press_approach_result = None
-
-        def reset(self, *, seed):
-            self.seeds.append(seed)
-            self.step_count = 0
-            return {"policy": torch.zeros((batch_size, 34))}, {}
-
-        def step(self, _action, /):
-            self.step_count += 1
-            step = self.step_count
-            # Early recovery, hold warmup, failed episodes and post-completion
-            # samples are deliberately much larger than the qualifying values.
-            values = torch.tensor(
-                [
-                    step / 1000 if end - hold_steps + warmup_steps < step <= end else 9.0
-                    for end in (*success_ends, 0)
-                ]
-            )
-            success = torch.tensor([step == end for end in (*success_ends, 0)])
-            timeout = torch.tensor(
-                [step == self.max_episode_length and end == 0 for end in (*success_ends, 0)]
-            )
-            clear = torch.zeros(batch_size, dtype=torch.bool)
-            # The third episode fails physically before either successful hold.
-            collision = clear.clone()
-            collision[2] = step == 20
-            stable_steps = torch.tensor(
-                [
-                    max(0, min(hold_steps, step - end + hold_steps)) if end else 0
-                    for end in (*success_ends, 0)
-                ]
-            )
-            self.press_approach_result = SimpleNamespace(
-                state=SimpleNamespace(
-                    closest_range_m=torch.full((batch_size,), 0.41),
-                    normalized_pose_error=torch.ones(batch_size),
-                    stable_goal_steps=stable_steps,
-                    longest_stable_goal_steps=stable_steps,
-                ),
-                range_m=torch.full((batch_size,), 0.41),
-                strict_goal=stable_steps > 0,
-                hover_evaluation=SimpleNamespace(
-                    position_error_enu_m=values[:, None].expand(-1, 3),
-                    horizontal_position_error_m=values,
-                    position_error_m=values,
-                    attitude_error_rpy_rad=values[:, None].expand(-1, 3),
-                    tilt_error_rad=values,
-                    orientation_error_rad=values,
-                    position_utilization=torch.ones(batch_size),
-                    attitude_utilization=torch.zeros(batch_size),
-                ),
-                termination=SimpleNamespace(
-                    success=success,
-                    collision=collision,
-                    body_collision=collision,
-                    pusher_collision=clear,
-                    flight_failure=clear,
-                    range_undershoot=clear,
-                    time_out=timeout,
-                ),
-                rewards=SimpleNamespace(**{name: torch.ones(batch_size) for name in reward_names}),
-            )
-            return (
-                {"policy": torch.zeros((batch_size, 34))},
-                torch.zeros(batch_size),
-                success | collision,
-                timeout,
-                {},
-            )
-
-    env = FakeEnv()
+    env = PressEvaluationEnv(success_ends=success_ends)
     reports: list[str] = []
     result = evaluate_press_approach_policy(
         env=env,
-        policy=FakePolicy(),
+        policy=ZeroPressPolicy(),
         seeds=(202, 303),
         episodes_per_seed=batch_size,
         hold_steps=hold_steps,
@@ -325,6 +243,131 @@ def _config():
             ),
         )
     )
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "policy_observation",
+        "raw_action",
+        "position_error_enu_x",
+        "closest_range_m",
+        "normalized_pose_error",
+        "reward.total",
+        "reward",
+    ],
+)
+def test_rollout_rejects_non_finite_values(*, monkeypatch, field: str, value: float) -> None:
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_approach_policy
+
+    env = PressEvaluationEnv(success_ends=(60, 72))
+    reset = env.reset
+    step = env.step
+    policy = ZeroPressPolicy()
+
+    def invalid_reset(*, seed):
+        observation, info = reset(seed=seed)
+        observation["policy"][1, 0] = value
+        return observation, info
+
+    def invalid_policy(observation, /):
+        action = policy(observation)
+        action[1, 0] = value
+        return action
+
+    def invalid_step(action, /):
+        transition = step(action)
+        result = env.press_approach_result
+        targets = {
+            "position_error_enu_x": result.hover_evaluation.position_error_enu_m[:, 0],
+            "closest_range_m": result.state.closest_range_m,
+            "normalized_pose_error": result.state.normalized_pose_error,
+            "reward.total": result.rewards.total,
+            "reward": transition[1],
+        }
+        targets[field][1] = value
+        return transition
+
+    if field == "policy_observation":
+        monkeypatch.setattr(env, "reset", invalid_reset)
+    elif field != "raw_action":
+        monkeypatch.setattr(env, "step", invalid_step)
+    with pytest.raises(ValueError, match=rf"non-finite {field}: seed=202 episode=1 step=0"):
+        evaluate_press_approach_policy(
+            env=env,
+            policy=invalid_policy if field == "raw_action" else policy,
+            seeds=(202, 303),
+            episodes_per_seed=3,
+            hold_steps=60,
+            flight_parameters=_FLIGHT_PARAMETERS,
+            report=lambda _message: None,
+            trace_worst_episode=False,
+        )
+    assert env.seeds == [202]
+    assert env.step_count == (0 if field in {"policy_observation", "raw_action"} else 1)
+
+
+def test_rollout_ignores_non_finite_values_after_episode_completion(*, monkeypatch) -> None:
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_approach_policy
+
+    env = PressEvaluationEnv(success_ends=(60, 72))
+    step = env.step
+
+    def step_with_invalid_completed_episode(action, /):
+        transition = step(action)
+        if env.step_count > 20:
+            env.press_approach_result.hover_evaluation.position_error_enu_m[2] = float("nan")
+            env.press_approach_result.rewards.total[2] = float("inf")
+        if env.step_count >= 20:
+            transition[0]["policy"][2] = float("nan")
+        return transition
+
+    monkeypatch.setattr(env, "step", step_with_invalid_completed_episode)
+    result = evaluate_press_approach_policy(
+        env=env,
+        policy=lambda observation: observation[:, :4],
+        seeds=(202,),
+        episodes_per_seed=3,
+        hold_steps=60,
+        flight_parameters=_FLIGHT_PARAMETERS,
+        report=lambda _message: None,
+        trace_worst_episode=False,
+    )
+    assert result.summary.success_rate == pytest.approx(2 / 3)
+    assert all(reward.mean == 1.0 for reward in result.reward_means)
+
+
+def test_hover_statistics_pool_samples_across_episodes_and_seeds(*, monkeypatch) -> None:
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_approach_policy
+
+    env = PressEvaluationEnv(success_ends=(60, 72))
+    step = env.step
+
+    def constant_error_step(action, /):
+        transition = step(action)
+        error = env.press_approach_result.hover_evaluation.position_error_enu_m
+        error[:] = 0.0 if env.seeds[-1] == 202 else 2.0
+        return transition
+
+    monkeypatch.setattr(env, "step", constant_error_step)
+    result = evaluate_press_approach_policy(
+        env=env,
+        policy=ZeroPressPolicy(),
+        seeds=(202, 303),
+        episodes_per_seed=3,
+        hold_steps=60,
+        flight_parameters=_FLIGHT_PARAMETERS,
+        report=lambda _message: None,
+        trace_worst_episode=False,
+    )
+    statistics = next(
+        item for item in result.hover_statistics if item.name == "position_error_enu_x"
+    )
+    assert statistics.maximum_absolute == 2.0
+    assert statistics.rmse == pytest.approx(2.0**0.5)
+    assert statistics.p95_absolute == 2.0
+    assert statistics.p99_absolute == 2.0
 
 
 def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: Path) -> None:

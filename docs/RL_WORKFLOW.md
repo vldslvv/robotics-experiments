@@ -389,7 +389,7 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 25 records the prepared acceptance criteria, the
+`training_report.json` schema 26 records the prepared acceptance criteria, the
 exact reward configuration, resolved rollout settings and derived maximum
 simulated durations per phase, trace-backed reset distribution, and every attempt,
 phase parent, raw validation metrics, exact monitoring step, telemetry summaries,
@@ -397,6 +397,22 @@ plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
 metric-registry revision 19 and comparison revision 36; older report shapes are
 unsupported.
+
+The report's `provenance` contains the complete resolved experiment config,
+config path, procedural-smoke flag, canonical controller and flight-parameter
+paths, producer run IDs, digests and fingerprints. It also records Python,
+Torch, NumPy, RSL-RL and CUDA versions. The coordinator captures this before
+creating the campaign; each attempt captures its own provenance before
+environment construction and retains it in its report and campaign attempt record.
+Attempts also record their learner initialization, including the preceding
+stage's checkpoint lineage when applicable. Existing evaluation records retain
+checkpoint paths, iterations, actor digests, seeds and results.
+
+The experiment record supports comparing a small number of consecutive policy
+runs. Training does not collect Git commits, working-tree state or container
+identity. Keep the checkout and configuration fixed during a campaign. See
+[stage 1 improvements](FLIGHT_TO_POLICY_IMPROVEMENTS.md) for the changes and
+expected impact.
 
 After selection, the exported actor is immutable. A new uncached worker runs the
 disjoint final workload: 100 episodes for each of seeds 404, 505, and 606. The
@@ -420,11 +436,40 @@ no consumer-owned tolerance. Test data cannot affect training,
 phase advancement, checkpoint selection, or retries. A test failure ends the
 command immediately and preserves evidence without publishing.
 
+Acceptance pools the retained successful-hold samples across all episodes and
+seeds. For each signal it computes maximum absolute error, `sqrt(mean(x^2))`,
+and the 95th and 99th percentiles of `abs(x)` using NumPy's default linear
+interpolation. These are sample-level statistics, not averages of episode
+RMSEs or percentiles. Each successful hold contributes the same number of
+samples. Reference limits are the largest corresponding **per-flight**
+policy-window statistic plus the artifact's authored margin. They are
+conservative limits applied to the pooled policy statistics; no per-episode
+RMSE or percentile acceptance requirement is added.
+
+Success, collision, failure and timeout rates count outcomes across all
+evaluated episodes, including unsuccessful ones. Occupancy and utilization
+diagnostics average each episode's active-step mean equally; reward diagnostics
+average all active steps. Minimum closest range is the minimum over all
+episodes. Missing successful-hold statistics remain `null` and fail their
+acceptance checks.
+
+Evaluation raises `ValueError` on NaN or infinity in an active episode's policy
+observation, raw actor output before clipping, or numeric transition values
+used for hover, range, duration or reward metrics. The error identifies the
+field, seed, zero-based episode and step. The transition that ends an episode
+is checked; later auto-reset samples from that slot are excluded. Non-finite
+aggregate metrics, reward means and available hover statistics also raise
+before a `PolicyEvaluation` is returned. Errors propagate through the existing
+worker error handling and stop selection or acceptance without publication.
+Intentional accumulator initialization and unavailable hover statistics are
+not invalid trajectory samples. The existing `all_traces_finite` metric is 1
+for a completed valid evaluation.
+
 A policy artifact is exactly `policy.pt` plus `policy_meta.json`. Metadata uses
 the strict schema-1 `robotics-experiments-policy` contract and records policy
 interface, observation/action contracts, cadence, controller artifact and
-digest, flight-parameters artifact and digest, comparison fingerprint, source
-commit, dirty state, and training phase provenance. Older policy schemas and
+digest, flight-parameters artifact and digest, comparison fingerprint,
+and training phase provenance. Older policy schemas and
 policies without complete controller and flight-parameters provenance are
 unsupported.
 

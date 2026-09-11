@@ -147,6 +147,23 @@ def _hover_signal_values(*, result: PressApproachResult[torch.Tensor]) -> dict[s
     }
 
 
+def _require_finite(
+    *, values: dict[str, torch.Tensor], active: torch.Tensor, seed: int, step: int
+) -> None:
+    samples = torch.cat(
+        [value.reshape(len(active), -1) for value in values.values()],
+        dim=1,
+    )
+    invalid = ~torch.isfinite(samples) & active[:, None]
+    if bool(invalid.any()):
+        episode, field = invalid.nonzero()[0].tolist()
+        names = tuple(
+            name for name, value in values.items() for _ in range(value.numel() // len(active))
+        )
+        name = names[field]
+        raise ValueError(f"non-finite {name}: seed={seed} episode={episode} step={step}")
+
+
 def summarize_press_approach_episodes(
     *,
     episodes: tuple[PressApproachEpisodeMetrics, ...],
@@ -292,8 +309,13 @@ def _evaluate_seed(
     )
     for step in range(horizon):
         policy_observation = observation["policy"]
+        _require_finite(
+            values={"policy_observation": policy_observation}, active=active, seed=seed, step=step
+        )
         with torch.no_grad():
-            action = policy(policy_observation).clamp(-1.0, 1.0)
+            action = policy(policy_observation)
+        _require_finite(values={"raw_action": action}, active=active, seed=seed, step=step)
+        action = action.clamp(-1.0, 1.0)
         if trace_worst_episode:
             active_trace.append(active.detach().cpu().clone())
             observation_trace.append(policy_observation.detach().cpu())
@@ -304,9 +326,25 @@ def _evaluate_seed(
         if result is None:
             raise RuntimeError("press approach environment did not publish a transition result")
         termination = result.termination
-        hover_history[step] = torch.stack(
-            tuple(_hover_signal_values(result=result).values()), dim=-1
-        ).detach()
+        hover_values = _hover_signal_values(result=result)
+        reward_terms = {f"reward.{name}": getattr(result.rewards, name) for name in reward_names}
+        _require_finite(
+            values={
+                **hover_values,
+                **reward_terms,
+                "reward": _reward,
+                "range_m": result.range_m,
+                "closest_range_m": result.state.closest_range_m,
+                "normalized_pose_error": result.state.normalized_pose_error,
+                "position_utilization": result.hover_evaluation.position_utilization,
+                "attitude_utilization": result.hover_evaluation.attitude_utilization,
+                "longest_stable_goal_steps": result.state.longest_stable_goal_steps,
+            },
+            active=active,
+            seed=seed,
+            step=step,
+        )
+        hover_history[step] = torch.stack(tuple(hover_values.values()), dim=-1).detach()
         current_range = result.range_m
         hover_occupancy_sums += torch.where(active, result.strict_goal.float(), 0.0)
         utilization = torch.stack(
@@ -343,7 +381,7 @@ def _evaluate_seed(
         range_undershoot |= active & termination.range_undershoot
         timeout |= active & termination.time_out
         reward_values = torch.stack(
-            [getattr(result.rewards, name) for name in reward_names],
+            tuple(reward_terms.values()),
             dim=0,
         )
         reward_sums += reward_values[:, active].sum(dim=1)
@@ -519,21 +557,19 @@ def press_policy_evaluation(
 ) -> PolicyEvaluation:
     """Convert one rollout result into the evaluator's decision-free contract."""
     summary = result.summary
-    finite_values = (
-        summary.success_rate,
-        summary.collision_rate,
-        summary.other_flight_failure_rate,
-        summary.range_undershoot_rate,
-        summary.timeout_rate,
-        summary.hover_envelope_occupancy_rate,
-        summary.hover_envelope_utilization_mean,
-        summary.position_envelope_utilization_mean,
-        summary.attitude_envelope_utilization_mean,
-        summary.episode_longest_hover_duration_mean_s,
-        summary.episode_longest_hover_duration_max_s,
-        summary.min_closest_range_m,
+    finite_values = {field.name: getattr(summary, field.name) for field in fields(summary)}
+    finite_values.update({f"reward.{reward.name}": reward.mean for reward in result.reward_means})
+    finite_values.update(
+        {
+            f"flight_parameters.{statistics.name}.{field.name}": getattr(statistics, field.name)
+            for statistics in result.hover_statistics
+            for field in fields(statistics)
+            if field.name not in {"name", "unit"}
+        }
     )
-    traces_finite = all(np.isfinite(value) for value in finite_values)
+    for name, value in finite_values.items():
+        if not np.isfinite(value):
+            raise ValueError(f"non-finite evaluation {name}: source={source} iteration={iteration}")
     hover_statistics = {statistics.name: statistics for statistics in result.hover_statistics}
     return PolicyEvaluation(
         iteration=iteration,
@@ -544,7 +580,7 @@ def press_policy_evaluation(
             EvaluationMetric("collision_rate", summary.collision_rate),
             EvaluationMetric("other_flight_failure_rate", summary.other_flight_failure_rate),
             EvaluationMetric("minimum_closest_range_m", summary.min_closest_range_m),
-            EvaluationMetric("all_traces_finite", float(traces_finite)),
+            EvaluationMetric("all_traces_finite", 1.0),
             EvaluationMetric(
                 "hover_envelope_occupancy_rate", summary.hover_envelope_occupancy_rate
             ),

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import gc
 import hashlib
+import importlib.metadata
 import json
 import math
 import multiprocessing
@@ -29,7 +30,8 @@ import sys
 import tempfile
 import time
 import traceback
-from dataclasses import asdict, dataclass, replace
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -81,7 +83,7 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 25
+_REPORT_SCHEMA_VERSION = 26
 
 
 class _TrackioWriter:
@@ -193,23 +195,50 @@ def _campaign_plateau(*, config: ExperimentConfig) -> RlPlateauCriteriaConfig:
     return config.rl.training.plateau
 
 
-def _git_source_metadata(*, repo_root: Path) -> dict[str, str | bool]:
-    git = ["git", "-c", f"safe.directory={repo_root.resolve()}"]
-    commit = subprocess.run(
-        [*git, "rev-parse", "--verify", "HEAD"],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    status = subprocess.run(
-        [*git, "status", "--porcelain", "--untracked-files=normal"],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return {"source_commit": commit, "source_dirty": bool(status)}
+def _config_values(value: Any, /) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: _config_values(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, Mapping):
+        return {key: _config_values(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_config_values(item) for item in value]
+    return value
+
+
+def _experiment_provenance(
+    *,
+    config: ExperimentConfig,
+    config_path: Path,
+    inputs: rl.PolicyInputs,
+    procedural_smoke: bool,
+) -> dict[str, Any]:
+    """Snapshot the experiment inputs before starting its work."""
+    return {
+        "config_path": str(config_path.resolve(strict=True)),
+        "resolved_config": _config_values(config),
+        "procedural_smoke": procedural_smoke,
+        "runtime": {
+            "python": sys.version,
+            "torch": torch.__version__,
+            "numpy": np.__version__,
+            "rsl_rl": importlib.metadata.version("rsl-rl-lib"),
+            "cuda": torch.version.cuda,
+        },
+        "inputs": {
+            "controller": {
+                "path": str(inputs.controller_path),
+                "run_id": inputs.controller.run_id,
+                "sha256": inputs.controller_digest,
+                "comparison_fingerprint": inputs.controller.comparison_fingerprint,
+            },
+            "flight_parameters": {
+                "path": str(inputs.flight_parameters_path),
+                "run_id": inputs.flight_parameters.run_id,
+                "sha256": inputs.flight_parameters_digest,
+                "fingerprint": inputs.flight_parameters.artifact_fingerprint,
+            },
+        },
+    }
 
 
 def _build_env(
@@ -244,7 +273,6 @@ def _artifact_metadata(
     *,
     config: ExperimentConfig,
     env_cfg,
-    source_metadata: dict[str, str | bool],
     artifact_run_id: str,
     controller_artifact: ControllerArtifact,
     controller_digest: str,
@@ -272,7 +300,7 @@ def _artifact_metadata(
         "source": "flight_parameters_policy_window",
         **hover_reset_samples.summary(flight_parameters=flight_parameters),
     }
-    return metadata | source_metadata | {"artifact_run_id": artifact_run_id}
+    return metadata | {"artifact_run_id": artifact_run_id}
 
 
 def _write_json(*, path: Path, payload: dict[str, Any]) -> None:
@@ -772,6 +800,7 @@ def _training_report(
     *,
     run_dir: Path,
     config: ExperimentConfig,
+    provenance: dict[str, Any],
     phases: tuple[RlTrainingPhaseConfig, ...],
     comparison_fingerprint: str,
     attempts: list[dict[str, Any]],
@@ -796,6 +825,7 @@ def _training_report(
         "schema_version": _REPORT_SCHEMA_VERSION,
         "report_kind": "campaign",
         "artifact_run_id": run_dir.name,
+        "provenance": provenance,
         "policy_name": config.rl.training.policy_name,
         "policy_interface": rl.PolicyInterface.PRESS.value,
         "comparison_fingerprint": comparison_fingerprint,
@@ -886,6 +916,7 @@ def _attempt_report(
     payload = _training_report(
         run_dir=run_dir,
         config=config,
+        provenance=attempt["provenance"],
         phases=phases,
         comparison_fingerprint=comparison_fingerprint,
         attempts=[attempt],
@@ -1076,6 +1107,7 @@ def _record_final_test(
     *,
     run_dir: Path,
     config: ExperimentConfig,
+    provenance: dict[str, Any],
     phases: tuple[RlTrainingPhaseConfig, ...],
     attempts: list[dict[str, Any]],
     selection: _AttemptSelection,
@@ -1107,6 +1139,7 @@ def _record_final_test(
         telemetry_failed_report = _training_report(
             run_dir=run_dir,
             config=config,
+            provenance=provenance,
             phases=phases,
             comparison_fingerprint=comparison_fingerprint,
             attempts=attempts,
@@ -1148,6 +1181,7 @@ def _record_final_test(
     final_report = _training_report(
         run_dir=run_dir,
         config=config,
+        provenance=provenance,
         phases=phases,
         comparison_fingerprint=comparison_fingerprint,
         attempts=attempts,
@@ -1194,6 +1228,12 @@ def _train_and_validate_attempt(
         else _campaign_phases(config=config)
     )
     total_maximum = sum(phase.max_iterations for phase in phases)
+    provenance = _experiment_provenance(
+        config=config,
+        config_path=config_path,
+        inputs=inputs,
+        procedural_smoke=args.procedural_smoke,
+    )
     if not run_dir.is_dir():
         raise ValueError(f"campaign run directory does not exist: {run_dir}")
     _report(
@@ -1225,6 +1265,7 @@ def _train_and_validate_attempt(
                     "artifact_run_id": run_dir.name,
                     "attempt_index": attempt_index,
                     "training_seed": seed,
+                    "provenance": provenance,
                 },
             )
             attempt_writer = _TrackioWriter(
@@ -1263,7 +1304,6 @@ def _train_and_validate_attempt(
                     metadata = _artifact_metadata(
                         config=config,
                         env_cfg=env_cfg,
-                        source_metadata=_git_source_metadata(repo_root=repo_root),
                         artifact_run_id=run_dir.name,
                         controller_artifact=controller_artifact,
                         controller_digest=controller_digest,
@@ -1356,6 +1396,8 @@ def _train_and_validate_attempt(
                     "attempt_index": attempt_index,
                     "training_seed": seed,
                     "worker_pid": os.getpid(),
+                    "provenance": provenance,
+                    "initialization": metadata["initialization"],
                     "hover_reset_distribution": metadata["hover_reset_distribution"],
                     "evaluations": evaluation_records,
                     "phase_results": phase_results,
@@ -1848,6 +1890,12 @@ def _run_policy_workflow(
         else _campaign_phases(config=config)
     )
     telemetry_probe = probe_telemetry()
+    provenance = _experiment_provenance(
+        config=config,
+        config_path=config_path,
+        inputs=inputs,
+        procedural_smoke=args.procedural_smoke,
+    )
     run_dir = _make_run_dir(out_root=policy_root, run_id=os.environ.get(_RUN_ID_ENV))
     hover_reset_distribution = {
         "source": "flight_parameters_policy_window",
@@ -1861,6 +1909,7 @@ def _run_policy_workflow(
         payload=_training_report(
             run_dir=run_dir,
             config=config,
+            provenance=provenance,
             phases=phases,
             comparison_fingerprint=comparison_fingerprint,
             attempts=attempts,
@@ -1910,6 +1959,7 @@ def _run_policy_workflow(
             payload=_training_report(
                 run_dir=run_dir,
                 config=config,
+                provenance=provenance,
                 phases=phases,
                 comparison_fingerprint=comparison_fingerprint,
                 attempts=attempts,
@@ -2032,6 +2082,7 @@ def _run_policy_workflow(
             payload=_training_report(
                 run_dir=run_dir,
                 config=config,
+                provenance=provenance,
                 phases=phases,
                 comparison_fingerprint=comparison_fingerprint,
                 attempts=attempts,
@@ -2080,6 +2131,7 @@ def _run_policy_workflow(
         smoke_report = _training_report(
             run_dir=run_dir,
             config=config,
+            provenance=provenance,
             phases=phases,
             comparison_fingerprint=comparison_fingerprint,
             attempts=attempts,
@@ -2103,6 +2155,7 @@ def _run_policy_workflow(
         failed_report = _training_report(
             run_dir=run_dir,
             config=config,
+            provenance=provenance,
             phases=phases,
             comparison_fingerprint=comparison_fingerprint,
             attempts=attempts,
@@ -2144,6 +2197,7 @@ def _run_policy_workflow(
         final_report = _record_final_test(
             run_dir=run_dir,
             config=config,
+            provenance=provenance,
             phases=phases,
             attempts=attempts,
             selection=campaign_selection,

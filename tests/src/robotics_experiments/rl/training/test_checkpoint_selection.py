@@ -10,7 +10,7 @@ import pytest
 
 from robotics_experiments.config import RlPlateauCriteriaConfig
 from robotics_experiments.flight_parameters import SignalStatistics, load_flight_parameters
-from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
+from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation, RewardMean
 from robotics_experiments.rl.press import (
     create_press_acceptance_criteria,
     evaluate_press_acceptance,
@@ -128,6 +128,36 @@ def test_unavailable_hover_statistics_keep_the_complete_null_metric_contract() -
     assert all(metric.value is None for metric in hover_metrics)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("field", ["summary", "reward", "hover_statistic"])
+def test_evaluation_rejects_non_finite_aggregates(*, field: str, value: float) -> None:
+    from robotics_experiments.workflows.isaac_lab import press_policy_evaluation
+
+    result = _press_result()
+    if field == "summary":
+        result = replace(
+            result, summary=replace(result.summary, hover_envelope_utilization_mean=value)
+        )
+        name = "hover_envelope_utilization_mean"
+    elif field == "reward":
+        result = replace(result, reward_means=(RewardMean(name="total", mean=value),))
+        name = "reward.total"
+    else:
+        statistics = replace(result.hover_statistics[0], rmse=value)
+        result = replace(result, hover_statistics=(statistics,))
+        name = f"flight_parameters.{statistics.name}.rmse"
+    with pytest.raises(
+        ValueError, match=f"non-finite evaluation {name}: source=fresh-test iteration=10"
+    ):
+        press_policy_evaluation(
+            iteration=10,
+            checkpoint_path=Path("checkpoint.pt"),
+            policy_digest="digest",
+            result=result,
+            source="fresh-test",
+        )
+
+
 def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None:
     from robotics_experiments.config import load_config
     from robotics_experiments.rl import PolicyContract, PolicyInterface
@@ -202,7 +232,6 @@ def test_acceptance_includes_configured_range_safety_boundary() -> None:
 @pytest.mark.parametrize(
     ("overrides", "failed_gate"),
     [
-        ({"hover_envelope_utilization_mean": float("nan")}, "trace finiteness"),
         ({"success_rate": 0.94}, "success rate"),
         ({"collision_rate": 0.02}, "collision rate"),
         ({"min_closest_range_m": 0.399}, "minimum closest range"),

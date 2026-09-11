@@ -45,7 +45,11 @@ def _phase(
 def _inputs(tmp_path: Path):
     flight_parameters = load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters")
     return SimpleNamespace(
-        controller=SimpleNamespace(selected_settings=SimpleNamespace(hover_thrust_normalized=0.5)),
+        controller=SimpleNamespace(
+            selected_settings=SimpleNamespace(hover_thrust_normalized=0.5),
+            run_id="controller-run",
+            comparison_fingerprint="controller-fingerprint",
+        ),
         controller_path=tmp_path / "resolved/controller.json",
         controller_digest="controller-digest",
         flight_parameters=flight_parameters,
@@ -212,6 +216,7 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
         config=config,
         phases=tuple(config.rl.press.selected_stage().phases),
         comparison_fingerprint="fingerprint",
+        provenance={"procedural_smoke": False},
         attempts=[],
         selected=None,
         selected_attempt_index=None,
@@ -228,7 +233,10 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
             config=config,
             phases=tuple(config.rl.press.selected_stage().phases),
             comparison_fingerprint="fingerprint",
-            attempt={"hover_reset_distribution": {"source": "flight_parameters_policy_window"}},
+            attempt={
+                "provenance": {"procedural_smoke": False},
+                "hover_reset_distribution": {"source": "flight_parameters_policy_window"},
+            },
             selected=None,
             selected_policy_path=None,
             status="training",
@@ -243,7 +251,7 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
         "num_mini_batches": 8,
         "phase_maximum_simulated_seconds_per_env": [192.0, 1280.0],
     }
-    assert report["schema_version"] == 25
+    assert report["schema_version"] == 26
     assert report["reward_configuration"] == {
         "hover_stabilization": "uniform",
         "position_progress_weight": 0.1,
@@ -256,6 +264,7 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
         "terminal_failure_weight": 3.0,
     }
     assert report["hover_reset_distribution"] == {"source": "flight_parameters_policy_window"}
+    assert report["provenance"] == {"procedural_smoke": False}
     assert report["report_kind"] == report_kind
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
@@ -443,6 +452,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
             "attempt_index": attempt_index,
             "training_seed": seed,
             "worker_pid": train_rl.os.getpid() + 100 + attempt_index,
+            "provenance": {"procedural_smoke": False},
             "evaluations": [
                 {
                     "iteration": 1,
@@ -529,6 +539,8 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
     assert finalized["selected_attempt_index"] == 1
     assert [attempt["training_seed"] for attempt in finalized["attempts"]] == [42, 43]
     assert len({attempt["worker_pid"] for attempt in finalized["attempts"]}) == 2
+    assert finalized["provenance"]["procedural_smoke"] is False
+    assert finalized["provenance"]["inputs"]["controller"]["run_id"] == "controller-run"
 
 
 def test_campaign_stops_retrying_when_final_phase_did_not_improve(tmp_path: Path) -> None:
@@ -606,6 +618,8 @@ def test_campaign_parent_preserves_active_attempt_on_interruption(
         )
     report = json.loads((run_dir / "training_report.json").read_text())
     assert report["status"] == "interrupted"
+    assert report["provenance"]["procedural_smoke"] is False
+    assert report["provenance"]["inputs"]["controller"]["run_id"] == "controller-run"
     assert report["attempts"] == []
     assert report["active_attempt"] == {
         "attempt_index": 0,
@@ -664,7 +678,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 25,
+        "schema_version": 26,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -760,21 +774,46 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
     assert "progress=true reference=0.250000 stale=0 reached=false" in plateau_log
 
 
-def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path) -> None:
+def test_experiment_provenance_records_resolved_configuration_and_inputs(
+    *, monkeypatch, tmp_path: Path
+) -> None:
+    from robotics_experiments.config import load_config
+
     train_rl = _load_train_rl_module()
-    calls = []
-    outputs = iter(("abc123\n", " M changed.py\n"))
+    config_path = REPO_ROOT / "configs/train_press_hover_quad.yaml"
+    config = load_config(config_path)
+    inputs = _inputs(tmp_path)
 
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return SimpleNamespace(stdout=next(outputs))
+    def unexpected_subprocess(*_args, **_kwargs):
+        raise AssertionError("experiment provenance must not launch subprocesses")
 
-    monkeypatch.setattr(train_rl.subprocess, "run", fake_run)
-    metadata = train_rl._git_source_metadata(repo_root=tmp_path)  # noqa: SLF001
-    safe_directory = f"safe.directory={tmp_path.resolve()}"
-    assert calls[0][0][:3] == ["git", "-c", safe_directory]
-    assert calls[1][0][:3] == ["git", "-c", safe_directory]
-    assert metadata == {"source_commit": "abc123", "source_dirty": True}
+    monkeypatch.setattr(train_rl.subprocess, "run", unexpected_subprocess)
+    provenance = train_rl._experiment_provenance(  # noqa: SLF001 - persisted experiment record
+        config=config,
+        config_path=config_path,
+        inputs=inputs,
+        procedural_smoke=False,
+    )
+    recorded = json.loads(json.dumps(provenance, allow_nan=False))
+    assert recorded["config_path"] == str(config_path.resolve())
+    assert recorded["resolved_config"]["rl"]["training"]["gamma"] == config.rl.training.gamma
+    assert recorded["resolved_config"]["rl"]["press"]["curriculum"]["stages"][0]["hold_s"] == 30.0
+    assert list(recorded["resolved_config"]["vehicles"]) == list(config.vehicles)
+    assert recorded["runtime"]["python"] == sys.version
+    assert recorded["inputs"] == {
+        "controller": {
+            "path": str(inputs.controller_path),
+            "run_id": "controller-run",
+            "sha256": "controller-digest",
+            "comparison_fingerprint": "controller-fingerprint",
+        },
+        "flight_parameters": {
+            "path": str(inputs.flight_parameters_path),
+            "run_id": inputs.flight_parameters.run_id,
+            "sha256": "flight-parameters-digest",
+            "fingerprint": inputs.flight_parameters.artifact_fingerprint,
+        },
+    }
 
 
 def test_checkpoint_restore_loads_optimizer_and_iteration(tmp_path: Path) -> None:
