@@ -144,7 +144,7 @@ sudo_validated=false
 trackio_host="127.0.0.1"
 trackio_port="${RL_TRACKIO_PORT:-7860}"
 trackio_base_url="http://${trackio_host}:${trackio_port}/"
-trackio_primary_filter='^(train/02_progress/(recent_100_episode_return_mean|hover_envelope_occupancy_rate|episode_longest_hover_duration_mean_s|hover_envelope_utilization_mean)|train/03_reward/per_step_mean|train/04_optimization/(actor_relative_parameter_change|critic_return_mse|ppo_clipped_surrogate_loss)|val/01_acceptance/(all_checks_passed|success_rate|collision_rate|flight_failure_rate|minimum_closest_range_m|all_traces_finite)|val/02_hover/(envelope_occupancy_rate|episode_longest_duration_mean_s|episode_longest_duration_max_s|envelope_utilization_mean|position_envelope_utilization_mean|attitude_envelope_utilization_mean)|val/03_outcome/range_undershoot_rate)$'
+trackio_primary_filter='^(training/Mean|training/reward/|validation/)'
 trackio_url="${trackio_base_url}?project=${policy_name}&runs=attempt_01&smoothing=0&accordion=hidden&metric_filter=${trackio_primary_filter}"
 trackio_container_name="vv-rl-trackio.${artifact_run_id}"
 trackio_dir=".build/training/${policy_name}/${artifact_run_id}/monitoring"
@@ -275,7 +275,7 @@ serve_trackio_when_ready() {
                     "${trackio_base_url}api/get_metrics_for_run" ||
                     true
             )"
-            if [[ "${metrics}" == *'"train/01_reset/sample_count"'* ]]; then
+            if [[ "${metrics}" == *'"training/reset/Measured reset states (count)"'* ]]; then
                 printf '[%s] Trackio URL: %s (run: %s/attempt_01; metrics loaded)\n' \
                     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     "${trackio_url}" \

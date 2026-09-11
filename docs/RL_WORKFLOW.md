@@ -99,10 +99,11 @@ current order is `hover`, then `approach`.
 The hover stage starts around the common 0.48 m press target using paired poses
 drawn directly from every final policy window in the pinned flight-parameter
 traces. Position and attitude from one measured sample always stay together;
-the reset distribution adds no synthetic noise. Training requires 30 continuous
-seconds inside that measured envelope. The approach stage adds measured
-navigation-handoff resets while
-retaining target-local envelope resets. Both remain parts of the press task;
+the reset distribution adds no synthetic noise. Validation and acceptance
+require 30 continuous seconds inside that measured envelope. Hover training
+minimizes pose error throughout collection, including after a qualifying hold.
+The approach stage adds measured navigation-handoff resets while retaining
+target-local envelope resets. Both remain parts of the press task;
 neither activates the switch yet.
 
 Success uses only the measured position and pose bounds: asymmetric ENU axis
@@ -143,8 +144,10 @@ It does not qualify an existing actor; retrain to qualify against the expanded
 reset distribution.
 
 Collision is privileged training/evaluation state and is not added to the actor
-observation. Success, collision, other flight failure, and timeout remain
-mutually exclusive terminal classifications.
+observation. Evaluation success, collision, other flight failure, and timeout
+remain mutually exclusive completion classifications. Hover training terminates on
+physical failure and truncates at its collection limit; completing a hold does
+not end collection.
 
 ## Training campaign
 
@@ -178,23 +181,54 @@ The plateau detector reads only the configured metric, direction, minimum delta,
 and patience. It never reads the PPO reward or any acceptance check. The active
 curriculum stage owns the rule. Hover maximizes mean longest continuous-hover
 duration, requires a `0.01` second improvement, and declares a plateau after
-three stale evaluations. Approach minimizes mean measured pose-envelope
+five stale evaluations. Approach minimizes mean measured pose-envelope
 utilization, requires a `0.003` improvement, and declares a plateau after 10
 stale evaluations.
 
 Hover training uses a 40-second episode horizon; approach uses 45 seconds. The
-hover schedule trains 25 iterations at `3e-5`, then restores the best complete
-checkpoint and refines it for five iterations at `1e-5`. Both phases are
-evaluated every five updates, and three stale evaluations stop either phase.
-Training uses the same 0.40 m minimum range and 30-second hold as acceptance.
-Hover PPO makes one optimization pass over each rollout so policy updates stay
-close to current on-policy data.
+hover schedule trains 15 iterations at `3e-5`, then restores the best complete
+checkpoint and refines it for up to 100 iterations at `1e-6`. Both phases are
+evaluated every five updates. Five stale evaluations stop either phase. The
+25+5 comparison peaked at broad update 15 and deteriorated afterward, motivating
+earlier, gentler refinement with the same reward. Active monitoring may still
+interrupt a clearly deteriorating campaign. The first run of this schedule,
+`press-hover-gentle-refine-20260905`, was interrupted after 15 broad and 15
+refinement updates: mean longest hover declined at all three refinement checks,
+from 7.65 to 6.70 seconds, with zero success. The configuration records the tried
+maximum budget; diagnose the saved trajectories before another launch. See
+decision-log entry 94 for the outcome and continuation.
+
+Hover uses 4,096 environments with 256 policy steps per environment per update:
+12.8 simulated seconds per rollout and 1,048,576 transitions per PPO update.
+The broad phase allows 192 simulated seconds per environment and refinement
+allows 1,280, including resets. PPO uses one epoch and eight minibatches. Gamma,
+GAE lambda, exploration, action scales, and complete checkpoint restoration
+remain unchanged. Longer trajectories are an experimental choice; measured GPU
+utilization must be measured for each campaign. The 25+5 comparison averaged
+about 54% GPU utilization during training; rollout collection dominated update
+time, with about 21 seconds collecting and 0.1 seconds optimizing.
+
+Every hover training reset starts its episode clock at zero. The runner does
+not randomize initial episode lengths for hover. At 20 Hz, collection truncates
+after 800 steps (40 seconds), even when the 600-step hold has been reached.
+Physical failures remain terminal and use the same 0.40 m minimum range as
+acceptance. The explicit training/evaluation choice is passed through
+environment construction; evaluation still terminates on hold success.
+Actor and critic observations do not contain a clock or hold counters.
+
+The press environment sets `is_finite_horizon=False`. The
+[pinned Isaac Lab adapter](https://github.com/isaac-sim/IsaacLab/blob/37ddf626871758333d6ed89cf64ad702aef127d0/source/isaaclab_rl/isaaclab_rl/rsl_rl/vecenv_wrapper.py)
+passes truncations as `time_outs`;
+[RSL-RL 3.1.2](https://github.com/leggedrobotics/rsl_rl/blob/v3.1.2/rsl_rl/algorithms/ppo.py)
+adds the discounted critic value to timeout rewards before storing the transition. Failures do not receive that
+bootstrap. Isaac Lab clears each reset episode clock before collection, and
+increments it before checking completion.
 
 Approach runs 50 iterations at `1e-4`, 30 at `3e-5`, and 100 at `1e-5`. Its
 broad phase evaluates every
 ten updates and both refinement phases evaluate every five. Model zero and every
 cadence-aligned phase boundary are evaluated; there is no extra boundary update.
-Hover and approach both train against the complete 30-second hold, and every
+Both stages qualify against the complete 30-second hold, and every
 hover run uses the same measured reset population. Hover permits 30 attempted
 PPO updates and approach
 permits 180. Training advances after a phase reaches its maximum or its plateau
@@ -236,7 +270,7 @@ the reserved test seeds.
 
 Use the campaign-scoped Trackio database under
 `.build/training/press-hover/<run-id>/monitoring`. Each attempt is one Trackio
-run containing its `train/`, `val/`, and `system/` metrics; the selected attempt
+run containing its `training/`, `validation/`, and `system/` metrics; the selected attempt
 also receives `test/`. The standard monitor is:
 
 ```bash
@@ -252,17 +286,20 @@ metric names, and filters for the main learning and validation charts. Set
 values are recorded under each attempt's `evaluations` list in
 `training_report.json`. The wrapper keeps the live server under supervision and
 waits until the expected attempt contains its first reset metric before reporting
-it ready. All rate metrics end in `_rate` and are fractions in `[0, 1]`.
+it ready. Displayed rates explicitly identify fractions in `[0, 1]`; raw report keys
+retain their semantic names.
 
-Trackio uses only the lowercase `train/`, `val/`, `test/`, and `system/`
-namespaces. Numeric group prefixes keep related charts together. Validation and
+Trackio uses the `training/`, `validation/`, `test/`, and `system/`
+namespaces. Chart names spell out the quantity and units, with no numeric group
+codes or internal variable names. Presentation registry revision 19 changes
+labels only; historical dashboards retain their recorded labels. Validation and
 test share one ordered registry: acceptance status, success, collision, other
 flight failure, minimum range, trace finiteness, measured-envelope occupancy and
 utilization, mean and maximum episode-longest hover duration, range undershoot,
 timeout, completed episodes, and all 40 flight-parameter statistics. Acceptance
 is report metadata, not a Trackio namespace. Total attempted PPO updates are the
 X coordinate and never rewind when a refinement phase restores an earlier
-learner checkpoint; `train/05_schedule/checkpoint_update` records that learner
+learner checkpoint; `training/Updates in current learner checkpoint` records that learner
 position separately.
 
 `system/` is diagnostic-only and cannot influence PPO, plateau progress,
@@ -278,35 +315,45 @@ sampler failure terminates at the interval boundary with evidence preserved.
 The configured `0.95` GPU-utilization target is diagnostic: a miss is recorded
 as the measured bottleneck and never changes policy qualification.
 
-The press PPO reward has five signed contributions. Hover adds position and
-attitude utilization so both remain visible to the optimizer independently.
-Its `hover_stabilization` config selects either an `outside_only` cost that is
-zero while every measured hover-envelope check passes and uses weight 0.03
-after any check fails, or a `boundary_weighted` cost with weight 0.01 inside
-and 0.03 outside. Neither cost chooses the larger of position and attitude.
-Hover also uses a squared normalized-action
-cost alongside hold progress and terminal outcome, and sets `position_progress`
-and `predictive_barrier` to zero. In the approach stage, `position_progress`
-rewards reduction in target error until the measured position envelope is
-reached, `stabilization` is `1 / (1 + utilization)` inside that position
-envelope before its 0.01 weight, and the predictive range barrier remains
-active.
-`hold_progress` is `0.01` only when the current continuous hold exceeds the
-episode's previous longest hold, so leaving and repeating a shorter hold cannot
-collect the reward again. `terminal_outcome` is +1.5 on hold success and -3.0
-on every unsuccessful termination, including timeout. Position progress and
-the approach predictive barrier have weight 0.1. Contact remains a binding
-predicate without a separate PPO shaping term.
+The press PPO reward reports six signed contributions. Hover adds position
+and attitude utilization so both remain visible to the optimizer independently.
+Its `hover_stabilization` config selects `uniform` (weight 0.01 everywhere),
+`boundary_weighted` (0.01 inside the full measured envelope, 0.03 outside), or
+`outside_only` (zero inside, 0.03 outside). The revised hover setup selects
+`uniform`: `-0.01 * (position_utilization + attitude_utilization)`. This cost
+remains active for nonzero error inside the envelope and reaches zero at the
+desired pose. It never chooses the larger of position and attitude.
 
-Training uses `train/01_reset/` for the fixed reset population,
-`train/02_progress/` for hover progress, `train/03_reward/` for the five PPO
-reward contributions, `train/04_optimization/`, `train/05_schedule/`, and
-`train/06_performance/`. The reset group records its trace source in metadata
-and scalar sample count, ENU mean position error, mean/p95 linear and angular
-speed, and mean/p95/maximum position and attitude envelope utilization. Hover
-durations are seconds, utilization is normalized so 1 is the measured boundary,
-and every rate is a fraction in `[0, 1]`. Hardware telemetry is under
-numerically grouped `system/` paths.
+Hover retains the squared normalized-action cost and the -3.0 physical-failure
+penalty. Its `position_progress`, `predictive_barrier`, and `hold_progress`
+contributions are zero. Crossing the 30-second hold or reaching the 40-second
+collection limit adds no reward or penalty. Hold counters remain qualification
+and reporting state, without changing actor or critic observations.
+
+Approach rewards are unchanged: `position_progress` rewards reduction in
+target error until the measured position envelope is reached; `stabilization`
+is `0.01 / (1 + utilization)` inside that position envelope; the predictive
+range barrier remains active. `hold_progress` is 0.01 only when the current
+continuous hold exceeds the episode's previous longest hold. Its terminal
+outcome is +1.5 on success and -3.0 on unsuccessful completion, including
+timeout. Position progress and the predictive barrier have weight 0.1.
+Contact remains a binding failure predicate.
+
+Training uses `training/reset/` for the fixed reset population and
+`training/reward/` for the six PPO reward contributions. Other progress,
+optimizer, schedule, and performance charts use descriptive names under
+`training/`. Reset charts include position error, linear and angular speed,
+and position and attitude error relative to their hover limits. A value of 1
+is the measured limit; all fraction charts use `[0, 1]`. Hardware telemetry
+uses `system/training/`, `system/validation/`, and `system/test/`.
+
+Use **`validation/Mean longest continuous hover (seconds)`** to compare each
+checkpoint: it averages each evaluated episode's longest uninterrupted hold.
+`validation/Longest continuous hover in any episode (seconds)` shows the
+maximum. `training/Mean longest hover so far in active episodes (seconds)`
+reports ongoing training episodes and has a different averaging population.
+Successful-hold flight statistics spell out maximum absolute error, root mean
+square error, and the 95th and 99th percentiles with meters or radians.
 
 PPO minimizes the clipped policy surrogate plus the configured value-loss
 coefficient times the clipped critic return error, minus the entropy
@@ -342,12 +389,13 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 24 records the prepared acceptance criteria, the
-exact reward configuration, trace-backed reset distribution, and every attempt,
+`training_report.json` schema 25 records the prepared acceptance criteria, the
+exact reward configuration, resolved rollout settings and derived maximum
+simulated durations per phase, trace-backed reset distribution, and every attempt,
 phase parent, raw validation metrics, exact monitoring step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
-metric-registry revision 18 and comparison revision 35; older report shapes are
+metric-registry revision 19 and comparison revision 36; older report shapes are
 unsupported.
 
 After selection, the exported actor is immutable. A new uncached worker runs the
@@ -357,10 +405,16 @@ resulting raw `PolicyEvaluation` is the sole measured input to
 at least 0.95 success, zero collision, at least 0.40 m minimum closest
 range, exactly zero other flight failures, and the flight-parameters maximum,
 RMSE, p95, and p99 limit for every hover error signal. Hover statistics use only
-episodes that complete the 30-second hold. They cover the final 24 seconds; the
-first six seconds are the artifact-configured policy warmup. Until an episode
-succeeds, those statistics are unavailable rather than being calculated from a
-failed partial hold. The evaluator records every raw
+episodes that complete the 30-second hold. They cover the final 24 seconds of
+each episode's actual successful hold, ending at its completion time. Earlier recovery, the first six seconds of
+the hold (the artifact-configured policy warmup), failed episodes, and
+post-completion samples are excluded. The evaluator retains pose history on the
+GPU and transfers it once per seed; seeds, reset order, episode counts, and
+aggregation are unchanged. Comparison revision 35 and earlier used an
+episode-start window for these statistics, so their delayed-success statistics
+are not comparable to revision 36. Historical artifacts remain immutable.
+Until an episode succeeds, those statistics are unavailable rather than being
+calculated from a failed partial hold. The evaluator records every raw
 statistic in the `PolicyEvaluation` and `training_report.json`; acceptance adds
 no consumer-owned tolerance. Test data cannot affect training,
 phase advancement, checkpoint selection, or retries. A test failure ends the
@@ -426,5 +480,5 @@ For a press policy, correct behavior is a controlled, contact-free move to the
 task-owned range center followed by a stable hover inside the complete envelope
 embedded from the pinned flight-parameters artifact. Deploy-time completion
 uses that exact envelope for the configured 600 continuous samples, matching
-training and evaluation. It should not touch the switch, climb away, or perform
-a learned retreat. The routine's later `goto` step owns any return motion.
+evaluation and training qualification counters. It should not touch the
+switch, climb away, or perform a learned retreat. The routine's later `goto` step owns any return motion.

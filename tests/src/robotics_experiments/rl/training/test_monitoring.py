@@ -83,13 +83,13 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
         step=17,
     )
     expected_suffixes = tuple(spec.suffix for spec in EVALUATION_METRICS)
-    assert tuple(tag.removeprefix("val/") for tag in validation_tags) == expected_suffixes
+    assert tuple(tag.removeprefix("validation/") for tag in validation_tags) == expected_suffixes
     assert tuple(tag.removeprefix("test/") for tag in test_tags) == expected_suffixes
     report_values = {metric.name: metric.value for metric in evaluation.metrics}
     event_values = {tag: value for tag, value, _step in writer.events}
     for spec in EVALUATION_METRICS:
         expected = 1.0 if spec.raw_name is None else report_values[spec.raw_name]
-        assert event_values[f"val/{spec.suffix}"] == expected
+        assert event_values[f"validation/{spec.suffix}"] == expected
         assert event_values[f"test/{spec.suffix}"] == expected
     assert writer.options
     assert all(
@@ -99,8 +99,9 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
 
 def test_metric_registry_names_rates_and_units() -> None:
     registry = metric_registry_payload()
-    assert registry["revision"] == 18
-    assert all(spec.suffix == spec.suffix.lower() for spec in EVALUATION_METRICS)
+    assert registry["revision"] == 19
+    assert all("_" not in spec.suffix for spec in EVALUATION_METRICS)
+    assert "Mean longest continuous hover (seconds)" in {spec.suffix for spec in EVALUATION_METRICS}
     assert all(not spec.suffix.endswith("_percent") for spec in EVALUATION_METRICS)
     rate_specs = tuple(
         spec
@@ -109,7 +110,10 @@ def test_metric_registry_names_rates_and_units() -> None:
     )
     assert rate_specs
     assert all(spec.unit == "fraction" for spec in rate_specs)
-    assert next(spec.unit for spec in EVALUATION_METRICS if spec.suffix.endswith("_range_m")) == "m"
+    assert (
+        next(spec.unit for spec in EVALUATION_METRICS if spec.raw_name == "minimum_closest_range_m")
+        == "m"
+    )
 
 
 def test_reset_distribution_uses_one_ordered_training_group() -> None:
@@ -120,8 +124,8 @@ def test_reset_distribution_uses_one_ordered_training_group() -> None:
         step=0,
     )
     assert tags == (
-        "train/01_reset/sample_count",
-        "train/01_reset/position_envelope_utilization_mean",
+        "training/reset/Measured reset states (count)",
+        "training/reset/Mean position error relative to hover limit (1 = limit)",
     )
 
 
@@ -162,16 +166,16 @@ def test_system_metric_tags_are_complete_ordered_and_namespaced() -> None:
     writer = _Writer()
     tags = write_system_scalars(writer=writer, role="val", summary=summary, step=20)
     assert tags == (
-        "system/val/01_gpu/gpu_utilization_rate_mean",
-        "system/val/01_gpu/gpu_utilization_rate_p95",
-        "system/val/01_gpu/gpu_memory_used_gib_peak",
-        "system/val/01_gpu/gpu_memory_utilization_rate_peak",
-        "system/val/01_gpu/gpu_power_w_mean",
-        "system/val/01_gpu/gpu_temperature_c_max",
-        "system/val/02_process/process_resident_memory_gib_peak",
-        "system/val/02_process/process_cpu_cores_used_mean",
-        "system/val/03_throughput/duration_s",
-        "system/val/03_throughput/work_items_per_s",
+        "system/validation/Mean GPU utilization (fraction)",
+        "system/validation/95th percentile GPU utilization (fraction)",
+        "system/validation/Peak GPU memory used (GiB)",
+        "system/validation/Peak GPU memory utilization (fraction)",
+        "system/validation/Mean GPU power (watts)",
+        "system/validation/Maximum GPU temperature (degrees Celsius)",
+        "system/validation/Peak process memory (GiB)",
+        "system/validation/Mean CPU cores used",
+        "system/validation/Measurement interval duration (seconds)",
+        "system/validation/Completed episodes per second",
     )
 
 
@@ -224,18 +228,18 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
     checkpoint_events = [
         (value, step)
         for tag, value, step in writer.events
-        if tag == "train/05_schedule/checkpoint_update"
+        if tag == "training/Updates in current learner checkpoint"
     ]
     assert checkpoint_events == [(170.0, 1), (141.0, 2), (141.0, 3)]
     parameter_changes = {
         tag: value
         for tag, value, step in writer.events
-        if step == 1 and tag.endswith("relative_parameter_change")
+        if step == 1 and tag.startswith("training/Relative change in")
     }
-    assert parameter_changes["train/04_optimization/actor_relative_parameter_change"] > 0.0
-    assert parameter_changes["train/04_optimization/critic_relative_parameter_change"] > 0.0
+    assert parameter_changes["training/Relative change in policy weights"] > 0.0
+    assert parameter_changes["training/Relative change in value model weights"] > 0.0
     assert all(
-        tag.startswith(("train/", "val/", "test/", "system/"))
+        tag.startswith(("training/", "validation/", "test/", "system/"))
         for tag, _value, _step in writer.events
     )
     assert not any(
@@ -259,12 +263,12 @@ def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
     assert rsl_rl.monitoring_step(runner=runner) == 1
     assert runner.log_dir == "logs"
     assert {tag for tag, _value, _step in writer.events} >= {
-        "train/04_optimization/critic_return_mse",
-        "train/04_optimization/actor_relative_parameter_change",
-        "train/04_optimization/critic_relative_parameter_change",
-        "train/06_performance/rollout_time_s",
-        "train/06_performance/optimizer_update_time_s",
-        "train/06_performance/total_update_time_s",
+        "training/Critic return prediction loss",
+        "training/Relative change in policy weights",
+        "training/Relative change in value model weights",
+        "training/Rollout collection time per update (seconds)",
+        "training/PPO optimization time per update (seconds)",
+        "training/Total time per update (seconds)",
     }
 
 
@@ -309,5 +313,5 @@ def test_training_chunk_advances_when_restored_learner_iteration_repeats() -> No
     assert [
         (value, step)
         for tag, value, step in writer.events
-        if tag == "train/05_schedule/checkpoint_update"
+        if tag == "training/Updates in current learner checkpoint"
     ] == [(1.0, 1), (1.0, 2)]

@@ -127,6 +127,7 @@ def _step(
     sample: PressApproachInput[np.ndarray] | None = None,
     approach_enabled: bool = True,
     reward: PressApproachRewardConfig = _REWARD,
+    training: bool = False,
 ):
     return step_press_approach(
         state=_state() if state is None else state,
@@ -138,6 +139,7 @@ def _step(
         flight_parameters=_ENVELOPE,
         hold_steps=100,
         approach_enabled=approach_enabled,
+        training=training,
     )
 
 
@@ -184,83 +186,36 @@ def test_predictive_barrier_penalizes_only_projected_range_undershoot() -> None:
     assert unsafe.rewards.predictive_barrier[0] == pytest.approx(-0.025)
 
 
-def test_hover_reward_penalizes_current_pose_without_predictive_barrier() -> None:
-    state = _state(range_m=0.50)
-    recovered = step_press_approach(
-        state=state,
-        sample=_sample(range_m=0.41),
-        goal_cfg=_GOAL,
-        reward_cfg=_REWARD,
-        termination_cfg=_TERMINATION,
-        minimum_range_m=0.40,
-        flight_parameters=_ENVELOPE,
-        hold_steps=100,
+@pytest.mark.parametrize("choice", ["uniform", "boundary_weighted", "outside_only"])
+@pytest.mark.parametrize(
+    ("range_m", "attitude_error_rad", "inside"),
+    [(0.41, 0.0, True), (0.45, 0.01, True), (0.511, 0.0, False), (0.41, 0.11, False)],
+)
+def test_hover_reward_penalizes_current_pose_without_predictive_barrier(
+    *, choice, range_m, attitude_error_rad, inside
+) -> None:
+    result = _step(
+        sample=_sample(range_m=range_m, attitude_error_rad=attitude_error_rad),
         approach_enabled=False,
+        reward=replace(_REWARD, hover_stabilization=choice),
     )
-    degraded = step_press_approach(
-        state=state,
-        sample=_sample(range_m=0.60, attitude_error_rad=np.deg2rad(20.0)),
-        goal_cfg=_GOAL,
-        reward_cfg=_REWARD,
-        termination_cfg=_TERMINATION,
-        minimum_range_m=0.40,
-        flight_parameters=_ENVELOPE,
-        hold_steps=100,
-        approach_enabled=False,
+    assert bool(result.hover_evaluation.inside[0]) == inside
+    weight = _REWARD.stabilization_weight
+    if choice == "outside_only" and inside:
+        weight = 0.0
+    elif choice != "uniform" and not inside:
+        weight = _REWARD.outside_envelope_weight
+    utilization = (
+        result.hover_evaluation.position_utilization[0]
+        + result.hover_evaluation.attitude_utilization[0]
     )
-    inside = _step(sample=_sample(range_m=0.509), approach_enabled=False)
-    position_only = _step(sample=_sample(range_m=0.511), approach_enabled=False)
-    attitude_only = _step(
-        sample=_sample(range_m=0.41, attitude_error_rad=0.11),
-        approach_enabled=False,
-    )
-    both = _step(
-        sample=_sample(range_m=0.511, attitude_error_rad=0.11),
-        approach_enabled=False,
-    )
-    outside_only_inside = _step(
-        sample=_sample(range_m=0.509),
-        approach_enabled=False,
-        reward=replace(_REWARD, hover_stabilization="outside_only"),
-    )
-    outside_only_failed = _step(
-        sample=_sample(range_m=0.511, attitude_error_rad=0.11),
-        approach_enabled=False,
-        reward=replace(_REWARD, hover_stabilization="outside_only"),
-    )
-    assert recovered.rewards.position_progress[0] == 0.0
-    assert degraded.rewards.position_progress[0] == 0.0
-    assert recovered.rewards.predictive_barrier[0] == 0.0
-    assert degraded.rewards.predictive_barrier[0] == 0.0
-    assert recovered.rewards.stabilization[0] == 0.0
-    assert degraded.rewards.stabilization[0] < -_REWARD.stabilization_weight
-    assert inside.hover_evaluation.inside[0]
-    assert inside.rewards.stabilization[0] == pytest.approx(
-        -_REWARD.stabilization_weight
-        * (
-            inside.hover_evaluation.position_utilization[0]
-            + inside.hover_evaluation.attitude_utilization[0]
-        )
-    )
-    assert not both.hover_evaluation.inside[0]
-    assert both.rewards.stabilization[0] == pytest.approx(
-        -_REWARD.outside_envelope_weight
-        * (
-            both.hover_evaluation.position_utilization[0]
-            + both.hover_evaluation.attitude_utilization[0]
-        )
-    )
-    assert both.rewards.stabilization[0] == pytest.approx(
-        position_only.rewards.stabilization[0] + attitude_only.rewards.stabilization[0]
-    )
-    assert outside_only_inside.rewards.stabilization[0] == 0.0
-    assert outside_only_failed.rewards.stabilization[0] == pytest.approx(
-        -_REWARD.outside_envelope_weight
-        * (
-            outside_only_failed.hover_evaluation.position_utilization[0]
-            + outside_only_failed.hover_evaluation.attitude_utilization[0]
-        )
-    )
+    assert result.rewards.stabilization[0] == pytest.approx(-weight * utilization)
+    assert result.rewards.position_progress[0] == 0.0
+    assert result.rewards.predictive_barrier[0] == 0.0
+    if range_m == 0.41 and attitude_error_rad == 0.0:
+        assert result.rewards.stabilization[0] == 0.0
+    elif weight:
+        assert result.rewards.stabilization[0] < 0.0
 
 
 def test_hover_penalizes_action_effort_but_approach_does_not() -> None:
@@ -295,44 +250,73 @@ def test_repeated_hold_below_episode_record_earns_no_progress() -> None:
     assert result.rewards.hold_progress[0] == 0.0
 
 
-def test_continuous_success_outscores_repeated_near_success() -> None:
-    reward = replace(
-        _REWARD,
-        position_progress_weight=0.0,
-        stabilization_weight=0.0,
-        predictive_barrier_weight=0.0,
+@pytest.mark.parametrize("training", [True, False])
+def test_hover_hold_qualifies_evaluation_but_training_collects_full_horizon(*, training) -> None:
+    state = _state(range_m=0.415)
+    expected_reward = _step(
+        sample=_sample(range_m=0.415), approach_enabled=False, training=training
+    ).rewards.total
+    for step in range(800):
+        result = step_press_approach(
+            state=state,
+            sample=_sample(range_m=0.415, time_out=step == 799),
+            goal_cfg=_GOAL,
+            reward_cfg=_REWARD,
+            termination_cfg=_TERMINATION,
+            minimum_range_m=0.40,
+            flight_parameters=_ENVELOPE,
+            hold_steps=600,
+            approach_enabled=False,
+            training=training,
+        )
+        np.testing.assert_allclose(result.rewards.total, expected_reward)
+        assert result.rewards.hold_progress[0] == 0.0
+        assert result.rewards.terminal_outcome[0] == 0.0
+        if result.termination.terminated[0] or result.termination.time_out[0]:
+            break
+        state = result.state
+    assert step + 1 == (800 if training else 600)
+    assert bool(result.termination.success[0]) == (not training)
+    assert bool(result.termination.terminated[0]) == (not training)
+    assert bool(result.termination.time_out[0]) == training
+
+
+@pytest.mark.parametrize("previous_record", [0, 40, 600, 800])
+def test_hover_reward_does_not_depend_on_previous_hold_record(*, previous_record) -> None:
+    state = replace(
+        _state(range_m=0.415),
+        stable_goal_steps=np.array([20]),
+        longest_stable_goal_steps=np.array([previous_record]),
+    )
+    result = _step(state=state, sample=_sample(range_m=0.415), approach_enabled=False)
+    assert result.rewards.hold_progress[0] == 0.0
+    np.testing.assert_allclose(
+        result.rewards.total,
+        _step(sample=_sample(range_m=0.415), approach_enabled=False).rewards.total,
     )
 
-    def discounted_return(*, break_before_success: bool) -> float:
-        state = _state(range_m=0.41)
-        total = 0.0
-        discount = 1.0
-        for step in range(800):
-            inside = not break_before_success or step % 100 != 99
-            result = step_press_approach(
-                state=state,
-                sample=_sample(
-                    range_m=0.41 if inside else 0.60,
-                    time_out=step == 799,
-                ),
-                goal_cfg=_GOAL,
-                reward_cfg=reward,
-                termination_cfg=_TERMINATION,
-                minimum_range_m=0.40,
-                flight_parameters=_ENVELOPE,
-                hold_steps=100,
-                approach_enabled=False,
-            )
-            total += discount * float(result.rewards.total[0])
-            if bool(result.termination.terminated[0] | result.termination.time_out[0]):
-                break
-            discount *= 0.995
-            state = result.state
-        return total
 
-    assert discounted_return(break_before_success=False) > discounted_return(
-        break_before_success=True
+@pytest.mark.parametrize(
+    "sample",
+    [
+        _sample(range_m=0.39),
+        _sample(altitude_m=0.1),
+        _sample(upright=0.5),
+        _sample(lateral_m=0.4),
+        _sample(body_collision=True),
+        _sample(pusher_collision=True),
+    ],
+)
+def test_hover_physical_failure_is_terminal_even_at_collection_timeout(*, sample) -> None:
+    result = _step(
+        sample=replace(sample, time_out=np.array([True])),
+        approach_enabled=False,
+        training=True,
     )
+    assert result.termination.terminated[0]
+    assert not result.termination.success[0]
+    assert not result.termination.time_out[0]
+    assert result.rewards.terminal_outcome[0] == -3.0
 
 
 @pytest.mark.parametrize(
@@ -387,7 +371,11 @@ def test_reset_replaces_only_selected_environment() -> None:
     assert reset.closest_range_m.tolist() == [0.41, 0.48]
 
 
-def test_numpy_and_torch_transitions_match() -> None:
+@pytest.mark.parametrize("choice", ["uniform", "boundary_weighted", "outside_only"])
+@pytest.mark.parametrize("approach_enabled", [False, True])
+@pytest.mark.parametrize("training", [False, True])
+@pytest.mark.parametrize("time_out", [False, True])
+def test_numpy_and_torch_transitions_match(*, choice, approach_enabled, training, time_out) -> None:
     sample = _sample(
         range_m=0.415,
         lateral_m=0.004,
@@ -395,7 +383,11 @@ def test_numpy_and_torch_transitions_match() -> None:
         angular_speed_radps=0.02,
         attitude_error_rad=0.01,
     )
-    numpy_result = _step(sample=sample)
+    sample = replace(sample, time_out=np.array([time_out]))
+    reward = replace(_REWARD, hover_stabilization=choice)
+    numpy_result = _step(
+        sample=sample, reward=reward, approach_enabled=approach_enabled, training=training
+    )
     torch_sample = PressApproachInput(
         **{
             field.name: torch.as_tensor(getattr(sample, field.name))
@@ -413,17 +405,23 @@ def test_numpy_and_torch_transitions_match() -> None:
         state=torch_state,
         sample=torch_sample,
         goal_cfg=_GOAL,
-        reward_cfg=_REWARD,
+        reward_cfg=reward,
         termination_cfg=_TERMINATION,
         minimum_range_m=0.40,
         flight_parameters=_ENVELOPE,
         hold_steps=100,
-        approach_enabled=True,
+        approach_enabled=approach_enabled,
+        training=training,
     )
     for field in fields(PressApproachRewardTerms):
         np.testing.assert_allclose(
             getattr(numpy_result.rewards, field.name),
             getattr(torch_result.rewards, field.name).cpu().numpy(),
+        )
+    for field in fields(numpy_result.termination):
+        np.testing.assert_array_equal(
+            getattr(numpy_result.termination, field.name),
+            getattr(torch_result.termination, field.name).cpu().numpy(),
         )
     for field in fields(PressApproachState):
         np.testing.assert_allclose(

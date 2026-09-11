@@ -81,7 +81,7 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 24
+_REPORT_SCHEMA_VERSION = 25
 
 
 class _TrackioWriter:
@@ -215,6 +215,7 @@ def _git_source_metadata(*, repo_root: Path) -> dict[str, str | bool]:
 def _build_env(
     *,
     task_id: str,
+    training: bool,
     seed: int,
     num_envs: int | None,
     experiment_config: ExperimentConfig,
@@ -228,6 +229,7 @@ def _build_env(
 
     return make_isaac_lab_env(
         task_id=task_id,
+        training=training,
         experiment_config=experiment_config,
         controller_settings=controller_settings,
         seed=seed,
@@ -460,6 +462,7 @@ def _evaluation_worker_main(
             raise ValueError(f"unsupported evaluation workload role {workload_role!r}")
         env, _env_cfg = _build_env(
             task_id=config.rl.training.task_id,
+            training=False,
             seed=seeds[0],
             num_envs=evaluation_config.episodes_per_seed,
             experiment_config=config,
@@ -787,6 +790,8 @@ def _training_report(
     reset_distribution = hover_reset_distribution
     if reset_distribution is None and attempts:
         reset_distribution = attempts[0].get("hover_reset_distribution")
+    rollout_steps = config.rl.training.num_steps_per_env
+    rollout_s = rollout_steps / config.rl.policy_rate_hz
     return {
         "schema_version": _REPORT_SCHEMA_VERSION,
         "report_kind": "campaign",
@@ -798,6 +803,18 @@ def _training_report(
             asdict(acceptance_criteria) if acceptance_criteria is not None else None
         ),
         "reward_configuration": asdict(config.rl.press.reward),
+        "rollout_configuration": {
+            "num_envs": config.rl.num_envs,
+            "num_steps_per_env": rollout_steps,
+            "policy_rate_hz": config.rl.policy_rate_hz,
+            "simulated_seconds_per_env_per_update": rollout_s,
+            "transitions_per_update": config.rl.num_envs * rollout_steps,
+            "num_learning_epochs": config.rl.training.num_learning_epochs,
+            "num_mini_batches": config.rl.training.num_mini_batches,
+            "phase_maximum_simulated_seconds_per_env": [
+                phase.max_iterations * rollout_s for phase in phases
+            ],
+        },
         "phases": [asdict(phase) for phase in phases],
         "plateau_criteria": asdict(criteria),
         "metric_registry": metric_registry_payload(),
@@ -1230,6 +1247,7 @@ def _train_and_validate_attempt(
             _report(f"attempt setup START attempt={attempt_index + 1} seed={seed}")
             env, env_cfg = _build_env(
                 task_id=training_config.task_id,
+                training=True,
                 seed=seed,
                 num_envs=config.rl.num_envs,
                 experiment_config=config,
@@ -1526,7 +1544,7 @@ def _train_and_validate_attempt(
                 )
                 write_training_progress()
                 branch_iteration = 0
-                randomize_episode_lengths = True
+                randomize_episode_lengths = config.rl.press.selected_stage().name != "hover"
                 for phase_index, phase in enumerate(phases):
                     parent = _select_attempt_candidate(
                         criteria=plateau_criteria,

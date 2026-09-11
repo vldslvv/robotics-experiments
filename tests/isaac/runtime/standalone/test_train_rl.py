@@ -110,7 +110,7 @@ def test_trackio_writer_preserves_metric_names_steps_and_run_identity(
         training_seed=42,
         resume=resume,
     )
-    writer.add_scalar("val/02_hover/episode_longest_duration_mean_s", 4.25, 25)
+    writer.add_scalar("validation/Mean longest continuous hover (seconds)", 4.25, 25)
     writer.flush()
     writer.close()
 
@@ -124,7 +124,7 @@ def test_trackio_writer_preserves_metric_names_steps_and_run_identity(
         "auto_log_gpu": False,
         "auto_log_cpu": False,
     }
-    assert logged == [({"val/02_hover/episode_longest_duration_mean_s": 4.25}, 25)]
+    assert logged == [({"validation/Mean longest continuous hover (seconds)": 4.25}, 25)]
     assert finished == [True]
 
 
@@ -198,16 +198,19 @@ def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
     assert selected[1]["stage"] == "hover"
 
 
-def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) -> None:
+@pytest.mark.parametrize("report_kind", ["campaign", "attempt"])
+def test_report_schema_records_rollouts_and_disjoint_workloads(
+    *, tmp_path: Path, report_kind
+) -> None:
     train_rl = _load_train_rl_module()
     from robotics_experiments.config import load_config
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    config = load_config(REPO_ROOT / "configs" / "train_press_hover_quad.yaml")
     acceptance_criteria = _acceptance_criteria(config)
     report = train_rl._training_report(  # noqa: SLF001
         run_dir=tmp_path,
         config=config,
-        phases=tuple(config.rl.training.phases),
+        phases=tuple(config.rl.press.selected_stage().phases),
         comparison_fingerprint="fingerprint",
         attempts=[],
         selected=None,
@@ -219,9 +222,30 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         acceptance_criteria=acceptance_criteria,
         hover_reset_distribution={"source": "flight_parameters_policy_window"},
     )
-    assert report["schema_version"] == 24
+    if report_kind == "attempt":
+        report = train_rl._attempt_report(  # noqa: SLF001 - script report contract
+            run_dir=tmp_path,
+            config=config,
+            phases=tuple(config.rl.press.selected_stage().phases),
+            comparison_fingerprint="fingerprint",
+            attempt={"hover_reset_distribution": {"source": "flight_parameters_policy_window"}},
+            selected=None,
+            selected_policy_path=None,
+            status="training",
+        )
+    assert report["rollout_configuration"] == {
+        "num_envs": 4096,
+        "num_steps_per_env": 256,
+        "policy_rate_hz": 20.0,
+        "simulated_seconds_per_env_per_update": 12.8,
+        "transitions_per_update": 1_048_576,
+        "num_learning_epochs": 1,
+        "num_mini_batches": 8,
+        "phase_maximum_simulated_seconds_per_env": [192.0, 1280.0],
+    }
+    assert report["schema_version"] == 25
     assert report["reward_configuration"] == {
-        "hover_stabilization": "boundary_weighted",
+        "hover_stabilization": "uniform",
         "position_progress_weight": 0.1,
         "stabilization_weight": 0.01,
         "outside_envelope_weight": 0.03,
@@ -232,7 +256,7 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
         "terminal_failure_weight": 3.0,
     }
     assert report["hover_reset_distribution"] == {"source": "flight_parameters_policy_window"}
-    assert report["report_kind"] == "campaign"
+    assert report["report_kind"] == report_kind
     assert report["attempt_execution"] == "isolated_process"
     assert report["workloads"] == {
         "validation": {
@@ -248,8 +272,9 @@ def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) ->
             "episode_count": 300,
         },
     }
-    assert report["acceptance_criteria"]["minimum_range_m"] == 0.40
-    assert len(report["acceptance_criteria"]["hover_limits"]) == 10
+    if report_kind == "campaign":
+        assert report["acceptance_criteria"]["minimum_range_m"] == 0.40
+        assert len(report["acceptance_criteria"]["hover_limits"]) == 10
 
 
 def test_attempt_report_preserves_unavailable_metrics_as_null(tmp_path: Path) -> None:
@@ -639,7 +664,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 24,
+        "schema_version": 25,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -675,9 +700,9 @@ def test_training_metrics_are_small_and_namespaced() -> None:
     source = (
         REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py"
     ).read_text()
-    assert '"train/02_progress/hover_envelope_occupancy_rate"' in source
-    assert '"train/02_progress/hover_envelope_utilization_mean"' in source
-    assert '"train/03_reward/per_step_mean"' in source
+    assert '"training/Fraction of samples inside hover limits"' in source
+    assert '"training/Mean worst pose error relative to hover limit (1 = limit)"' in source
+    assert '"training/reward/Total reward per step"' in source
     assert '"train/cumulative_outcome/' not in source
     assert '"train/target/' not in source
     assert "_percent" not in source

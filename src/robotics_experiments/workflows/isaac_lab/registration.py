@@ -96,6 +96,7 @@ def register_isaac_lab_tasks() -> bool:
 def make_isaac_lab_env(
     *,
     task_id: str,
+    training: bool,
     experiment_config: ExperimentConfig,
     controller_settings: ControllerSettings,
     seed: int | None = None,
@@ -142,6 +143,7 @@ def make_isaac_lab_env(
             raise ValueError("the press task requires a pinned flight parameters")
         if hover_reset_samples is None:
             raise ValueError("the press task requires pinned hover reset samples")
+        env_kwargs["training"] = training
         env_kwargs["flight_parameters"] = flight_parameters
         env_kwargs["hover_reset_samples"] = hover_reset_samples
     env = gym.make(task_id, **env_kwargs).unwrapped

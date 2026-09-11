@@ -1,7 +1,9 @@
 # Press policy training decision log
 
-Status: PRESS-HOVER OBJECTIVE SIMPLIFIED; METRIC CONTRACT REPAIRED; CLEAN
-CAMPAIGN PENDING (2026-08-23).
+Status: HOVER COMPARISON COMPLETE; GENTLE REFINEMENT INTERRUPTED AFTER
+THREE DECLINING VALIDATIONS (2026-09-05). No accepted policy. Continue from
+entry 94 before requesting another hover campaign; approach remains out of scope.
+
 
 This is the chronological record for press-policy scratch training, checkpoint
 selection, acceptance, and deployment decisions. Controller fitting and its
@@ -2772,3 +2774,199 @@ the workflow ends. Existing TensorBoard event files remain historical output;
 they are not converted. Rename `tensorboard_step` to `monitoring_step` and
 advance the strict training report to schema 24. `training_report.json` remains
 the exact source for validation and acceptance values.
+
+
+### 92. Separate continuous hover learning from hold qualification
+
+Date: 2026-09-04.
+
+Prepare one combined revision. Train the actor to reduce commanded-position
+and attitude error continuously; retain the measured envelope and 30-second
+continuous hold as validation and acceptance requirements.
+
+The historical baseline in entries 88-89 used the uniform 0.01 summed pose
+cost, 32,768 environments, and 32 rollout steps per environment (1.6 simulated
+seconds). Update 25 reached 2.650167 seconds mean longest hover and 7.70 seconds
+maximum. After restoring that learner and taking five refinement updates,
+`press-hover-trace-motion-refine-20260903` reached 4.281167 seconds mean and
+6.30 seconds maximum, with 0.124014 occupancy, 0.106667 other flight failures,
+and zero success or collision. These are different checkpoints: the 7.70-second
+maximum must not be attributed to the 4.281167-second mean checkpoint. The
+following five updates collapsed to 3.011667 seconds mean and 0.993333 other
+flight failures. Exact values remain in that run's
+`attempt_01_seed_42/attempt_report.json`; its campaign report records the
+interruption.
+
+The later boundary-weighted run `20260903T224323Z.81551` was not a reproduction
+of that reward. It ended validation-failed: at monitoring update 30, mean
+longest hover was 0.205833 seconds, maximum 1.40 seconds, occupancy 0.016616,
+and other flight failure 0.073333, with zero success or collision. The
+outside-only campaigns `20260903T231249Z.96394` and
+`20260903T233328Z.104980` were interrupted. The first retained validation
+through update 20 (0.162 seconds mean, 0.55 seconds maximum); the second
+retained model zero only. They provide no accepted policy. Their exact reward
+choices and partial evaluations remain in their producer-owned reports.
+
+Restore `uniform` alongside `boundary_weighted` and `outside_only`, and
+select it in the existing hover config:
+`-0.01 * (position_utilization + attitude_utilization)`. Nonzero pose error
+inside the envelope still costs reward; the desired pose has zero pose cost.
+Keep the squared normalized-action cost and physical-failure penalty. Hover
+has no longest-hold bonus, success bonus, or timeout penalty. Approach rewards
+remain unchanged.
+
+Hover training continues after reaching the hold. Every reset starts at elapsed
+time zero and preserves the paired measured pose and motion distribution.
+Collision and flight failure terminate; 800 policy steps at 20 Hz truncate
+collection at 40 seconds. The pinned Isaac Lab/RSL-RL adapter retains timeout
+value bootstrapping. One explicit training/evaluation choice passes through
+environment construction. Evaluation still terminates after 600 continuous
+qualifying steps. Actor and critic observations are unchanged; hold counters
+remain qualification and reporting state.
+
+Use 4,096 environments and 256 rollout steps: 12.8 simulated seconds per
+environment and 1,048,576 transitions per update. Run seed 42 only, with 25
+broad updates at `3e-5` and five refinement updates at `1e-5`, one PPO epoch
+and eight minibatches. Restore the complete validation-selected learner and
+reset environments before refinement. Gamma, GAE lambda, exploration, action
+scales, and checkpoint restoration are unchanged. The phase budgets are 320
+and 64 simulated seconds per environment, including resets. Validate every
+five updates; maximize mean longest continuous hover with a 0.01-second
+minimum improvement and five stale evaluations. Ordinary stagnation cannot
+stop the broad comparison before update 25; clear deterioration may still
+justify an actively monitored interruption.
+
+Correct the evaluator's flight-statistics window to the final 24 seconds of
+each actual successful 30-second hold, ending at that episode's completion.
+Exclude recovery, hold warmup, failed episodes, and post-completion samples.
+Keep pose history on the GPU and transfer it once per seed. Seeds, reset
+ordering, episode counts, and aggregation remain unchanged. Diagnostic trace
+observation entries now identify normalized ENU target error, not range or
+metres. Advance comparison revision to 36; older delayed-success statistics
+used an episode-start window and cannot be treated as corrected evidence.
+Keep every historical artifact intact. Report schema 25 records resolved
+rollout settings and derived phase durations in campaign and attempt reports.
+
+Continuation: first request the existing procedural GPU smoke check, then a
+separate campaign with this single revised setup. It is not an exact historical
+reproduction. Keep the campaign-scoped Trackio monitor available with zero
+smoothing and complete metric names. Inspect mean/maximum longest hover,
+occupancy, separate position/attitude utilization, success, collision, and
+flight-failure rates during the run. Measure GPU utilization and report the
+limiting factor if it misses the diagnostic target; longer trajectories alone
+establish no learning or utilization improvement. This implementation does not
+launch training, deploy a policy, or shut down the host.
+
+
+### 93. Refine earlier and expose readable dashboard metrics
+
+Date: 2026-09-05.
+
+The user authorized the 25+5 comparison, a subsequent full hover-only campaign,
+and host poweroff afterward. Approach and the full curriculum remain outside
+this request.
+
+`press-hover-continuous-20260905` completed all 30 attempted updates in about
+33 minutes. It failed validation and published nothing. The best checkpoint,
+broad update 15, reached 7.648167 seconds mean longest hover and 10.90 seconds
+maximum, with 0.208528 occupancy, 2.796095 position utilization, 0.326801
+attitude utilization, and 0.11 other flight failures. No evaluation completed
+the 30-second hold and no collision occurred. Broad updates 20 and 25 fell to
+4.115 and 3.438 seconds mean. Restoring update 15 and refining five updates at
+`1e-5` finished at 4.260833 seconds mean, 7.80 seconds maximum, and 0.862919
+attitude utilization. Exact evidence is in that campaign's
+`training_report.json` and `attempt_01_seed_42/attempt_report.json`.
+
+The best mean exceeded the earlier uniform checkpoint's 4.281167 seconds by
+about 79%, but neither qualified. Boundary-weighted and outside-only runs
+remained much weaker (entry 92). Comparison revision 36 corrects the successful
+hold statistics window; historical statistics remain distinct. These runs had
+no successful holds, so longest duration and occupancy remain useful comparisons.
+The revised campaign used about 54% mean GPU utilization during training versus
+about 74% for the historical shorter rollouts. Collection took about 21 seconds
+per update and optimization about 0.1 seconds; longer trajectories did not
+improve utilization or throughput.
+
+Keep the uniform reward and existing rollout, exploration, and discount settings.
+Start a fresh seed-42 hover attempt with 15 broad updates at `3e-5`, then restore
+its complete validation-selected learner and allow up to 100 refinement updates
+at `1e-6`. The earlier switch preserves the observed useful broad checkpoint;
+the lower rate tests whether smaller updates preserve and improve it. The phase
+budgets are 192 and 1,280 simulated seconds per environment, including resets.
+Validate every five updates and retain the 0.01-second improvement / five-check
+plateau rule. These are maximum budgets, not a requirement to continue after
+plateau or clear deterioration. No external checkpoint initialization is used.
+
+Presentation registry revision 19 replaces internal abbreviations and numeric
+group codes across validation, test, training, reward, reset, and system charts
+with quantity names and units. The primary progress chart is
+`validation/Mean longest continuous hover (seconds)`. Fraction charts say so;
+normalized pose errors identify 1 as the hover limit. Raw report metrics,
+qualification, report schema 25, and comparison revision 36 are unchanged.
+Historical artifacts and dashboards retain their original labels.
+
+Continuation: run full pre-commit checks, launch the fresh hover-only campaign,
+keep its separate Trackio database available with zero smoothing and complete
+metric names, inspect every validation checkpoint, record its outcome, and
+power off the host as requested.
+
+
+### 94. Stop declining refinement and retain the useful broad checkpoint
+
+Date: 2026-09-05.
+
+`press-hover-gentle-refine-20260905` reproduced every raw validation value of
+`press-hover-continuous-20260905` through broad update 15. It restored that
+complete learner, reset the environments, and refined at `1e-6`. Three full
+300-episode validations then declined:
+
+| Attempted updates | Mean longest hover (s) | Maximum hover (s) | Occupancy | Position utilization | Attitude utilization | Other flight failures |
+| --- | --- | --- | --- | --- | --- | --- |
+| 15 | 7.648167 | 10.90 | 0.208528 | 2.796095 | 0.326801 | 0.110000 |
+| 20 | 7.352500 | 10.50 | 0.200818 | 2.765957 | 0.293350 | 0.110000 |
+| 25 | 6.955167 | 9.70 | 0.191455 | 2.713377 | 0.281635 | 0.113333 |
+| 30 | 6.702167 | 8.95 | 0.185209 | 2.681399 | 0.288414 | 0.113333 |
+
+Success and collision rates were zero at every checkpoint. The best mean
+still exceeded the historical useful uniform checkpoint by about 79%, but
+remained far below qualification. The smaller refinement steps preserved hover
+better than `1e-5`, yet did not improve it. Mean position error decreased while
+continuous hover, maximum hold, and occupancy worsened. This is evidence against
+simply extending the schedule or reducing the learning rate again; it does not
+establish a unique cause or justify another untested reward change.
+
+Active monitoring stopped the campaign after 15 broad and 15 refinement updates,
+before the 100-update refinement maximum and before the five-check plateau rule.
+Three consistent declines and no successful hold provided no demonstrated path
+toward acceptance. The campaign report is `interrupted`; its active-attempt
+pointer and partial attempt report preserve all seven complete validation
+checkpoints. The partial attempt report retains its last `training` status and
+30 validated attempted updates. It is partial evidence, not a completed attempt.
+No final test ran, and no policy was published or deployed. The coordinator and
+learner handled interrupts; the remaining evaluation subprocesses were then
+stopped with their campaign container.
+
+Completed training intervals averaged 0.533737 GPU utilization, with a peak
+12.71875 GiB of device memory used. The 25+5 comparison averaged 0.538577,
+with 12.939453 GiB peak. Neither met the diagnostic 0.95 utilization target;
+rollout collection dominated update time. The smaller learning rate does not
+change that workload cost.
+
+Presentation registry 19 was verified against all 79 live Trackio metrics:
+no old `train/` or `val/` prefixes and no underscore-separated internal names.
+The primary metric is `validation/Mean longest continuous hover (seconds)`.
+The new database is under the gentle-refinement run's `monitoring/` directory;
+its dashboard used port 7861, while the 25+5 comparison used port 7860. Both
+use zero smoothing and full metric names. Host poweroff stops these services;
+the persistent databases remain available after reboot via `make trackio-rl`.
+
+Derived plots, CSV values, and source-report digests are under
+`.build/benchmarks/press-hover-comparisons/20260905/`. Producer reports and
+historical artifacts remain unchanged. Full pre-commit checks run before launch and again after recording outcomes.
+The final check log is `/tmp/hover-final-precommit.log`.
+
+Continuation: do not automatically relaunch the current maximum schedule.
+Inspect the preserved best and declining policies' position-drift and failure
+trajectories before proposing another reward or procedure change. Keep the
+measured hover limits and 30-second hold unchanged, and keep approach outside
+scope. This request ends with evidence preservation and host poweroff.

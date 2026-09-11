@@ -13,21 +13,21 @@ curriculum:
       hold_s: 30.0
       episode_length_s: 40.0
       phases:
-        - max_iterations: 25
+        - max_iterations: 15
           evaluation_interval: 5
           learning_rate: 3.0e-5
           schedule: fixed
           entropy_coef: 0.0
-        - max_iterations: 5
+        - max_iterations: 100
           evaluation_interval: 5
-          learning_rate: 1.0e-5
+          learning_rate: 1.0e-6
           schedule: fixed
           entropy_coef: 0.0
       plateau:
         metric_name: episode_longest_hover_duration_mean_s
         direction: maximize
         minimum_delta: 0.01
-        patience_evaluations: 4
+        patience_evaluations: 5
     - name: approach
       reset_mix:
         - source: measured_navigation_handoff

@@ -210,15 +210,14 @@ def _report_worst_episode_trace(
             continue
         observation = observation_trace[step][episode]
         action = action_trace[step][episode]
-        relative_position = observation[:3].tolist()
+        normalized_target_error = observation[:3].tolist()
         body_velocity = observation[10:13].tolist()
         body_angular_velocity = observation[13:16].tolist()
         report(
             f"press approach worst trace seed={seed} episode={episode} step={step} "
             f"time_s={(step + 1) * step_dt:.3f} "
-            f"range_before_m={relative_position[0]:.6f} "
+            f"normalized_target_error_enu={normalized_target_error} "
             f"range_after_m={float(range_trace[step][episode].item()):.6f} "
-            f"lateral_m={relative_position[1]:.6f} vertical_m={relative_position[2]:.6f} "
             f"body_velocity_mps={body_velocity} "
             f"body_angular_velocity_radps={body_angular_velocity} "
             f"action={action.tolist()} "
@@ -277,10 +276,14 @@ def _evaluate_seed(
     range_trace: list[torch.Tensor] = []
     body_collision_trace: list[torch.Tensor] = []
     pusher_collision_trace: list[torch.Tensor] = []
-    hover_samples: dict[str, list[np.ndarray]] = {name: [] for name in _HOVER_SIGNAL_UNITS}
     reset_result = env.reset(seed=seed)
     observation = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     horizon = int(env.max_episode_length)
+    hover_history = torch.empty(
+        (horizon, episode_count, len(_HOVER_SIGNAL_UNITS)),
+        dtype=torch.float32,
+        device=env.device,
+    )
     progress_interval = max(1, horizon // 10)
     started_at = time.monotonic()
     report(
@@ -301,9 +304,9 @@ def _evaluate_seed(
         if result is None:
             raise RuntimeError("press approach environment did not publish a transition result")
         termination = result.termination
-        if step < hold_steps:
-            for name, values in _hover_signal_values(result=result).items():
-                hover_samples[name].append(values.detach().cpu().numpy())
+        hover_history[step] = torch.stack(
+            tuple(_hover_signal_values(result=result).values()), dim=-1
+        ).detach()
         current_range = result.range_m
         hover_occupancy_sums += torch.where(active, result.strict_goal.float(), 0.0)
         utilization = torch.stack(
@@ -425,12 +428,24 @@ def _evaluate_seed(
         f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
         f"timeout={summary.timeout_rate:.3f}"
     )
-    successful = success.detach().cpu().numpy()
+    # Each episode owns its completion time; recovery and later auto-reset
+    # samples do not belong to its successful continuous hold.
+    history = hover_history[: step + 1].cpu().numpy()
+    window_steps = hold_steps - policy_warmup_steps
+    episode_step_counts = trajectory_sample_count.cpu().tolist()
+    successful_windows = [
+        history[end - window_steps : end, index]
+        for index, (episode, end) in enumerate(zip(episodes, episode_step_counts, strict=True))
+        if episode.success
+    ]
+    successful_values = (
+        np.stack(successful_windows, axis=1)
+        if successful_windows
+        else np.empty((0, 0, len(_HOVER_SIGNAL_UNITS)))
+    )
     successful_hover_samples = {
-        name: (np.stack(values, axis=0)[policy_warmup_steps:hold_steps, successful].reshape(-1),)
-        if bool(np.any(successful))
-        else ()
-        for name, values in hover_samples.items()
+        name: (successful_values[:, :, signal].reshape(-1),) if successful_windows else ()
+        for signal, name in enumerate(_HOVER_SIGNAL_UNITS)
     }
     return (
         episodes,

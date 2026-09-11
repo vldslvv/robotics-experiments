@@ -56,14 +56,14 @@ _PAD_PRIM_PATH = "/World/envs/env_.*/Drone/pusher/pad"
 # about Z faces the physical button toward world -X; applying this same fixed
 # correction to its root pose yields the canonical pi-about-Z provider pose.
 _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
-_TRAINING_REWARD_TERMS = (
-    "position_progress",
-    "stabilization",
-    "predictive_barrier",
-    "action_effort",
-    "hold_progress",
-    "terminal_outcome",
-)
+_TRAINING_REWARD_TERMS = {
+    "position_progress": "Position correction reward per step",
+    "stabilization": "Pose stabilization reward per step",
+    "predictive_barrier": "Predicted range violation cost per step",
+    "action_effort": "Action effort cost per step",
+    "hold_progress": "New longest hover reward per step",
+    "terminal_outcome": "Episode outcome reward per step",
+}
 
 
 @configclass
@@ -128,6 +128,7 @@ def make_switch_press_env_cfg(
         policy_interface="press",
         policy_config=rl.press.policy,
         state_space=0,
+        is_finite_horizon=False,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
             render_interval=decimation,
@@ -200,6 +201,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         experiment_config: ExperimentConfig,
         flight_parameters: FlightParameters,
         hover_reset_samples: HoverResetSamples,
+        training: bool,
         policy_contract=None,
         render_mode: str | None = None,
         **kwargs,
@@ -217,6 +219,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 f"press task requires exactly one switch joint, found {len(switch_joint_ids)}"
             )
         self._switch_joint_id = int(switch_joint_ids[0])
+        self._training = training
         self._flight_parameters = flight_parameters
         self._hover_reset_position_errors = torch.as_tensor(
             hover_reset_samples.position_error_enu_m,
@@ -421,7 +424,12 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        time_out = self.episode_length_buf >= self.max_episode_length - 1
+        # DirectRLEnv increments the clock before checking completion.
+        horizon = self.max_episode_length
+        if self._training and self._stage.name == "hover":
+            time_out = self.episode_length_buf >= horizon
+        else:
+            time_out = self.episode_length_buf >= horizon - 1
         press = self._experiment_config.rl.press
         self._task_sample = self._sample(time_out=time_out)
         self._task_result = step_press_approach(
@@ -434,6 +442,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             flight_parameters=self._flight_parameters,
             hold_steps=round(self._stage.hold_s * self.cfg.policy_rate_hz),
             approach_enabled=self._stage.name == "approach",
+            training=self._training,
         )
         result = self._task_result
         self._task_state = result.state
@@ -446,30 +455,30 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         ended = self.reset_buf
         self._completed_episode_count += ended.count_nonzero()
         self.extras["log"] = {
-            "train/02_progress/completed_episodes": self._completed_episode_count,
-            "train/02_progress/hover_envelope_occupancy_rate": (result.strict_goal.float().mean()),
-            "train/02_progress/episode_longest_hover_duration_mean_s": (
+            "training/Completed training episodes (count)": self._completed_episode_count,
+            "training/Fraction of samples inside hover limits": (result.strict_goal.float().mean()),
+            "training/Mean longest hover so far in active episodes (seconds)": (
                 result.state.longest_stable_goal_steps.float().mean() * self.step_dt
             ),
-            "train/02_progress/hover_envelope_utilization_mean": (
+            "training/Mean worst pose error relative to hover limit (1 = limit)": (
                 result.state.normalized_pose_error.mean()
             ),
-            "train/02_progress/position_envelope_utilization_mean": (
+            "training/Mean position error relative to hover limit (1 = limit)": (
                 result.hover_evaluation.position_utilization.mean()
             ),
-            "train/02_progress/attitude_envelope_utilization_mean": (
+            "training/Mean attitude error relative to hover limit (1 = limit)": (
                 result.hover_evaluation.attitude_utilization.mean()
             ),
         }
         self.extras["log"].update(
             {
-                f"train/03_reward/{name}": getattr(result.rewards, name).mean()
-                for name in _TRAINING_REWARD_TERMS
+                f"training/reward/{label}": getattr(result.rewards, name).mean()
+                for name, label in _TRAINING_REWARD_TERMS.items()
             }
         )
         self.extras["log"].update(
             {
-                "train/03_reward/per_step_mean": result.rewards.total.mean(),
+                "training/reward/Total reward per step": result.rewards.total.mean(),
             }
         )
         return result.rewards.total

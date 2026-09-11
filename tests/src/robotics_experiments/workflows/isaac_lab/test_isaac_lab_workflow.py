@@ -108,7 +108,8 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
     }
 
 
-def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeypatch):
+@pytest.mark.parametrize("training", [False, True])
+def test_contract_and_mode_are_forwarded_to_task_config_and_environment(*, monkeypatch, training):
     registration = importlib.import_module("robotics_experiments.workflows.isaac_lab.registration")
     from robotics_experiments.rl import PolicyInterface
 
@@ -137,6 +138,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
 
     env, returned_cfg = registration.make_isaac_lab_env(
         task_id=registration.SWITCH_PRESS_TASK_ID,
+        training=training,
         experiment_config="training-yaml",
         controller_settings="aligned-controller",
         seed=123,
@@ -155,6 +157,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     assert calls["gym"][1]["flight_parameters"] is flight_parameters
     assert calls["gym"][1]["hover_reset_samples"] is hover_reset_samples
     assert env_cfg.scene.num_envs == 8
+    assert calls["gym"][1]["training"] is training
 
 
 def test_drone_hover_task_import_and_config_when_isaac_lab_available():

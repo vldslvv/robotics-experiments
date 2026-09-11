@@ -366,8 +366,13 @@ def step_press_approach(
     flight_parameters: FlightParameters,
     hold_steps: int,
     approach_enabled: bool,
+    training: bool,
 ) -> PressApproachResult[ArrayT]:
-    """Advance the stable, contact-free approach objective exactly once."""
+    """Advance pose costs and hold qualification once.
+
+    Hover training continues after hold completion; evaluation and approach
+    terminate on success. Physical failures always terminate.
+    """
     current_range = sample.relative_switch_pos_m[..., 0]
     alignment_error = _norm(sample.relative_switch_pos_m[..., 1:3])
     relative_attitude_error = quaternion_geodesic_error_rad(
@@ -416,7 +421,7 @@ def step_press_approach(
     collision = sample.body_collision_flag | sample.pusher_collision_flag
     ordinary_flight_failure = flight_failure & ~collision
     failure = collision | ordinary_flight_failure
-    success = (stable_goal_steps >= hold_steps) & ~failure
+    success = (stable_goal_steps >= hold_steps) & ~failure & (approach_enabled or not training)
     terminated = success | failure
     time_out = sample.time_out & ~terminated
     termination = PressApproachTerminationFlags(
@@ -466,6 +471,8 @@ def step_press_approach(
                 0.0,
                 reward_cfg.outside_envelope_weight,
             )
+        elif reward_cfg.hover_stabilization == "uniform":
+            stabilization_weight = reward_cfg.stabilization_weight
         elif reward_cfg.hover_stabilization == "boundary_weighted":
             stabilization_weight = _where(
                 envelope_evaluation.inside,
@@ -488,10 +495,16 @@ def step_press_approach(
         stabilization=stabilization,
         predictive_barrier=predictive_barrier,
         action_effort=action_effort,
-        hold_progress=reward_cfg.hold_progress_weight * hold_progress_steps,
+        hold_progress=(
+            reward_cfg.hold_progress_weight * hold_progress_steps
+            if approach_enabled
+            else _zeros_like(value=normalized_pose_error)
+        ),
         terminal_outcome=(
             reward_cfg.terminal_success_weight * success
             - reward_cfg.terminal_failure_weight * unsuccessful_termination
+            if approach_enabled
+            else -reward_cfg.terminal_failure_weight * failure
         ),
     )
     successor = PressApproachState(

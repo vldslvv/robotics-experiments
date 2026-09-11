@@ -77,7 +77,7 @@ fi
 if [ "${STALE_TRACKIO}" = true ]; then
     printf '["train/unrelated"]\\n'
 else
-    printf '["train/01_reset/sample_count"]\\n'
+    printf '["training/reset/Measured reset states (count)"]\\n'
 fi
 exit 0
 """,
@@ -234,7 +234,7 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
     )
     assert "smoothing=0&accordion=hidden&metric_filter=" in console
     assert "complete metric names with smoothing=0" in console
-    assert "train/01_reset" not in next(
+    assert "training/reset/" not in next(
         line for line in console.splitlines() if "Trackio URL:" in line
     )
     assert "training_report.json" in console

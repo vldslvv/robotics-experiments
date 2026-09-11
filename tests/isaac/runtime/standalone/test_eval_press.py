@@ -11,7 +11,11 @@ from types import SimpleNamespace
 import pytest
 
 from robotics_experiments.controller import ControllerSettings
-from robotics_experiments.flight_parameters import SignalStatistics, load_flight_parameters
+from robotics_experiments.flight_parameters import (
+    SignalStatistics,
+    load_flight_parameters,
+    summarize_signal,
+)
 from tests.support.paths import REPO_ROOT
 
 _FLIGHT_PARAMETERS = load_flight_parameters(
@@ -164,20 +168,24 @@ def test_approach_evaluation_aggregation() -> None:
     assert summary.min_closest_range_m == pytest.approx(0.39)
 
 
-def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
+@pytest.mark.parametrize("success_ends", [(60, 60), (64, 72), (60, 72), (0, 0)])
+def test_seed_rollout_reseeds_and_uses_each_successful_hold_window(*, success_ends) -> None:
     torch = pytest.importorskip("torch")
     from robotics_experiments.rl.press import PressApproachRewardTerms
     from robotics_experiments.workflows.isaac_lab import evaluate_press_approach_policy
 
     reward_names = tuple(field.name for field in fields(PressApproachRewardTerms)) + ("total",)
+    batch_size = 3
+    hold_steps = 60
+    warmup_steps = 12
 
     class FakePolicy:
-        def __call__(self, observation):
+        def __call__(self, observation, /):
             return torch.zeros((observation.shape[0], 4))
 
     class FakeEnv:
         device = "cpu"
-        max_episode_length = 2
+        max_episode_length = 80
         step_dt = 0.5
 
         def __init__(self):
@@ -188,63 +196,68 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         def reset(self, *, seed):
             self.seeds.append(seed)
             self.step_count = 0
-            observation = torch.zeros((2, 34))
-            observation[:, 6] = 1.0
-            observation[:, 19] = 1.0
-            return {"policy": observation}, {}
+            return {"policy": torch.zeros((batch_size, 34))}, {}
 
-        def step(self, _action):
+        def step(self, _action, /):
             self.step_count += 1
-            first = self.step_count == 1
-            finished = self.step_count == 2
-            success = torch.tensor([finished, False])
-            timeout = torch.tensor([False, finished])
+            step = self.step_count
+            # Early recovery, hold warmup, failed episodes and post-completion
+            # samples are deliberately much larger than the qualifying values.
+            values = torch.tensor(
+                [
+                    step / 1000 if end - hold_steps + warmup_steps < step <= end else 9.0
+                    for end in (*success_ends, 0)
+                ]
+            )
+            success = torch.tensor([step == end for end in (*success_ends, 0)])
+            timeout = torch.tensor(
+                [step == self.max_episode_length and end == 0 for end in (*success_ends, 0)]
+            )
+            clear = torch.zeros(batch_size, dtype=torch.bool)
+            # The third episode fails physically before either successful hold.
+            collision = clear.clone()
+            collision[2] = step == 20
+            stable_steps = torch.tensor(
+                [
+                    max(0, min(hold_steps, step - end + hold_steps)) if end else 0
+                    for end in (*success_ends, 0)
+                ]
+            )
             self.press_approach_result = SimpleNamespace(
                 state=SimpleNamespace(
-                    closest_range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
-                    normalized_pose_error=torch.tensor([0.0, 2.0]),
-                    stable_goal_steps=torch.tensor([self.step_count, 0]),
-                    longest_stable_goal_steps=torch.tensor([self.step_count, 0]),
+                    closest_range_m=torch.full((batch_size,), 0.41),
+                    normalized_pose_error=torch.ones(batch_size),
+                    stable_goal_steps=stable_steps,
+                    longest_stable_goal_steps=stable_steps,
                 ),
-                range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
-                range_error_m=torch.tensor([0.0, 0.04 if first else 0.02]),
-                alignment_error_m=torch.zeros(2),
-                attitude_error_rad=torch.zeros(2),
-                linear_speed_mps=torch.zeros(2),
-                angular_speed_radps=torch.zeros(2),
-                contact_clear=torch.ones(2, dtype=torch.bool),
-                strict_goal=torch.tensor([True, False]),
+                range_m=torch.full((batch_size,), 0.41),
+                strict_goal=stable_steps > 0,
                 hover_evaluation=SimpleNamespace(
-                    position_error_enu_m=torch.tensor([[0.0, 0.0, 0.0], [9.0, 9.0, 9.0]]),
-                    horizontal_position_error_m=torch.tensor([0.0, 9.0]),
-                    position_error_m=torch.tensor([0.0, 9.0]),
-                    attitude_error_rpy_rad=torch.tensor([[0.0, 0.0, 0.0], [9.0, 9.0, 9.0]]),
-                    tilt_error_rad=torch.tensor([0.0, 9.0]),
-                    orientation_error_rad=torch.tensor([0.0, 9.0]),
-                    position_utilization=torch.tensor([0.0, 2.0]),
-                    attitude_utilization=torch.zeros(2),
+                    position_error_enu_m=values[:, None].expand(-1, 3),
+                    horizontal_position_error_m=values,
+                    position_error_m=values,
+                    attitude_error_rpy_rad=values[:, None].expand(-1, 3),
+                    tilt_error_rad=values,
+                    orientation_error_rad=values,
+                    position_utilization=torch.ones(batch_size),
+                    attitude_utilization=torch.zeros(batch_size),
                 ),
                 termination=SimpleNamespace(
                     success=success,
-                    collision=torch.zeros(2, dtype=torch.bool),
-                    body_collision=torch.zeros(2, dtype=torch.bool),
-                    pusher_collision=torch.zeros(2, dtype=torch.bool),
-                    flight_failure=torch.zeros(2, dtype=torch.bool),
-                    range_undershoot=torch.zeros(2, dtype=torch.bool),
+                    collision=collision,
+                    body_collision=collision,
+                    pusher_collision=clear,
+                    flight_failure=clear,
+                    range_undershoot=clear,
                     time_out=timeout,
                 ),
-                rewards=SimpleNamespace(**{name: torch.ones(2) for name in reward_names}),
+                rewards=SimpleNamespace(**{name: torch.ones(batch_size) for name in reward_names}),
             )
-            terminated = success
-            truncated = timeout
-            observation = torch.zeros((2, 34))
-            observation[:, 6] = 1.0
-            observation[:, 19] = 1.0
             return (
-                {"policy": observation},
-                torch.zeros(2),
-                terminated,
-                truncated,
+                {"policy": torch.zeros((batch_size, 34))},
+                torch.zeros(batch_size),
+                success | collision,
+                timeout,
                 {},
             )
 
@@ -253,24 +266,42 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
     result = evaluate_press_approach_policy(
         env=env,
         policy=FakePolicy(),
-        seeds=(202,),
-        episodes_per_seed=2,
-        hold_steps=2,
-        flight_parameters=_FLIGHT_PARAMETERS,
+        seeds=(202, 303),
+        episodes_per_seed=batch_size,
+        hold_steps=hold_steps,
+        flight_parameters=replace(_FLIGHT_PARAMETERS, policy_warmup_s=6.0),
         report=reports.append,
         trace_worst_episode=True,
     )
-    assert env.seeds == [202]
-    assert result.summary.success_rate == 0.5
-    assert result.summary.timeout_rate == 0.5
-    assert len(result.hover_statistics) == 10
-    assert all(statistics.maximum_absolute == 0.0 for statistics in result.hover_statistics)
+    assert env.seeds == [202, 303]
+    successful_count = sum(end > 0 for end in success_ends)
+    assert result.summary.episodes == 6
+    assert result.summary.success_rate == pytest.approx(successful_count / batch_size)
+    assert result.summary.timeout_rate == pytest.approx((2 - successful_count) / batch_size)
+    assert result.summary.collision_rate == pytest.approx(1 / batch_size)
+    if successful_count:
+        expected_values = [
+            step / 1000
+            for end in success_ends
+            for step in range(end - hold_steps + warmup_steps + 1, end + 1)
+        ]
+        assert len(result.hover_statistics) == 10
+        for statistics in result.hover_statistics:
+            expected = summarize_signal(
+                name=statistics.name, unit=statistics.unit, values=expected_values * 2
+            )
+            for field in fields(statistics):
+                if field.name not in {"name", "unit"}:
+                    assert getattr(statistics, field.name) == pytest.approx(
+                        getattr(expected, field.name)
+                    )
+    else:
+        assert not result.hover_statistics
     assert {reward.name for reward in result.reward_means} == set(reward_names)
     assert {reward.mean for reward in result.reward_means} == {1.0}
-    assert any(
-        "worst trace seed=202 episode=0 closest_range_m=0.410000" in message for message in reports
-    )
     assert any("worst trace seed=202 episode=0 step=0" in message for message in reports)
+    assert any("normalized_target_error_enu=" in message for message in reports)
+    assert not any("range_before_m=" in message or "lateral_m=" in message for message in reports)
 
 
 def _config():

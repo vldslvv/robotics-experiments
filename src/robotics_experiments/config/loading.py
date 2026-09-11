@@ -355,7 +355,7 @@ def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
     ):
         raise ValueError("active press stage reset weights must sum to one")
     reward = press.reward
-    if reward.hover_stabilization not in {"outside_only", "boundary_weighted"}:
+    if reward.hover_stabilization not in {"uniform", "outside_only", "boundary_weighted"}:
         raise ValueError(
             "unsupported rl.press.reward.hover_stabilization: " f"{reward.hover_stabilization!r}"
         )

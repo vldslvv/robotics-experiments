@@ -265,13 +265,13 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert stage.plateau.minimum_delta == 0.003
     assert stage.plateau.patience_evaluations == 10
     hover_stage = config.rl.press.curriculum.stages[0]
-    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (25, 5)
-    assert tuple(phase.learning_rate for phase in hover_stage.phases) == (3.0e-5, 1.0e-5)
+    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (15, 100)
+    assert tuple(phase.learning_rate for phase in hover_stage.phases) == (3.0e-5, 1.0e-6)
     assert tuple(phase.evaluation_interval for phase in hover_stage.phases) == (5, 5)
     assert hover_stage.plateau.metric_name == "episode_longest_hover_duration_mean_s"
     assert hover_stage.plateau.direction == "maximize"
     assert hover_stage.plateau.minimum_delta == 0.01
-    assert hover_stage.plateau.patience_evaluations == 4
+    assert hover_stage.plateau.patience_evaluations == 5
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
     assert training.attempt_seeds == (42, 43, 44)
@@ -288,10 +288,13 @@ def test_press_hover_uses_one_ppo_epoch_per_rollout():
     policy = config.rl.press.policy
     reward = config.rl.press.reward
     assert config.rl.training.num_learning_epochs == 1
+    assert config.rl.num_envs == 4096
+    assert config.rl.training.num_steps_per_env == 256
+    assert config.rl.training.num_mini_batches == 8
     assert config.rl.training.attempt_seeds == (42,)
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
-    assert reward.hover_stabilization == "boundary_weighted"
+    assert reward.hover_stabilization == "uniform"
     assert reward.stabilization_weight == 0.01
     assert reward.outside_envelope_weight == 0.03
     assert reward.action_effort_weight == 1.0
@@ -353,7 +356,7 @@ def test_press_hover_outside_only_changes_only_reward_choice():
     baseline = load_config(_ROOT / "train_press_hover_quad.yaml")
     comparison = load_config(_ROOT / "train_press_hover_outside_only_quad.yaml")
     assert comparison.rl.press.reward.hover_stabilization == "outside_only"
-    assert replace(comparison.rl.press.reward, hover_stabilization="boundary_weighted") == (
+    assert replace(comparison.rl.press.reward, hover_stabilization="uniform") == (
         baseline.rl.press.reward
     )
     assert comparison.rl.press.curriculum == baseline.rl.press.curriculum

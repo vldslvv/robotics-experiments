@@ -7,11 +7,13 @@ defaults:
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
-  num_envs: 32768
+  num_envs: 4096
   episode_length_s: 40.0
   action:
     max_body_velocity_mps: 0.5
   press:
+    reward:
+      hover_stabilization: uniform
     curriculum:
       active_stage: hover
     policy:
@@ -24,7 +26,7 @@ rl:
     evaluation_worker_timeout_s: 600.0
     telemetry_sample_interval_s: 1.0
     gpu_utilization_target_rate: 0.95
-    num_steps_per_env: 32
+    num_steps_per_env: 256
     gamma: 0.995
     lam: 0.95
     clip_param: 0.2

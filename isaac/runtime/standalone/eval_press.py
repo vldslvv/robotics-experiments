@@ -64,6 +64,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         raise ValueError("configured flight parameters differ from policy metadata")
     env, env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
+        training=False,
         experiment_config=config,
         controller_settings=metadata.controller_settings,
         seed=seeds[0],
