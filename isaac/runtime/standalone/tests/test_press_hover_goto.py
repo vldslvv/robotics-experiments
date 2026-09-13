@@ -19,6 +19,7 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import random
@@ -956,6 +957,7 @@ def main() -> None:
         help="accepted for integration-runner compatibility; ignored by this Isaac Lab gate",
     )
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--alignment-report", type=Path)
     parser.add_argument("--diag", action="store_true", help="log per-step flight diagnostics")
     parser.add_argument("--seed", type=int, default=_DEFAULT_SEED)
     parser.add_argument("--num-envs", type=int, default=None)
@@ -986,7 +988,30 @@ def main() -> None:
             config_path = os.environ[_CONFIG_PATH_ENV]
         except KeyError as exc:
             raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
-        _run(args=args, config=load_config(config_path))
+        config = load_config(config_path)
+        if args.alignment_report:
+            if args.contact_chain or args.ctbr_sanity:
+                raise ValueError("alignment qualification requires the hover/goto check")
+            artifact, _path = _controller_artifact(config=config)
+            report = {
+                "schema_version": 1,
+                "passed": False,
+                "settings_fingerprint": artifact.settings_fingerprint,
+                "flight_parameters_fingerprint": artifact.flight_parameters_fingerprint,
+                "failures": ["integration has not completed"],
+            }
+            with args.alignment_report.open("x") as stream:
+                json.dump(report, stream)
+        try:
+            _run(args=args, config=config)
+        except Exception as exc:
+            if args.alignment_report:
+                report["failures"] = [str(exc)]
+                args.alignment_report.write_text(json.dumps(report, indent=2) + "\n")
+            raise
+        if args.alignment_report:
+            report.update(passed=True, failures=[])
+            args.alignment_report.write_text(json.dumps(report, indent=2) + "\n")
         if args.contact_chain:
             _report("press contact-chain validation PASSED")
         elif args.ctbr_sanity:

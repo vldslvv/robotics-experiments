@@ -287,7 +287,9 @@ the current contents and the intended home for that kind of code.
   match the exact flight-parameters fingerprint; a consumer must not resolve a
   newer artifact implicitly after recording provenance.
 - When launching an RL training run for the user, provide a run-scoped
-  Trackio database and report the local URL and monitoring directory. Keep
+  Trackio database and report the local URL and monitoring directory. Always
+  provide Trackio or similar monitoring links as plain URLs, not labeled
+  Markdown links or inline code. Keep
   monitoring available while the run is active unless the user asks otherwise.
   Use zero smoothing and show complete metric names so raw validation,
   acceptance, and training values remain visible; `training_report.json` is the

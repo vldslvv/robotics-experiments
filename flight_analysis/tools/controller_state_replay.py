@@ -1737,7 +1737,7 @@ def _report(
         target_angular_acceleration_flu=isaac_angular_acceleration_array,
         px4_angular_acceleration_flu=px4_angular_acceleration_flu,
     )
-    outer_loop_metrics: dict[str, float] = {}
+    outer_loop_metrics: dict[str, float | list[float]] = {}
     vertical_setpoint_delay_scan: list[dict] = []
     if control_mode == "velocity":
         used_time = np.asarray(used_t)
@@ -1788,7 +1788,15 @@ def _report(
             px4_acceleration_setpoint_z_enu=px4_acceleration_setpoint_z,
             maximum_delay_steps=3,
         )
+        velocity_input_error = (
+            isaac_filtered_velocity_array
+            - local_velocity_ned[np.asarray(used_replay_indices)] @ _NED_TO_ENU
+        )
         outer_loop_metrics = {
+            "linear_velocity_input_rmse_mps": [
+                _root_mean_square(values=velocity_input_error[:, axis]) for axis in range(3)
+            ],
+            "linear_velocity_input_mean_error_mps": np.mean(velocity_input_error, axis=0).tolist(),
             **_collective_boundary_metrics(
                 target_desired_collective=isaac_desired_collective_array,
                 px4_attitude_collective=px4_attitude_collective,

@@ -514,6 +514,14 @@ def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
                 f"rl.press.reward.{name} must be finite and non-negative, got {value!r}"
             )
     evaluation = press.evaluation
+    for name in (
+        "feasibility_position_gain_per_s",
+        "feasibility_velocity_damping",
+        "feasibility_yaw_gain_per_s",
+    ):
+        value = getattr(evaluation, name)
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(f"rl.press.evaluation.{name} must be finite and non-negative")
     validation_seeds = tuple(evaluation.validation_seeds)
     test_seeds = tuple(evaluation.test_seeds)
     if not validation_seeds or len(set(validation_seeds)) != len(validation_seeds):

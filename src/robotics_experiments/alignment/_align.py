@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import subprocess
@@ -37,6 +38,7 @@ from robotics_experiments.alignment._models import (
 )
 from robotics_experiments.config import load_config
 from robotics_experiments.flight_parameters import (
+    FlightParameters,
     evaluate_hover_pose,
     load_flight_parameters,
     validate_flight_parameters_bundle,
@@ -615,12 +617,7 @@ def _validate_pair(
         raise ValueError(f"incompatible controller definitions: {', '.join(mismatches)}")
 
 
-def _flight_parameters_qualification(
-    *,
-    target: ControllerDefinition,
-    target_traces: tuple[ProbeTrace, ...],
-    repo_root: Path,
-) -> tuple[str, str, list[str]]:
+def _load_qualification_flight_parameters(*, target: ControllerDefinition) -> FlightParameters:
     run_dir_value = os.environ.get("ROBOTICS_ALIGNMENT_RUN_DIR")
     pinned_artifact = (
         Path(run_dir_value) / "flight_parameters" if run_dir_value else Path("missing")
@@ -630,7 +627,7 @@ def _flight_parameters_qualification(
     else:
         artifact_path = Path(target.flight_parameters_artifact)
         if not artifact_path.is_absolute():
-            artifact_path = repo_root / artifact_path
+            artifact_path = Path(__file__).resolve().parents[3] / artifact_path
     validate_flight_parameters_bundle(artifact_path)
     flight_parameters = load_flight_parameters(artifact_path)
     if (
@@ -638,6 +635,12 @@ def _flight_parameters_qualification(
         or flight_parameters.source_backend != "px4-sitl"
     ):
         raise ValueError("flight parameters are incompatible with controller alignment")
+    return flight_parameters
+
+
+def _flight_parameters_qualification(
+    *, flight_parameters: FlightParameters, target_traces: tuple[ProbeTrace, ...]
+) -> tuple[str, str, list[str]]:
     try:
         trace = next(item for item in target_traces if item.profile == "stability-hover-pose")
     except StopIteration as exc:
@@ -668,6 +671,104 @@ def _flight_parameters_qualification(
             f"flight-parameters attitude utilization={attitude_utilization:.6g} exceeds 1"
         )
     return flight_parameters.run_id, flight_parameters.artifact_fingerprint, reasons
+
+
+def _fitting_candidates(
+    *, target: ControllerDefinition, outcome: _SearchOutcome
+) -> tuple[CandidateScore, ...]:
+    response_candidates = tuple(
+        candidate
+        for candidate in outcome.candidate_scores
+        if candidate.usable and outcome.metric_results[candidate.index].quality_passed
+    )
+    if not response_candidates:
+        return ()
+    flight_parameters = _load_qualification_flight_parameters(target=target)
+    eligible = []
+    for candidate in response_candidates:
+        traces = outcome.target_traces.get(candidate.settings)
+        if traces is None:
+            traces = target.evaluator.evaluate(
+                definition=target,
+                settings=outcome.trace_sources[candidate.settings],
+                reference_traces=None,
+            )
+        _run_id, _fingerprint_value, reasons = _flight_parameters_qualification(
+            flight_parameters=flight_parameters,
+            target_traces=traces,
+        )
+        if not reasons:
+            eligible.append(candidate)
+    return tuple(eligible)
+
+
+def _select_validation(
+    *,
+    target: ControllerDefinition,
+    reference: ControllerDefinition,
+    outcome: _SearchOutcome,
+) -> tuple[CandidateScore, tuple[CandidateScore, ...], list[str]]:
+    """Select on independent validation flights after fitting has finished."""
+    eligible = _fitting_candidates(target=target, outcome=outcome)
+    if not eligible:
+        return (
+            outcome.selected,
+            outcome.candidate_scores,
+            ["no candidate passed fitting qualification"],
+        )
+    flight_parameters = _load_qualification_flight_parameters(target=target)
+    reference_traces = reference.evaluator.for_set("validation").evaluate(
+        definition=reference,
+        settings=reference.base_settings,
+        reference_traces=None,
+    )
+    evaluator = target.evaluator.for_set("validation")
+    scored = {}
+    reasons_by_index = {}
+    for candidate in eligible:
+        traces = evaluator.evaluate(
+            definition=target,
+            settings=candidate.settings,
+            reference_traces=reference_traces,
+        )
+        result = metric(name=target.selection_metric)(reference_traces, traces)
+        if not _finite_metric_result(result=result):
+            raise ValueError("validation metric returned a non-finite value")
+        _run_id, _fingerprint_value, reasons = _flight_parameters_qualification(
+            flight_parameters=flight_parameters,
+            target_traces=traces,
+        )
+        reasons.extend(
+            f"validation {gate.name}={gate.value:.6g} exceeds {gate.limit:.6g}"
+            for gate in result.gates
+            if gate.value > gate.limit
+        )
+        if not result.quality_passed and not reasons:
+            reasons.append("validation response quality failed")
+        regularization = _selection_regularization(candidate.settings, target.parameters)
+        has_regularization = any(
+            p.selection_regularization_scale is not None for p in target.parameters
+        )
+        ranking = (
+            (0.0, regularization, *result.ranking_values)
+            if not reasons and has_regularization
+            else (float(bool(reasons)), *result.ranking_values, regularization)
+        )
+        scored[candidate.index] = replace(
+            candidate,
+            set_name="validation",
+            ranking_values=ranking,
+            metrics={**result.fit_metrics, **result.validation_metrics, **result.metrics},
+        )
+        reasons_by_index[candidate.index] = reasons
+    selected = min(
+        scored.values(), key=lambda candidate: (candidate.ranking_values, candidate.index)
+    )
+    return (
+        selected,
+        tuple(scored.get(c.index, c) for c in outcome.candidate_scores),
+        reasons_by_index[selected.index],
+    )
 
 
 def _git_source(*, repo_root: Path) -> tuple[str, bool]:
@@ -731,7 +832,7 @@ def align(
     reference: ControllerDefinition,
     /,
 ) -> AlignmentResult:
-    """Run deterministic staged beam search and publish its held-out selection."""
+    """Fit, select on validation, and qualify frozen settings on acceptance."""
     _validate_pair(target, reference)
     reference_traces = reference.evaluator.evaluate(
         definition=reference,
@@ -744,60 +845,57 @@ def align(
     )
     repo_root = Path(__file__).resolve().parents[3]
 
-    def load_candidate_traces(*, candidate: CandidateScore) -> tuple[ProbeTrace, ...]:
-        traces = outcome.target_traces.get(candidate.settings)
-        if traces is not None:
-            return traces
-        return target.evaluator.evaluate(
-            definition=target,
-            settings=outcome.trace_sources[candidate.settings],
-            reference_traces=reference_traces,
-        )
-
-    selected = outcome.selected
-    selected_traces = load_candidate_traces(candidate=selected)
-    (
-        flight_parameters_run_id,
-        flight_parameters_fingerprint,
-        qualification_reasons,
-    ) = _flight_parameters_qualification(
+    selected, candidate_scores, quality_reasons = _select_validation(
         target=target,
-        target_traces=selected_traces,
-        repo_root=repo_root,
+        reference=reference,
+        outcome=outcome,
     )
-    response_passing = sorted(
-        (
-            candidate
-            for candidate in outcome.candidate_scores
-            if candidate.usable and outcome.metric_results[candidate.index].quality_passed
-        ),
-        key=lambda candidate: (candidate.ranking_values, candidate.index),
+    # Freeze selection before reading the fixed acceptance benchmark.
+    set_name = "acceptance" if not quality_reasons else "fit"
+    final_reference = reference.evaluator.for_set(set_name).evaluate(
+        definition=reference,
+        settings=reference.base_settings,
+        reference_traces=None,
     )
-    for candidate in response_passing:
-        if candidate is selected:
-            reasons = qualification_reasons
-            traces = selected_traces
-        else:
-            traces = load_candidate_traces(candidate=candidate)
-            run_id, fingerprint, reasons = _flight_parameters_qualification(
-                target=target,
-                target_traces=traces,
-                repo_root=repo_root,
-            )
-            if run_id != flight_parameters_run_id or fingerprint != flight_parameters_fingerprint:
-                raise RuntimeError("flight parameters changed during alignment selection")
-        if not reasons:
-            selected = candidate
-            selected_traces = traces
-            qualification_reasons = reasons
-            break
-    selected_result = outcome.metric_results[selected.index]
-    quality_reasons = [
-        f"{gate.name}={gate.value:.6g} exceeds {gate.limit:.6g}"
+    selected_traces = target.evaluator.for_set(set_name).evaluate(
+        definition=target,
+        settings=selected.settings,
+        reference_traces=final_reference,
+    )
+    selected_result = metric(name=target.selection_metric)(final_reference, selected_traces)
+    if not _finite_metric_result(result=selected_result):
+        raise ValueError("qualification metric returned a non-finite value")
+    flight_parameters_run_id, flight_parameters_fingerprint, qualification_reasons = (
+        _flight_parameters_qualification(
+            flight_parameters=_load_qualification_flight_parameters(target=target),
+            target_traces=selected_traces,
+        )
+    )
+    quality_reasons.extend(qualification_reasons)
+    if not selected_result.quality_passed:
+        quality_reasons.append(f"{set_name} response quality failed")
+    quality_reasons.extend(
+        f"{set_name} {gate.name}={gate.value:.6g} exceeds {gate.limit:.6g}"
         for gate in selected_result.gates
         if gate.value > gate.limit
-    ]
-    quality_reasons.extend(qualification_reasons)
+    )
+    run_dir_value = os.environ.get("ROBOTICS_ALIGNMENT_RUN_DIR")
+    if run_dir_value:
+        qualification_payload = {
+            "schema_version": 1,
+            "passed": not quality_reasons,
+            "failures": quality_reasons,
+            "qualification": "repeated qualification against a fixed benchmark",
+            "set_name": set_name,
+            "selection_set": "validation",
+            "settings_fingerprint": _fingerprint(asdict(selected.settings)),
+            "flight_parameters_run_id": flight_parameters_run_id,
+            "flight_parameters_fingerprint": flight_parameters_fingerprint,
+            "result": _plain(selected_result),
+        }
+        (Path(run_dir_value) / "qualification.json").write_text(
+            json.dumps(qualification_payload, indent=2, allow_nan=False) + "\n"
+        )
     source_commit, source_dirty = _git_source(repo_root=repo_root)
     experiment_fingerprint = _resolved_experiment_fingerprint(
         target=target,
@@ -807,6 +905,7 @@ def align(
     comparison_fingerprint = _fingerprint(
         {
             "controller_artifact_schema": 1,
+            "recording_set_qualification": 1,
             "target_definition": target.definition_fingerprint,
             "reference_definition": reference.definition_fingerprint,
             "probe_suite": probe_suite_fingerprint,
@@ -858,6 +957,6 @@ def align(
         selection_metric=target.selection_metric,
         base_settings=target.base_settings,
         declared_parameters=target.parameters,
-        candidates=outcome.candidate_scores,
+        candidates=candidate_scores,
         selected_candidate_index=selected.index,
     )

@@ -96,7 +96,7 @@ is finalized. No field, sample, command, timestamp, fit/validation split, or
 controller-boundary value is reduced in the artifact.
 
 Alignment preparation resolves one immutable `FlightParametersBundle`, pins it
-inside the alignment run, selects its single fitting response flight, and
+inside the alignment run, selects one complete response flight from each of the three sets, and
 validates before fitting that the response has:
 
 - every required profile exactly once and in authored order;
@@ -116,13 +116,18 @@ resampled or reduced.
 It then exposes the reference JSON, ULog, and bridge log through relative
 symlinks with the filenames expected by the existing alignment workflow. The
 immutable producer files remain in their timestamped flight-parameters bundle;
-alignment neither copies nor mutates them. Alignment search, metrics, ranking,
-fit/validation behavior, actuator audit, controller-boundary replay, and
-publication checks are unchanged. Independent validation and acceptance
-recordings remain available in the bundle; using them to select and qualify
-controllers is deferred to Stage 5. The current alignment workflow still uses
-the internal fit/validation/stability profiles in the fitting flight. Merely
-capturing three sets does not establish independent controller acceptance.
+alignment neither copies nor mutates them. Fitting retains the root filenames;
+validation and acceptance each have their own subdirectory with the same names.
+All three inputs are validated before creating the run directory.
+
+Alignment searches only on the fitting response recording, selects fitting-
+qualified candidates on validation, then evaluates the frozen settings on
+acceptance. Existing internal fit/validation/stability profile labels are
+preserved within every recording. All three recordings receive actuator audit
+and controller-boundary replay. Response and hover thresholds stay unchanged;
+independent hover recordings remain retained statistics, while bounds and policy
+reset samples still use fitting hover recordings only. Subsequent controller
+iterations reuse this immutable bundle as a fixed qualification benchmark.
 
 ## Artifact publication
 

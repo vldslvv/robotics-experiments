@@ -28,7 +28,11 @@ def _press_comparison_fingerprint(
     payload = {
         "comparison_revision": 36,
         "acceptance": asdict(config.rl.press.acceptance),
-        "evaluation": asdict(config.rl.press.evaluation),
+        "evaluation": {
+            name: value
+            for name, value in asdict(config.rl.press.evaluation).items()
+            if not name.startswith("feasibility_")
+        },
         "goal": asdict(config.rl.press.goal),
         "handoff": asdict(config.rl.press.handoff),
         "reset": asdict(config.rl.press.reset),

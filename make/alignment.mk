@@ -30,12 +30,15 @@ alignment-audit-actuators:
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.ulg'
 	@test -f '$(ALIGNMENT_RUN_DIR)/bridge.log'
-	@PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
-	    --config configs/alignment_px4_x500_velocity.yaml \
-	    --audit-reference '$(ALIGNMENT_RUN_DIR)/reference.json' \
-	    --bridge-log '$(ALIGNMENT_RUN_DIR)/bridge.log' \
-	    --ulog '$(ALIGNMENT_RUN_DIR)/reference.ulg' \
-	    --json '$(ALIGNMENT_RUN_DIR)/actuator_audit.json'
+	@for set_name in fit validation acceptance; do \
+	    directory='$(ALIGNMENT_RUN_DIR)'; \
+	    if [ "$$set_name" != fit ]; then directory="$$directory/$$set_name"; fi; \
+	    PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
+	        --config configs/alignment_px4_x500_velocity.yaml \
+	        --audit-reference "$$directory/reference.json" \
+	        --bridge-log "$$directory/bridge.log" --ulog "$$directory/reference.ulg" \
+	        --json "$$directory/actuator_audit.json" || exit $$?; \
+	done
 
 .PHONY: alignment-sweep-target
 alignment-sweep-target: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
@@ -75,13 +78,16 @@ alignment-replay-controller:
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.ulg'
 	@test -f '$(ALIGNMENT_RUN_DIR)/controller.json'
-	@PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
-	    --config configs/alignment_px4_x500_velocity.yaml \
-	    --ulog '$(ALIGNMENT_RUN_DIR)/reference.ulg' \
-	    --controller-artifact '$(ALIGNMENT_RUN_DIR)/controller.json' \
-	    --profile-reference '$(ALIGNMENT_RUN_DIR)/reference.json' \
-	    --bridge-log '$(ALIGNMENT_RUN_DIR)/bridge.log' \
-	    --json '$(ALIGNMENT_RUN_DIR)/controller_boundary_replay.json'
+	@for set_name in fit validation acceptance; do \
+	    directory='$(ALIGNMENT_RUN_DIR)'; \
+	    if [ "$$set_name" != fit ]; then directory="$$directory/$$set_name"; fi; \
+	    PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
+	        --config configs/alignment_px4_x500_velocity.yaml \
+	        --controller-artifact '$(ALIGNMENT_RUN_DIR)/controller.json' \
+	        --ulog "$$directory/reference.ulg" --profile-reference "$$directory/reference.json" \
+	        --bridge-log "$$directory/bridge.log" \
+	        --json "$$directory/controller_boundary_replay.json" || exit $$?; \
+	done
 
 .PHONY: align-controllers
 align-controllers:
@@ -94,7 +100,8 @@ align-controllers:
 	    ALIGNMENT_TARGET='$(ALIGNMENT_TARGET)' ALIGNMENT_REFERENCE='$(ALIGNMENT_REFERENCE)'
 	@$(MAKE) alignment-replay-controller ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)'
 	@$(MAKE) test-integration-alignment-target \
-	    CONTROLLER_ARTIFACT='$(ALIGNMENT_RUN_DIR)/controller.json'
+	    CONTROLLER_ARTIFACT='$(ALIGNMENT_RUN_DIR)/controller.json' \
+	    ISAAC_TEST_EXTRA_ARGS='--alignment-report $(ALIGNMENT_RUN_DIR_CONTAINER)/integration.json'
 	@PYTHONPATH=src uv run python '$(ALIGNMENT_FIT_SCRIPT)' \
 	    --run-dir '$(ALIGNMENT_RUN_DIR)' --finalize
 

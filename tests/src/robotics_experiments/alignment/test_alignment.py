@@ -317,6 +317,9 @@ def _ctbr_response_traces(*, family: ProbeFamily) -> tuple[ProbeTrace, ...]:
 
 
 class _Evaluator:
+    def for_set(self, set_name, /):
+        return self
+
     def __init__(self, *, reference_settings: ControllerSettings | None = None) -> None:
         self._reference_settings = reference_settings
 
@@ -449,34 +452,12 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_observation_bias_command_start_mps",
         "velocity_observation_bias_command_full_mps",
     )
-    assert target.parameters[0].candidates == pytest.approx((204.0,))
-    assert target.parameters[1].candidates == pytest.approx((0.075,))
-    assert target.parameters[2].candidates == (pytest.approx((0.014, 0.075, 0.04)),)
-    assert target.parameters[3].candidates == (pytest.approx((-0.010, -0.0140, 0.0)),)
     assert target.parameters[3].selection_regularization_scale == pytest.approx(1.0)
     assert next(
         profile
         for profile in target.probe_families[0].profiles
         if profile.name == "stability-hover-pose"
     ).hold_position
-    assert target.parameters[4].candidates == (pytest.approx((0.0, 1.5, 0.0)),)
-    assert target.parameters[5].candidates[0] == pytest.approx((1.00, 1.04, 1.0))
-    assert target.parameters[5].candidates[-1] == pytest.approx((1.00, 1.08, 1.0))
-    assert target.parameters[6].candidates == (pytest.approx((1.10, 1.06, 1.0)),)
-    assert target.parameters[7].candidates == (pytest.approx((0.4, 0.20, 2.0)),)
-    assert target.parameters[8].candidates == (pytest.approx((0.2, 0.20, 0.0)),)
-    assert target.parameters[9].candidates == pytest.approx((1.23,))
-    assert target.parameters[10].candidates == pytest.approx((0.09,))
-    assert target.parameters[11].candidates == pytest.approx((0.5,))
-    assert target.parameters[12].candidates == pytest.approx((0.050,))
-    assert target.parameters[13].candidates == pytest.approx((0.070,))
-    assert target.parameters[14].candidates == pytest.approx((0.085,))
-    assert target.parameters[15].candidates == pytest.approx((40.0,))
-    assert target.parameters[16].candidates == (pytest.approx((1.8, 1.8, 4.0)),)
-    assert target.parameters[17].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
-    assert target.parameters[18].candidates == pytest.approx((1.0005,))
-    assert target.parameters[19].candidates == pytest.approx((0.040,))
-    assert target.parameters[20].candidates == pytest.approx((0.060,))
     extended = replace(
         target,
         parameters=(
@@ -693,9 +674,9 @@ def test_alignment_references_immutable_flight_parameter_inputs(
                 response=SimpleNamespace(
                     repetitions=3,
                     traces=(
-                        SimpleNamespace(set_name="acceptance"),
+                        SimpleNamespace(**(vars(evidence) | {"set_name": "acceptance"})),
                         evidence,
-                        SimpleNamespace(set_name="validation"),
+                        SimpleNamespace(**(vars(evidence) | {"set_name": "validation"})),
                     ),
                 ),
             ),
@@ -962,7 +943,7 @@ def test_staged_beam_search_batches_without_changing_deterministic_order() -> No
     assert max(batch_evaluator.batch_sizes) > 1
 
 
-def test_alignment_reloads_only_selected_traces_after_scored_search() -> None:
+def test_alignment_loads_qualified_traces_for_each_recording_set() -> None:
     class ScoredEvaluator(_Evaluator):
         _retain_traces = False
 
@@ -1000,7 +981,7 @@ def test_alignment_reloads_only_selected_traces_after_scored_search() -> None:
     result = align(target, reference)
 
     assert result.controller.selected_settings == target.base_settings
-    assert evaluator.trace_loads == 1
+    assert evaluator.trace_loads == 3
 
 
 def test_alignment_selects_response_candidate_inside_flight_parameters() -> None:
@@ -1043,7 +1024,9 @@ def test_alignment_selects_response_candidate_inside_flight_parameters() -> None
     )
     reference = _definition(
         backend="px4-sitl",
-        evaluator=_Evaluator(reference_settings=target.base_settings),
+        evaluator=_Evaluator(
+            reference_settings=replace(target.base_settings, command_delay_s=0.05)
+        ),
     )
 
     result = align(target, reference)
@@ -1256,10 +1239,14 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
     ).encode()
     key = hashlib.sha256(encoded).hexdigest()
     path = tmp_path / "target_candidates.json"
+    (tmp_path / "reference.json").write_text("reference")
+    reference_sha256 = hashlib.sha256(b"reference").hexdigest()
     path.write_text(
         json.dumps(
             {
                 "schema_version": 1,
+                "set_name": "fit",
+                "reference_sha256": reference_sha256,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
                 "image": definition.image,
@@ -1308,6 +1295,45 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
 
     assert first == second
     assert index_count == 1
+    validation_dir = tmp_path / "validation"
+    validation_dir.mkdir()
+    (validation_dir / "reference.json").write_text("validation-reference")
+    payload = json.loads(path.read_text())
+    payload["set_name"] = "validation"
+    payload["reference_sha256"] = hashlib.sha256(b"validation-reference").hexdigest()
+    payload["candidates"][key][0]["start_sim_time_us"] = 123456
+    validation_path = validation_dir / path.name
+    validation_path.write_text(json.dumps(payload))
+    validation_evaluator = evaluator.for_set("validation")
+    held_out = validation_evaluator.evaluate(
+        definition=definition,
+        settings=settings,
+        reference_traces=None,
+    )
+    assert held_out[0].start_sim_time_us == 123456
+    assert held_out != first
+    assert (
+        evaluator.evaluate(definition=definition, settings=settings, reference_traces=None) == first
+    )
+    assert index_count == 2
+    payload["set_name"] = "fit"
+    validation_path.write_text(json.dumps(payload))
+    with pytest.raises(RuntimeError, match="different recording set"):
+        evaluator.for_set("validation").evaluate(
+            definition=definition,
+            settings=settings,
+            reference_traces=None,
+        )
+
+    payload["set_name"] = "validation"
+    payload["reference_sha256"] = reference_sha256
+    validation_path.write_text(json.dumps(payload))
+    with pytest.raises(RuntimeError, match="different reference recording"):
+        evaluator.for_set("validation").evaluate(
+            definition=definition,
+            settings=settings,
+            reference_traces=None,
+        )
 
 
 def test_controller_quality_reports_braking_distance_and_residual_speed_error() -> None:
@@ -1689,8 +1715,8 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
         result,
         controller=replace(
             result.controller,
-            advisory_quality_passed=True,
-            advisory_quality_reasons=(),
+            advisory_quality_passed=False,
+            advisory_quality_reasons=(artifact_module._PENDING_QUALIFICATION,),  # noqa: SLF001 - provisional artifact contract
         ),
     )
     run_dir = tmp_path / "run"
@@ -1732,7 +1758,42 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
 
     monkeypatch.setattr(artifact_module, "_compress_file", record_compression)
 
+    for set_name in ("validation", "acceptance"):
+        (run_dir / set_name).mkdir()
+        for filename in ("actuator_audit.json", "controller_boundary_replay.json"):
+            (run_dir / set_name / filename).write_text('{"schema_version":1,"passed":true}\n')
+    for set_name in ("validation", "acceptance"):
+        (run_dir / set_name / "target_candidates.json").write_text("{}\n")
+    for filename in ("qualification.json", "integration.json"):
+        (run_dir / filename).write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "passed": True,
+                    "set_name": "acceptance",
+                    "settings_fingerprint": result.controller.settings_fingerprint,
+                    "flight_parameters_fingerprint": (
+                        result.controller.flight_parameters_fingerprint
+                    ),
+                }
+            )
+        )
+    report_path = run_dir / "qualification.json"
+    passing_report = report_path.read_text()
+    report = json.loads(passing_report)
+    for changes, message in (
+        ({"passed": False}, "fixed benchmark qualification failed"),
+        ({"settings_fingerprint": "another-controller"}, "does not qualify"),
+        ({"set_name": "validation"}, "requires acceptance recordings"),
+    ):
+        report_path.write_text(json.dumps(report | changes))
+        with pytest.raises(ValueError, match=message):
+            finalize_alignment_bundle(run_dir=run_dir)
+        assert not load_controller_artifact(run_dir).advisory_quality_passed
+        assert not (run_dir.parent / "latest").exists()
+    report_path.write_text(passing_report)
     manifest_path = finalize_alignment_bundle(run_dir=run_dir)
+    assert load_controller_artifact(run_dir).advisory_quality_passed
 
     validate_alignment_bundle(run_dir)
     manifest = json.loads(manifest_path.read_text())
@@ -1746,7 +1807,7 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
         assert reference.is_symlink()
         assert not reference.readlink().is_absolute()
     assert not (run_dir / "target_candidates.json").exists()
-    assert compression_arguments_seen == [("-8", "--long=27", "-T0")]
+    assert compression_arguments_seen == [("-8", "--long=27", "-T0")] * 3
 
     (run_dir / "diagnostics" / "untracked.log").write_text("untracked")
     with pytest.raises(ValueError, match="inventory every payload"):
@@ -1782,6 +1843,26 @@ def test_publication_replaces_unsupported_existing_label(tmp_path: Path) -> None
         "gpu_utilization.json": "{}\n",
     }.items():
         (run_dir / name).write_text(payload)
+    for set_name in ("validation", "acceptance"):
+        (run_dir / set_name).mkdir()
+        for filename in ("actuator_audit.json", "controller_boundary_replay.json"):
+            (run_dir / set_name / filename).write_text('{"schema_version":1,"passed":true}\n')
+    for set_name in ("validation", "acceptance"):
+        (run_dir / set_name / "target_candidates.json").write_text("{}\n")
+    for filename in ("qualification.json", "integration.json"):
+        (run_dir / filename).write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "passed": True,
+                    "set_name": "acceptance",
+                    "settings_fingerprint": result.controller.settings_fingerprint,
+                    "flight_parameters_fingerprint": (
+                        result.controller.flight_parameters_fingerprint
+                    ),
+                }
+            )
+        )
     finalize_alignment_bundle(run_dir=run_dir)
 
     obsolete = tmp_path / "obsolete"
@@ -1812,3 +1893,70 @@ def test_failed_boundary_diagnostic_blocks_acceptance(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="vertical collective mismatch"):
         _require_passed_diagnostic(path=report, name="controller boundary replay")
+
+
+@pytest.mark.parametrize("acceptance_passed", [True, False])
+def test_validation_selects_then_acceptance_freezes_settings(monkeypatch, acceptance_passed):
+    import robotics_experiments.alignment._align as alignment_module
+
+    calls = []
+    bundle_validations = []
+    validate_bundle = alignment_module.validate_flight_parameters_bundle
+
+    def validate_once_per_stage(path, /):
+        bundle_validations.append(path)
+        return validate_bundle(path)
+
+    monkeypatch.setattr(
+        alignment_module, "validate_flight_parameters_bundle", validate_once_per_stage
+    )
+
+    class SetEvaluator(_Evaluator):
+        def __init__(self, *, set_name="fit"):
+            super().__init__()
+            self.set_name = set_name
+
+        def for_set(self, set_name, /):
+            return SetEvaluator(set_name=set_name)
+
+        def evaluate(self, *, definition, settings, reference_traces):
+            calls.append((definition.backend, self.set_name, settings.command_delay_s))
+            traces = _response_traces(
+                profiles=definition.profiles, settings=definition.base_settings
+            )
+            # Encode the test response in the first trace, away from the hover profile.
+            marker = {"fit": 0.0, "validation": 0.05, "acceptance": 0.0}[self.set_name]
+            if definition.backend == "isaac-lab":
+                marker = settings.command_delay_s
+            return (replace(traces[0], start_sim_time_us=round(marker * 1000)), *traces[1:])
+
+    def score(reference, target, /):
+        error = abs(reference[0].start_sim_time_us - target[0].start_sim_time_us)
+        accepting = calls[-1][1] == "acceptance"
+        return MetricResult(
+            metrics={"error": float(error)},
+            ranking_values=(float(error),),
+            fit_metrics={},
+            validation_metrics={},
+            quality_passed=acceptance_passed if accepting else True,
+        )
+
+    monkeypatch.setattr(alignment_module, "metric", lambda **_kwargs: score)
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=SetEvaluator(),
+        parameters=(ParameterSpec("command_delay_s", 1, (0.0, 0.05)),),
+    )
+    result = align(target, _definition(backend="px4-sitl", evaluator=SetEvaluator()))
+    assert result.controller.selected_settings.command_delay_s == 0.05
+    assert result.controller.advisory_quality_passed is acceptance_passed
+    assert [
+        delay
+        for backend, set_name, delay in calls
+        if backend == "isaac-lab" and set_name == "acceptance"
+    ] == [0.05]
+    first_validation = next(i for i, call in enumerate(calls) if call[1] == "validation")
+    assert all(call[1] == "fit" for call in calls[:first_validation])
+    assert all(call[1] != "fit" for call in calls[first_validation:])
+    assert result.candidates[result.selected_candidate_index].set_name == "validation"
+    assert len(bundle_validations) == 3

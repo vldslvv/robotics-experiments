@@ -9,11 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
+from rsl_rl.networks import EmpiricalNormalization
 
 from robotics_experiments.config import RlTrainingPhaseConfig
 from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
 from robotics_experiments.rl.press import create_press_acceptance_criteria
+from robotics_experiments.rl.training import rsl_rl
 from tests.support.paths import REPO_ROOT
 
 
@@ -247,13 +250,13 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
         "policy_rate_hz": 20.0,
         "simulated_seconds_per_env_per_update": 12.8,
         "transitions_per_update": 1_048_576,
-        "num_learning_epochs": 1,
+        "num_learning_epochs": 4,
         "num_mini_batches": 8,
-        "phase_maximum_simulated_seconds_per_env": [192.0, 1280.0],
+        "phase_maximum_simulated_seconds_per_env": [640.0, 1280.0],
     }
     assert report["schema_version"] == 26
     assert report["reward_configuration"] == {
-        "hover_stabilization": "uniform",
+        "hover_stabilization": "boundary_weighted",
         "position_progress_weight": 0.1,
         "stabilization_weight": 0.01,
         "outside_envelope_weight": 0.03,
@@ -261,7 +264,7 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
         "action_effort_weight": 1.0,
         "hold_progress_weight": 0.01,
         "terminal_success_weight": 1.5,
-        "terminal_failure_weight": 3.0,
+        "terminal_failure_weight": 30.0,
     }
     assert report["hover_reset_distribution"] == {"source": "flight_parameters_policy_window"}
     assert report["provenance"] == {"procedural_smoke": False}
@@ -816,25 +819,54 @@ def test_experiment_provenance_records_resolved_configuration_and_inputs(
     }
 
 
-def test_checkpoint_restore_loads_optimizer_and_iteration(tmp_path: Path) -> None:
-    torch = pytest.importorskip("torch")
-    from robotics_experiments.rl.training import rsl_rl
+@pytest.mark.parametrize("normalize", [False, True])
+def test_checkpoint_restore_loads_optimizer_and_iteration(
+    *, tmp_path: Path, normalize: bool
+) -> None:
+    policy = torch.nn.Module()
+    policy.actor = torch.nn.Linear(2, 1)
+    policy.critic = torch.nn.Linear(2, 1)
+    policy.actor_obs_normalizer = EmpiricalNormalization(2) if normalize else torch.nn.Identity()
+    policy.critic_obs_normalizer = EmpiricalNormalization(2) if normalize else torch.nn.Identity()
+    optimizer = torch.optim.Adam(policy.parameters(), lr=1.0e-4)
+    observations = torch.tensor([[0.1, -0.2], [0.3, 0.4]])
 
-    calls = []
-    runner = SimpleNamespace(
-        current_learning_iteration=99,
-        load=lambda *args, **kwargs: calls.append((args, kwargs)),
-    )
+    def update_learner() -> None:
+        optimizer.zero_grad()
+        (policy.actor(observations).sum() + policy.critic(observations).sum()).backward()
+        optimizer.step()
+        if normalize:
+            with torch.inference_mode():
+                policy.actor_obs_normalizer.update(observations)
+                policy.critic_obs_normalizer.update(observations)
+
+    update_learner()
+    expected = {key: value.clone() for key, value in policy.state_dict().items()}
     checkpoint = tmp_path / "model_299.pt"
-    torch.save({"iter": 17}, checkpoint)
-    restored = rsl_rl.restore_checkpoint(
-        runner=runner,
-        checkpoint_path=checkpoint,
-        device="cpu",
+    runner = SimpleNamespace(
+        alg=SimpleNamespace(policy=policy, optimizer=optimizer),
+        current_learning_iteration=17,
     )
+    rsl_rl.save_checkpoint(runner=runner, checkpoint_path=checkpoint, iteration=17)
+    update_learner()
+    runner.current_learning_iteration = 99
+
+    def load(*, path: str, load_optimizer: bool, map_location: str) -> None:
+        payload = torch.load(path, map_location=map_location, weights_only=True)
+        policy.load_state_dict(payload["model_state_dict"])
+        assert load_optimizer
+        optimizer.load_state_dict(payload["optimizer_state_dict"])
+
+    runner.load = lambda path, **kwargs: load(path=path, **kwargs)
+    restored = rsl_rl.restore_checkpoint(runner=runner, checkpoint_path=checkpoint, device="cpu")
     assert restored == 17
     assert runner.current_learning_iteration == 17
-    assert calls == [((str(checkpoint),), {"load_optimizer": True, "map_location": "cpu"})]
+    for key, value in policy.state_dict().items():
+        torch.testing.assert_close(value, expected[key])
+        assert not value.is_inference()
+    assert all(state["step"].item() == 1 for state in optimizer.state.values())
+    update_learner()
+    assert all(state["step"].item() == 2 for state in optimizer.state.values())
 
 
 def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path: Path) -> None:
@@ -1068,9 +1100,8 @@ def test_training_chunks_do_not_repeat_boundary_iteration_numbers() -> None:
     assert second.iterations == 5
 
 
-def test_training_adapter_disables_internal_periodic_checkpoint_cadence() -> None:
-    from robotics_experiments.rl.training import rsl_rl
-
+@pytest.mark.parametrize("normalize", [False, True])
+def test_training_adapter_disables_internal_periodic_checkpoint_cadence(*, normalize) -> None:
     training_cfg = SimpleNamespace(
         num_steps_per_env=32,
         gamma=0.995,
@@ -1084,6 +1115,7 @@ def test_training_adapter_disables_internal_periodic_checkpoint_cadence() -> Non
     )
     policy_cfg = SimpleNamespace(
         activation="elu",
+        normalize_observations=normalize,
         actor=SimpleNamespace(
             hidden_dims=[256, 256, 128],
             initial_noise_std=0.2,
@@ -1098,6 +1130,8 @@ def test_training_adapter_disables_internal_periodic_checkpoint_cadence() -> Non
     )
     assert runner_cfg["save_interval"] == 2**31 - 1
     assert runner_cfg["algorithm"]["learning_rate"] == 1.0e-4
+    assert runner_cfg["policy"]["actor_obs_normalization"] is normalize
+    assert runner_cfg["policy"]["critic_obs_normalization"] is normalize
 
 
 def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> None:
@@ -1117,17 +1151,31 @@ def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> No
     assert float(action_mean.abs().max()) < 0.01
 
 
-def test_export_contains_only_actor_and_metadata(tmp_path: Path) -> None:
-    torch = pytest.importorskip("torch")
-    from robotics_experiments.rl.training import rsl_rl
-
+@pytest.mark.parametrize("normalize", [False, True])
+def test_export_freezes_actor_input_normalization(*, tmp_path: Path, normalize) -> None:
     actor = torch.nn.Sequential(torch.nn.Linear(34, 4))
     critic = torch.nn.Sequential(torch.nn.Linear(34, 1))
+    normalizer = EmpiricalNormalization(34) if normalize else torch.nn.Identity()
+    observations = torch.linspace(-0.02, 0.04, 68).reshape(2, 34)
+    if normalize:
+        normalizer.update(observations)
     runner = SimpleNamespace(
-        alg=SimpleNamespace(policy=SimpleNamespace(actor=actor, critic=critic))
+        alg=SimpleNamespace(
+            policy=SimpleNamespace(actor=actor, actor_obs_normalizer=normalizer, critic=critic)
+        )
     )
+    expected = actor(normalizer(observations)).detach()
     metadata = {"obs_dim": 34, "marker": "contract"}
     rsl_rl.export_policy(runner, tmp_path, metadata=metadata)
     module = torch.jit.load(str(tmp_path / "policy.pt"))
-    assert module(torch.zeros((2, 34))).shape == (2, 4)
+    torch.testing.assert_close(module(observations), expected)
+    torch.testing.assert_close(rsl_rl.deterministic_actor(runner=runner)(observations), expected)
+    if normalize:
+        normalizer.update(observations + 10.0)
+        torch.testing.assert_close(actor(normalizer(observations)), expected)
+        normalizer.train()
+        normalizer.update(observations + 10.0)
+        torch.testing.assert_close(module(observations), expected)
+        assert not torch.allclose(actor(normalizer(observations)), expected)
+    assert {path.name for path in tmp_path.iterdir()} == {"policy.pt", "policy_meta.json"}
     assert json.loads((tmp_path / "policy_meta.json").read_text()) == metadata

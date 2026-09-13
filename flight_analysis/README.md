@@ -10,8 +10,8 @@ rotor, or force-application mismatch in the Isaac bridge.
 Run the helpers from the repository root.
 
 ```bash
-python flight_analysis/tools/list_pairs.py px4/logs
-python flight_analysis/tools/bridge_summary.py px4/logs/2026-06-11/05_11_40_v0_bridge.log
+uv run python flight_analysis/tools/list_pairs.py px4/logs
+uv run python flight_analysis/tools/bridge_summary.py px4/logs/2026-06-11/05_11_40_v0_bridge.log
 env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python \
   flight_analysis/tools/ulog_timeline.py px4/logs/2026-06-11/05_11_40.ulg
 ```
@@ -24,7 +24,7 @@ loaders in `tools/_ulog_common.py`.
 ## Sim-to-real comparison
 
 Task-neutral repeated-flight evidence and position/pose envelopes are produced
-by `make measure-flight-envelope`; see `docs/FLIGHT_PARAMETERS.md`. Those
+by `make measure-flight-parameters`; see `docs/FLIGHT_PARAMETERS.md`. Those
 artifacts establish the stable comparison boundary. The tools below remain
 diagnostics for explaining differences in the retained ULogs and bridge or
 hardware logs.
@@ -44,12 +44,15 @@ configured Pegasus scaling and compares per-rotor angular velocity, collective
 thrust, and body torque at logged actuator timestamps. It also regresses the
 logged normalized PX4 torque setpoint against reconstructed physical body
 torque, reporting the per-axis N-m conversion scale, intercept, and fit RMSE.
-This is a diagnostic, not the controller-alignment publication path.
+The arbitrary-window replay is diagnostic. The complete actuator audit and
+per-profile controller replay are required by controller-alignment publication.
 
 Alignment trace schema 1 records every profile's absolute PX4 simulation start
 time, exact command cadence, physical and PX4-estimated initial velocity, and
 controller acceleration, rate-integral, and normalized hover-thrust state at
-that timestamp. Profile replay uses those absolute boot times directly. It
+that timestamp. Profile replay runs on all three independent response recordings
+(fitting, validation, and acceptance), preserving each recording's internal
+profile splits. It uses those absolute boot times directly and
 checks both the core controller on PX4-estimated state and the complete
 physical-state observation boundary seeded from the recorded estimator offset.
 The core enforces motor and collective limits; the physical-state replay adds a
@@ -104,7 +107,7 @@ Use a window containing finite OFFBOARD velocity setpoints. The comparison
 boundary is deliberately below the policy and above the plant: identical state
 and velocity intent enter both controllers, and physical rotor speed/body wrench
 leave both. Isaac Lab's `Thruster` is a lower actuator-realization layer; with
-the configured zero time constants its output must match the requested
+zero time constants its output must match the requested
 per-rotor thrust independently of this controller comparison.
 
 Closed-loop controller fitting belongs exclusively to

@@ -570,3 +570,85 @@ def test_evaluation_rejects_stage_mismatch(monkeypatch) -> None:
             config=_config(),
             artifact_dir=Path("artifact"),
         )
+
+
+def test_hover_feedback_signs_frames_and_limits():
+    import math
+
+    import torch
+
+    from robotics_experiments.config import load_config
+
+    module = _load_eval_press_module()
+    config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    policy = module._HoverFeedback(  # noqa: SLF001 - host test of the CLI feedback policy
+        config=config,
+        flight_parameters=_FLIGHT_PARAMETERS,
+    )
+    observation = torch.zeros((5, 34), dtype=torch.float64)
+    observation[:, 6] = 1.0
+    observation[:, 19] = 1.0
+    observation[0, 0] = 1.0
+    observation[1, 0] = 1.0
+    observation[1, 18:20] = math.sqrt(0.5)
+    observation[2, 5:7] = torch.tensor([math.sin(0.1), math.cos(0.1)])
+    observation[3, :3] = 1e6
+    observation[3, 5:7] = torch.tensor([math.sin(1.0), math.cos(1.0)])
+    observation[4, 10:13] = torch.tensor([0.1, -0.1, 0.1])
+    action = policy(observation)
+    assert action[0, 0] < 0.0
+    assert action[0, 1:].tolist() == [0.0, 0.0, 0.0]
+    assert action[1, 0].item() == pytest.approx(0.0, abs=1e-12)
+    assert action[1, 1].item() == pytest.approx(-action[0, 0].item())
+    assert action[2, 3] < 0.0
+    assert action[3].tolist() == [-1.0, -1.0, -1.0, -1.0]
+    assert action[4, :3].tolist() == pytest.approx([-0.04, 0.04, -0.04])
+    assert torch.equal(action, policy(observation))
+
+
+def test_hover_feasibility_reuses_production_evaluation_and_pinned_resets(monkeypatch, tmp_path):
+    import robotics_experiments.workflows.isaac_lab as workflow
+    from robotics_experiments.config import load_config
+
+    module = _load_eval_press_module()
+    config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    samples = object()
+    inputs = SimpleNamespace(
+        controller=SimpleNamespace(
+            selected_settings=_controller_settings(), run_id="controller-run"
+        ),
+        controller_path=tmp_path / "controller.json",
+        controller_digest="controller-digest",
+        flight_parameters=_FLIGHT_PARAMETERS,
+        flight_parameters_path=tmp_path / "flights",
+        flight_parameters_digest="flight-digest",
+        hover_reset_samples=samples,
+    )
+    monkeypatch.setattr(module, "prepare_policy_inputs", lambda **_kwargs: inputs)
+    monkeypatch.setattr(module, "press_policy_contract", lambda **_kwargs: _contract())
+    calls = []
+    closed = []
+    env = SimpleNamespace(close=lambda: closed.append(True))
+
+    def factory(**kwargs):
+        calls.append(kwargs)
+        return env, object()
+
+    def evaluate(**kwargs):
+        calls.append(kwargs)
+        raise ValueError("recorded evaluation failure")
+
+    monkeypatch.setattr(workflow, "make_isaac_lab_env", factory)
+    monkeypatch.setattr(workflow, "evaluate_press_approach_policy", evaluate)
+    output = tmp_path / "feasibility"
+    with pytest.raises(ValueError, match="recorded evaluation failure"):
+        module._run_feasibility(config=config, output_dir=output)  # noqa: SLF001 - CLI workflow test
+    assert closed == [True]
+    assert calls[0]["hover_reset_samples"] is samples
+    assert calls[0]["training"] is False
+    assert calls[0]["experiment_config"] is config
+    assert calls[1]["env"] is env
+    assert calls[1]["seeds"] == (101, 202, 303)
+    assert calls[1]["episodes_per_seed"] == 100
+    assert calls[1]["hold_steps"] == 600
+    assert "recorded evaluation failure" in (output / "feasibility.json").read_text()

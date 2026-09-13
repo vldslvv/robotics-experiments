@@ -126,7 +126,11 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
 - `make test-integration-alignment-target` runs the analytic hover/goto
   stability envelope with the selected alignment `best` artifact. It is owned
   by `make/alignment.mk` and excluded from `test-integration-all` because it
-  requires an alignment publication.
+  requires an alignment publication. During `align-controllers`, the same target
+  tests the provisional run-local controller and writes `integration.json` through
+  the existing script's `--alignment-report` option. The report binds pass/fail to
+  the selected settings and flight-parameters fingerprints; finalization requires
+  that matching passing report.
 - `make test-integration-press-policy-transfer` runs the trained press actor
   through three PX4 policy stages at distinct entry ranges in the production
   warehouse. Physical wall and switch contact remain enabled, and the gate

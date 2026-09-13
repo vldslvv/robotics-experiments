@@ -13,9 +13,9 @@ curriculum:
       hold_s: 30.0
       episode_length_s: 40.0
       phases:
-        - max_iterations: 15
+        - max_iterations: 50
           evaluation_interval: 5
-          learning_rate: 3.0e-5
+          learning_rate: 3.0e-4
           schedule: fixed
           entropy_coef: 0.0
         - max_iterations: 100
@@ -60,6 +60,7 @@ curriculum:
 
 policy:
   activation: elu
+  normalize_observations: false
   actor:
     hidden_dims: [256, 256, 128]
     initial_noise_std: 0.03
@@ -146,6 +147,9 @@ evaluation:
   validation_seeds: [101, 202, 303]
   test_seeds: [404, 505, 606]
   episodes_per_seed: 100
+  feasibility_position_gain_per_s: 1.25
+  feasibility_velocity_damping: 0.2
+  feasibility_yaw_gain_per_s: 2.0
 
 acceptance:
   success_rate_min: 0.95

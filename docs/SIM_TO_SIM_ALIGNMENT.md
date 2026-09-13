@@ -6,12 +6,10 @@ learning. Waypoint navigation, policy rewards, policy actions, and domain
 randomization are not fitting inputs.
 
 Flight-parameter bundles contain independently captured fitting, validation, and
-acceptance flights. Reference preparation currently selects exactly one complete
-`fit` response flight and retains its existing internal profile splits. Hover
-bounds come only from fitting flights. The separate validation and acceptance
-recordings are reserved for Stage 5; current controller qualification does not
-yet consume them. See [flight parameters](FLIGHT_PARAMETERS.md) for capture and
-set ownership.
+acceptance flights. Preparation pins all three complete response recordings;
+their `set_name` remains separate from each recording's internal profile splits.
+Hover bounds and policy reset samples still come only from fitting hover flights.
+See [flight parameters](FLIGHT_PARAMETERS.md) for capture and set ownership.
 
 ## Architecture and contracts
 
@@ -30,8 +28,7 @@ stability profiles, then exposes its `reference.json`, ULog, and bridge log to
 the existing alignment evaluator through relative symlinks. The selected target
 settings are still replayed through the full 30-second
 `stability-hover-pose` profile and must keep position and attitude within the
-full-window hover bounds. No alignment metric, search, ranking, or acceptance
-logic changes at this boundary. The exact flight-parameters fingerprint enters
+full-window hover bounds. The registered metrics, response thresholds, and hover bounds remain unchanged. The exact flight-parameters fingerprint enters
 the comparison fingerprint and strict controller artifact. The capture manifest
 and controller artifact also record the resolved producer `run_id`; an authored
 `latest` selector is never retained as lineage.
@@ -77,6 +74,16 @@ body rate from the captured PX4 angular-rate seed. Controller state carries
 these estimator states, the held outer-loop setpoints, and the acceleration
 setpoint needed for PX4's thrust-preserving hover-estimate integrator
 correction. Sequential NumPy/Torch parity is a host-test requirement.
+
+The velocity observation hold scale applies per world axis only when both the
+command and physical velocity are small. The larger absolute value drives the
+existing smooth command-threshold transition to the motion scale. A zero command
+during braking therefore retains the motion scale until the vehicle slows down.
+The steady velocity bias additionally fades out as the difference between
+commanded and physical velocity crosses the same thresholds. It therefore
+describes settled motion without applying the steady correction during large
+acceleration transients. Seeded-offset decay retains its command-based
+transition. Seeding and subsequent controller updates use the same mappings.
 
 Horizontal velocity proportional gain has two bounded error schedules. The
 `horizontal_velocity_braking_gain_*` lobe owns low-error braking attenuation;
@@ -147,6 +154,38 @@ mode and padding the smaller family's trace stride to the fixed scene capacity;
 constructing multiple `DirectRLEnv` instances in one process is unsupported by
 Isaac Lab's simulation-context ownership.
 
+### Independent selection and qualification
+
+Parameter expansion and beam retention use the fitting response flight only.
+After search finishes, candidates passing both response and full-window hover
+checks are replayed on the validation response flight. Validation selects among
+those candidates using the existing response ranking and declared L2
+regularization, with the same hover bounds. It never expands the parameter grid.
+The selected settings are frozen before the acceptance recording is evaluated.
+An acceptance failure preserves that selection and fails qualification; it does
+not trigger a second selection on acceptance data.
+
+Each qualification stage validates the immutable flight bundle once and reuses
+the loaded hover bounds for its candidates. Candidate iteration does not reread
+and hash all producer evidence files. Fitting eligibility, validation selection,
+and frozen acceptance each perform their own validation.
+
+This is repeated qualification against a fixed benchmark. Subsequent controller
+iterations reuse the same immutable PX4 bundle, including acceptance recordings.
+Recapture only when PX4 setup, flight profiles, or recording configuration changes.
+This repeated use is not a claim of an untouched final test population.
+
+Fitting inputs and target traces retain the existing root filenames. Independent
+validation and acceptance inputs and target traces live under `validation/` and
+`acceptance/`. Evaluators have separate caches per set and reject mismatched
+`set_name` headers or reference SHA-256 digests. Digests are pinned before worker
+launch and checked when target results are loaded. Selection rows identify the recording set that owns their
+metrics; metric names containing `fit` or `validation` still identify internal
+profile splits. `qualification.json` records the frozen settings fingerprint,
+pinned flight fingerprint, selection set, final evaluation set, raw metric
+result, and failure reasons. Each held-out GPU evaluation also records its
+reference digest and exact settings list in `evaluation.json`.
+
 ## Evidence and boundary audit
 
 Flight-parameters response capture uses the ordinary fleet/bridge path with a
@@ -193,6 +232,10 @@ the rate controller and the per-axis angular-velocity and derivative errors at
 the rate-controller input. It consumes PX4's independently published angular
 derivative rather than attempting to derive it again from logged rate samples;
 held-setpoint source ages and rate-sample interpolation errors remain visible.
+For velocity profiles, replay also reports per-axis ENU velocity-input RMSE
+and signed mean error against PX4's recorded velocity state, including its
+vertical-state blending. These diagnostic values separate estimator mapping
+error from downstream attitude and motor errors and do not change acceptance limits.
 The core replay then enforces the same motor and collective limits. A second
 replay starts from the physics-rate physical articulation state in the bridge
 log, seeds the recorded
@@ -249,9 +292,11 @@ the componentwise command-magnitude transition
 per-axis `velocity_filter_hz`, and
 `angular_velocity_filter_hz` model the evidenced physical-to-estimated state
 boundary without changing the pinned PX4 controller gains. The smooth command
-transition suppresses steady correction during exact zero-command ringdown,
-blends observation scale from its hold mapping to its motion mapping, and
-reaches the authored bias outside that band uniformly for X/Y/Z. It also blends
+transition suppresses steady correction during exact zero-command ringdown.
+Outside that band, the authored bias applies when physical velocity follows
+the command; it fades out during larger tracking errors. Observation
+scale uses the same transition with the larger command or physical speed on
+each axis. The command transition also blends
 estimator-bias persistence from each axis's low-command hold rate to the motion
 rate.
 The core replay
@@ -293,9 +338,13 @@ Each translational axis has an independent envelope profile through 0.8 m/s.
 The Z profile specifically prevents a low-speed aggregate from hiding the wrong
 climb/descend correction observed during policy execution.
 
-A run cannot finalize or publish unless all metric gates pass, every stability
-trace completes with finite values, the actuator audit passes, and the
-controller-boundary replay passes. Policy training rejects a controller whose
+A run cannot finalize or publish unless acceptance response and hover checks
+pass, every stability trace completes with finite values, all three actuator
+audits and controller-boundary replays pass, and the integration report passes.
+The run-local controller stays quality-failed with an explicit pending reason
+until these checks complete. Finalization verifies that qualification and
+integration reports identify the selected settings and pinned flight inputs
+before marking the controller quality-passed. Policy training rejects a controller whose
 quality record is failed. The authoritative live gate is:
 
 ```bash
@@ -310,8 +359,9 @@ make align-controllers
 ```
 
 `align-controllers` begins with `alignment-prepare-reference`; it never captures
-PX4 reference data. The campaign runs the authoritative integration gate against its run-local
-`controller.json` after replay and before finalization. A failure therefore
+PX4 reference data. The campaign runs the authoritative integration check against its run-local
+`controller.json` after replay and before finalization, retaining a settings-bound
+`integration.json` report. A failure therefore
 preserves diagnostic evidence without advancing `latest` or `best`.
 
 `controller.json` is the downstream product. It contains complete controller

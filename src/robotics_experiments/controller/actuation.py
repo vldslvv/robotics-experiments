@@ -520,15 +520,28 @@ def _velocity_command_blend(
 
 
 def _velocity_observation_bias(
-    params: ActuationParams, velocity_setpoint: np.ndarray, /
+    params: ActuationParams,
+    velocity_setpoint: np.ndarray,
+    physical_velocity: np.ndarray,
+    /,
 ) -> np.ndarray:
-    return params.velocity_observation_bias_mps * _velocity_command_blend(params, velocity_setpoint)
+    steady_motion = 1.0 - _velocity_command_blend(params, velocity_setpoint - physical_velocity)
+    return (
+        params.velocity_observation_bias_mps
+        * _velocity_command_blend(params, velocity_setpoint)
+        * steady_motion
+    )
 
 
 def _effective_velocity_observation_scale(
-    params: ActuationParams, velocity_setpoint: np.ndarray, /
+    params: ActuationParams,
+    velocity_setpoint: np.ndarray,
+    physical_velocity: np.ndarray,
+    /,
 ) -> np.ndarray:
-    blend = _velocity_command_blend(params, velocity_setpoint)
+    blend = _velocity_command_blend(
+        params, np.maximum(np.abs(velocity_setpoint), np.abs(physical_velocity))
+    )
     return params.velocity_observation_hold_scale + blend * (
         params.velocity_observation_scale - params.velocity_observation_hold_scale
     )
@@ -685,12 +698,12 @@ def _velocity_command_to_omega(
     rotation = _rotation_from_wxyz(state.attitude_flu_enu_wxyz)
     yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
     velocity_setpoint_world = command[:3]
+    physical_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
     physical_velocity = _effective_velocity_observation_scale(
-        params, velocity_setpoint_world
-    ) * np.asarray(
-        state.linear_velocity_enu,
-        dtype=np.float64,
-    ) + _velocity_observation_bias(params, velocity_setpoint_world)
+        params, velocity_setpoint_world, physical_velocity
+    ) * physical_velocity + _velocity_observation_bias(
+        params, velocity_setpoint_world, physical_velocity
+    )
     measured_velocity = physical_velocity + controller_state.velocity_estimator_bias_enu
     if controller_state.initialized:
         velocity_alpha = _low_pass_alpha_vector(
@@ -1050,10 +1063,13 @@ def seed_actuation_controller_state(
         "filtered_linear_velocity_enu",
     )
     velocity_setpoint = vector(velocity_setpoint_enu_mps, "velocity_setpoint_enu_mps")
-    physical_velocity = _effective_velocity_observation_scale(params, velocity_setpoint) * vector(
+    physical_velocity = vector(
         physical_linear_velocity_enu,
         "physical_linear_velocity_enu",
-    ) + _velocity_observation_bias(params, velocity_setpoint)
+    )
+    physical_velocity = _effective_velocity_observation_scale(
+        params, velocity_setpoint, physical_velocity
+    ) * physical_velocity + _velocity_observation_bias(params, velocity_setpoint, physical_velocity)
     angular_velocity = vector(angular_velocity_body_flu, "angular_velocity_body_flu")
     acceleration_setpoint = vector(
         acceleration_setpoint_enu_mps2,

@@ -290,8 +290,8 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert stage.plateau.minimum_delta == 0.003
     assert stage.plateau.patience_evaluations == 10
     hover_stage = config.rl.press.curriculum.stages[0]
-    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (15, 100)
-    assert tuple(phase.learning_rate for phase in hover_stage.phases) == (3.0e-5, 1.0e-6)
+    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (50, 100)
+    assert tuple(phase.learning_rate for phase in hover_stage.phases) == (3.0e-4, 1.0e-6)
     assert tuple(phase.evaluation_interval for phase in hover_stage.phases) == (5, 5)
     assert hover_stage.plateau.metric_name == "episode_longest_hover_duration_mean_s"
     assert hover_stage.plateau.direction == "maximize"
@@ -306,13 +306,14 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert policy.critic.hidden_dims == (256, 256, 128)
 
 
-def test_press_hover_uses_one_ppo_epoch_per_rollout():
+def test_press_hover_training_configuration():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "train_press_hover_quad.yaml")
     policy = config.rl.press.policy
     reward = config.rl.press.reward
-    assert config.rl.training.num_learning_epochs == 1
+    assert config.rl.training.num_learning_epochs == 4
+    assert policy.normalize_observations is True
     assert config.rl.num_envs == 4096
     assert config.rl.training.num_steps_per_env == 256
     assert config.rl.training.num_mini_batches == 8
@@ -320,14 +321,14 @@ def test_press_hover_uses_one_ppo_epoch_per_rollout():
     assert config.rl.press.selected_stage().episode_length_s == 40.0
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
-    assert reward.hover_stabilization == "uniform"
+    assert reward.hover_stabilization == "boundary_weighted"
     assert reward.stabilization_weight == 0.01
     assert reward.outside_envelope_weight == 0.03
     assert reward.action_effort_weight == 1.0
     assert reward.predictive_barrier_weight == 0.1
     assert reward.hold_progress_weight == 0.01
     assert reward.terminal_success_weight == 1.5
-    assert reward.terminal_failure_weight == 3.0
+    assert reward.terminal_failure_weight == 30.0
     assert config.rl.press.acceptance.minimum_range_m == 0.40
     assert config.rl.press.goal.stable_steps == 600
     assert config.rl.press.goal.alignment_error_max_m == 0.01
@@ -382,7 +383,7 @@ def test_press_hover_outside_only_changes_only_reward_choice():
     baseline = load_config(_ROOT / "train_press_hover_quad.yaml")
     comparison = load_config(_ROOT / "train_press_hover_outside_only_quad.yaml")
     assert comparison.rl.press.reward.hover_stabilization == "outside_only"
-    assert replace(comparison.rl.press.reward, hover_stabilization="uniform") == (
+    assert replace(comparison.rl.press.reward, hover_stabilization="boundary_weighted") == (
         baseline.rl.press.reward
     )
     assert comparison.rl.press.curriculum == baseline.rl.press.curriculum

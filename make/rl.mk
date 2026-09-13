@@ -19,7 +19,7 @@ PRESS_NAVIGATION_ROTATION_MARGIN_RAD ?= 0.004363323129985824
 PRESS_NAVIGATION_MEASUREMENT_ROOT ?= .build/benchmarks/press-navigation-handoff-campaigns
 PRESS_NAVIGATION_MEASUREMENT_RUNNER = make/scripts/run_press_navigation_handoff_measurement.sh
 
-# One campaign validates up to three scratch attempts, freshly tests the first
+# One campaign validates the configured scratch attempts, freshly tests the first
 # eligible immutable actor, and publishes only after final acceptance.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)

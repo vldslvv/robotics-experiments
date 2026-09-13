@@ -143,6 +143,9 @@ class ProbeTrace:
 class BackendEvaluator(Protocol):
     """Host-side adapter for one concrete controller backend."""
 
+    def for_set(self, set_name: str, /) -> BackendEvaluator:
+        """Return an evaluator with caches isolated to one recording set."""
+
     def evaluate(
         self,
         *,
@@ -192,6 +195,7 @@ class CandidateScore:
     metrics: Mapping[str, float]
     ranking_values: tuple[float, ...]
     failure_reason: str | None
+    set_name: str = "fit"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metrics", MappingProxyType(dict(self.metrics)))

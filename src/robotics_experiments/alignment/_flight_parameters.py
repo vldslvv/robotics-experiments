@@ -109,34 +109,49 @@ def prepare_alignment_reference(
     """Validate sufficient response evidence and stage it without transforming samples."""
 
     bundle = load_flight_parameters_bundle(path=flight_parameters_artifact)
-    fitting = tuple(
-        trace for trace in bundle.flight_parameters.response.traces if trace.set_name == "fit"
-    )
-    if len(fitting) != 1:
-        raise ValueError("alignment requires exactly one complete fitting response repetition")
-    evidence = fitting[0]
-    source_reference = bundle.run_dir / evidence.reference_path
-    _validated_payload(
-        path=source_reference,
-        definition=definition,
-        expected_profile_count=evidence.profile_count,
-    )
-    if evidence.profile_count != len(definition.profiles):
-        raise ValueError("flight parameters response profile count is insufficient for alignment")
+    evidence_by_set = {}
+    for set_name in ("fit", "validation", "acceptance"):
+        recordings = tuple(
+            trace
+            for trace in bundle.flight_parameters.response.traces
+            if trace.set_name == set_name
+        )
+        if len(recordings) != 1:
+            raise ValueError(
+                f"alignment requires exactly one complete {set_name} response repetition"
+            )
+        evidence = recordings[0]
+        _validated_payload(
+            path=bundle.run_dir / evidence.reference_path,
+            definition=definition,
+            expected_profile_count=evidence.profile_count,
+        )
+        if evidence.profile_count != len(definition.profiles):
+            raise ValueError(
+                "flight parameters response profile count is insufficient for alignment"
+            )
+        evidence_by_set[set_name] = evidence
     run_dir.mkdir(parents=True, exist_ok=True)
-    pinned_flight_parameters = run_dir / "flight_parameters"
     immutable_reference = os.path.relpath(bundle.run_dir, start=run_dir)
-    pinned_flight_parameters.symlink_to(immutable_reference, target_is_directory=True)
-    for source_relative, destination in (
-        (evidence.reference_path, run_dir / "reference.json"),
-        (evidence.ulog_path, run_dir / "reference.ulg"),
-        (evidence.bridge_log_path, run_dir / "bridge.log"),
-    ):
-        destination.symlink_to(Path("flight_parameters") / source_relative)
+    (run_dir / "flight_parameters").symlink_to(immutable_reference, target_is_directory=True)
+    for set_name, evidence in evidence_by_set.items():
+        destination_dir = run_dir if set_name == "fit" else run_dir / set_name
+        destination_dir.mkdir(exist_ok=True)
+        for source_relative, name in (
+            (evidence.reference_path, "reference.json"),
+            (evidence.ulog_path, "reference.ulg"),
+            (evidence.bridge_log_path, "bridge.log"),
+        ):
+            (destination_dir / name).symlink_to(
+                os.path.relpath(bundle.run_dir / source_relative, start=destination_dir)
+            )
     (run_dir / "manifest.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
+                "recording_sets": {
+                    name: evidence.reference_path for name, evidence in evidence_by_set.items()
+                },
                 "flight_parameters_run_id": bundle.flight_parameters.run_id,
                 "flight_parameters_fingerprint": (bundle.flight_parameters.artifact_fingerprint),
                 "flight_parameters_artifact": immutable_reference,

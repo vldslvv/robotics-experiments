@@ -52,6 +52,19 @@ failed attempt.
 The registered tasks are `Isaac-Drone-Hover-Direct-v1` and
 `Isaac-Switch-Press-Direct-v1`. Both use the normalized controller interface. The
 Torch implementation is required to match the NumPy controller sequentially.
+
+Each task's `policy.normalize_observations` Hydra setting controls RSL-RL's
+actor and critic empirical observation normalization. The current press-hover
+configuration enables it. Statistics update from training observations only
+and are part of the complete learner checkpoint restored between phases.
+Before restoring a checkpoint, the adapter makes normalization buffers created
+during inference-mode rollouts writable for checkpoint loading. The deterministic
+actor includes the actor normalizer followed by the actor network. Export deep-copies both into the same TorchScript artifact, freezing
+the input mapping for validation, final testing, and deployment. Evaluation
+does not update these statistics or modify producer artifacts. Observation
+schema, action limits, sensor noise, reset sampling, and acceptance criteria
+are unchanged.
+
 The pinned Isaac Lab `Thruster` realizes per-rotor response while the project
 owns allocation, yaw reaction, drag, the pusher-equipped articulation, and the
 sole body-wrench sink. Lab rigid-body gyroscopic forces are Hydra-owned and
@@ -197,27 +210,20 @@ utilization, requires a `0.003` improvement, and declares a plateau after 10
 stale evaluations.
 
 Hover training uses a 40-second episode horizon; approach uses 45 seconds. The
-hover schedule trains 15 iterations at `3e-5`, then restores the best complete
+hover schedule trains up to 50 iterations at `3e-4`, then restores the best complete
 checkpoint and refines it for up to 100 iterations at `1e-6`. Both phases are
-evaluated every five updates. Five stale evaluations stop either phase. The
-25+5 comparison peaked at broad update 15 and deteriorated afterward, motivating
-earlier, gentler refinement with the same reward. Active monitoring may still
-interrupt a clearly deteriorating campaign. The first run of this schedule,
-`press-hover-gentle-refine-20260905`, was interrupted after 15 broad and 15
-refinement updates: mean longest hover declined at all three refinement checks,
-from 7.65 to 6.70 seconds, with zero success. The configuration records the tried
-maximum budget; diagnose the saved trajectories before another launch. See
-decision-log entry 94 for the outcome and continuation.
+evaluated every five updates. Five stale evaluations stop either phase. Active
+monitoring may interrupt a campaign without a credible path to acceptance.
+The configuration records the maximum budget; experiment decisions and measured
+results are retained in `FLIGHT_TO_POLICY_IMPROVEMENTS.md`.
 
 Hover uses 4,096 environments with 256 policy steps per environment per update:
 12.8 simulated seconds per rollout and 1,048,576 transitions per PPO update.
-The broad phase allows 192 simulated seconds per environment and refinement
-allows 1,280, including resets. PPO uses one epoch and eight minibatches. Gamma,
+The broad phase allows 640 simulated seconds per environment and refinement
+allows 1,280, including resets. PPO uses four epochs and eight minibatches. Gamma,
 GAE lambda, exploration, action scales, and complete checkpoint restoration
-remain unchanged. Longer trajectories are an experimental choice; measured GPU
-utilization must be measured for each campaign. The 25+5 comparison averaged
-about 54% GPU utilization during training; rollout collection dominated update
-time, with about 21 seconds collecting and 0.1 seconds optimizing.
+remain unchanged. GPU utilization and rollout/optimizer timing must be measured
+for each campaign and retained alongside its training results.
 
 Every hover training reset starts its episode clock at zero. The runner does
 not randomize initial episode lengths for hover. At 20 Hz, collection truncates
@@ -240,7 +246,7 @@ broad phase evaluates every
 ten updates and both refinement phases evaluate every five. Model zero and every
 cadence-aligned phase boundary are evaluated; there is no extra boundary update.
 Both stages qualify against the complete 30-second hold, and every
-hover run uses the same measured reset population. Hover permits 30 attempted
+hover run uses the same measured reset population. Hover permits 150 attempted
 PPO updates and approach
 permits 180. Training advances after a phase reaches its maximum or its plateau
 rule fires. Validation and test always sample the full pinned envelope.
@@ -256,6 +262,30 @@ all four values together; it does not replace measured motion with zero. The
 trace does not contain controller filters, integrators, or command-delay state,
 so those start uninitialized and initialize from the restored physical state on
 the first controller step. Rotor thrust starts at the vehicle's hover value.
+
+Before PPO, evaluate deterministic position/yaw feedback in the actual press-hover
+environment:
+
+```bash
+make eval-press HYDRA_CONFIG=configs/train_press_hover_quad.yaml \
+  EVAL_ARGS=--hover-feasibility
+```
+
+This mode loads the same accepted controller, fitting-flight reset samples,
+selected stage duration, action interface, and production evaluation logic as
+training validation. It uses validation seeds 101/202/303 with 100 episodes per
+seed and applies the existing acceptance criteria. It does not load a trained
+actor or use test seeds. Feedback reads the schema-2 observed ENU position error,
+body velocity, body-to-world attitude, and contact-relative yaw. It converts the
+corrective velocity into body FLU, normalizes by policy action scales, and clips
+to the production action limits. Sensor noise and reset mixtures are unchanged.
+
+The three `rl.press.evaluation.feasibility_*` gains are Hydra-owned and excluded
+from the policy comparison fingerprint because they affect only this diagnostic.
+Reports live under `.build/hover-feasibility/<run-id>/feasibility.json`; an optional
+`--output-dir` selects a new directory. Reports retain pinned inputs, gains,
+workload, raw results, acceptance checks, and errors. Resolve a failed feasibility
+check before starting PPO; a pass is diagnostic evidence, not a policy artifact.
 
 Run training with:
 
@@ -332,12 +362,13 @@ The press PPO reward reports six signed contributions. Hover adds position
 and attitude utilization so both remain visible to the optimizer independently.
 Its `hover_stabilization` config selects `uniform` (weight 0.01 everywhere),
 `boundary_weighted` (0.01 inside the full measured envelope, 0.03 outside), or
-`outside_only` (zero inside, 0.03 outside). The revised hover setup selects
-`uniform`: `-0.01 * (position_utilization + attitude_utilization)`. This cost
+`outside_only` (zero inside, 0.03 outside). The current hover setup selects
+`boundary_weighted`: the cost is the sum of position and attitude utilization,
+multiplied by -0.01 inside the complete envelope and -0.03 outside. This cost
 remains active for nonzero error inside the envelope and reaches zero at the
 desired pose. It never chooses the larger of position and attitude.
 
-Hover retains the squared normalized-action cost and the -3.0 physical-failure
+Hover retains the squared normalized-action cost and a -30.0 physical-failure
 penalty. Its `position_progress`, `predictive_barrier`, and `hold_progress`
 contributions are zero. Crossing the 30-second hold or reaching the 40-second
 collection limit adds no reward or penalty. Hold counters remain qualification

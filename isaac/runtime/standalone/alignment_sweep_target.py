@@ -24,8 +24,12 @@ import numpy as np
 import torch
 
 from robotics_experiments.alignment import load_controller_definition
-from robotics_experiments.alignment._align import _staged_beam_search
-from robotics_experiments.alignment._io import _trace
+from robotics_experiments.alignment._align import (
+    _fitting_candidates,
+    _select_validation,
+    _staged_beam_search,
+)
+from robotics_experiments.alignment._io import _trace, _TraceFileEvaluator
 from robotics_experiments.alignment._metrics import metric
 from robotics_experiments.alignment._models import (
     CandidateScore,
@@ -64,9 +68,11 @@ def _write_target_candidates(
     schema_version: int,
     controller_id: str,
     definition_fingerprint: str,
+    reference_sha256: str,
     image: str,
     candidates: dict[ControllerSettings, tuple[ProbeTrace, ...]],
     failures: dict[str, str | None],
+    set_name: str = "fit",
 ) -> None:
     temporary_path = path.with_suffix(f"{path.suffix}.tmp")
     try:
@@ -82,6 +88,10 @@ def _write_target_candidates(
                 allow_nan=False,
                 separators=(",", ":"),
             )
+            stream.write(',"reference_sha256":')
+            json.dump(reference_sha256, stream)
+            stream.write(',"set_name":')
+            json.dump(set_name, stream)
             stream.write(',"image":')
             json.dump(image, stream, allow_nan=False, separators=(",", ":"))
             stream.write(',"candidates":{')
@@ -130,10 +140,12 @@ def _merge_target_candidate_spools(
     path: Path,
     controller_id: str,
     definition_fingerprint: str,
+    reference_sha256: str,
     image: str,
     scores: tuple[CandidateScore, ...],
     trace_sources: Mapping[ControllerSettings, ControllerSettings],
     spool_paths: tuple[Path, ...],
+    set_name: str = "fit",
 ) -> None:
     offsets: dict[str, tuple[Path, int, int, int]] = {}
     for spool_path in spool_paths:
@@ -159,6 +171,10 @@ def _merge_target_candidate_spools(
             json.dump(controller_id, stream, separators=(",", ":"))
             stream.write(',"definition_fingerprint":')
             json.dump(definition_fingerprint, stream, separators=(",", ":"))
+            stream.write(',"reference_sha256":')
+            json.dump(reference_sha256, stream)
+            stream.write(',"set_name":')
+            json.dump(set_name, stream)
             stream.write(',"image":')
             json.dump(image, stream, separators=(",", ":"))
             stream.write(',"candidates":{')
@@ -1161,6 +1177,9 @@ class _WorkerPool:
 
 
 class _LiveEvaluator:
+    def for_set(self, set_name: str, /) -> _TraceFileEvaluator:
+        return _TraceFileEvaluator(backend="isaac-lab", set_name=set_name)
+
     _retain_traces = False
 
     def __init__(
@@ -1233,6 +1252,89 @@ class _LiveEvaluator:
         return raw_results
 
 
+def _evaluate_fixed_set(
+    *,
+    config: ExperimentConfig,
+    target_path: Path,
+    run_dir: Path,
+    set_name: str,
+    candidates: tuple[CandidateScore, ...],
+) -> None:
+    """Replay a frozen list without parameter expansion or cross-set caches."""
+    if not candidates:
+        return
+    target = load_controller_definition(target_path)
+    directory = run_dir / set_name
+    reference_bytes = (directory / "reference.json").read_bytes()
+    reference_sha256 = hashlib.sha256(reference_bytes).hexdigest()
+    payload = json.loads(reference_bytes)
+    if payload["set_name"] != set_name:
+        raise ValueError("target reference recording set does not match evaluation")
+    (directory / "evaluation.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "set_name": set_name,
+                "settings_fingerprints": [_settings_fingerprint(c.settings) for c in candidates],
+                "reference_sha256": reference_sha256,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    spool_dir = directory / ".target-trace-spool"
+    spool_dir.mkdir()
+    pool = _WorkerPool(
+        config_path=os.environ[_CONFIG_PATH_ENV],
+        target_path=target_path,
+        reference_traces=payload["traces"],
+        worker_count=min(config.alignment.execution.worker_count, len(candidates)),
+        candidate_capacity=min(config.alignment.execution.candidate_capacity, len(candidates)),
+        spool_dir=spool_dir,
+    )
+    sampler = _GpuSampler(
+        run_dir=directory,
+        target_percent=config.alignment.execution.gpu_target_percent,
+        interval_s=config.alignment.execution.gpu_sample_interval_s,
+    )
+    sampler.start()
+    evaluator = _LiveEvaluator(pool=pool, sampler=sampler)
+    try:
+        results = evaluator.evaluate_scored_batch(
+            definition=target,
+            settings=tuple(c.settings for c in candidates),
+            reference_traces=None,
+        )
+        pool.close()
+    except BaseException:
+        pool.terminate()
+        raise
+    finally:
+        evaluator.finish_sampling(search_statistics={}, generated_refinements=0)
+    scores = tuple(
+        replace(
+            candidate,
+            usable=isinstance(result, MetricResult),
+            failure_reason=result if isinstance(result, str) else None,
+        )
+        for candidate, result in zip(candidates, results, strict=True)
+    )
+    _merge_target_candidate_spools(
+        path=directory / "target_candidates.json",
+        controller_id=target.controller_id,
+        definition_fingerprint=target.definition_fingerprint,
+        reference_sha256=reference_sha256,
+        image=os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image),
+        scores=scores,
+        trace_sources={candidate.settings: candidate.settings for candidate in candidates},
+        spool_paths=pool.spool_paths,
+        set_name=set_name,
+    )
+    for path in pool.spool_paths:
+        path.unlink()
+    spool_dir.rmdir()
+
+
 def _run(
     *,
     config: ExperimentConfig,
@@ -1241,7 +1343,11 @@ def _run(
 ) -> None:
     target = load_controller_definition(target_path)
     reference_path = run_dir / "reference.json"
-    payload = json.loads(reference_path.read_text())
+    reference_bytes = reference_path.read_bytes()
+    reference_sha256 = hashlib.sha256(reference_bytes).hexdigest()
+    payload = json.loads(reference_bytes)
+    if payload["set_name"] != "fit":
+        raise ValueError("alignment search requires fitting recordings")
     reference_traces = payload.get("traces")
     if not isinstance(reference_traces, list):
         raise ValueError(f"{reference_path} has no traces list")
@@ -1301,6 +1407,8 @@ def _run(
         json.dumps(
             {
                 "schema_version": 1,
+                "set_name": "fit",
+                "reference_sha256": reference_sha256,
                 "statistics": dict(outcome.statistics),
                 "generated_refinements": list(outcome.generated_refinements),
             },
@@ -1313,6 +1421,7 @@ def _run(
         path=run_dir / "target_candidates.json",
         controller_id=target.controller_id,
         definition_fingerprint=target.definition_fingerprint,
+        reference_sha256=reference_sha256,
         image=os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image),
         scores=outcome.candidate_scores,
         trace_sources=outcome.trace_sources,
@@ -1321,6 +1430,29 @@ def _run(
     for spool_path in pool.spool_paths:
         spool_path.unlink()
     spool_dir.rmdir()
+    # Validation sees only fitting-qualified candidates; acceptance sees one frozen setting.
+    eligible = _fitting_candidates(target=target, outcome=outcome)
+    _evaluate_fixed_set(
+        config=config,
+        target_path=target_path,
+        run_dir=run_dir,
+        set_name="validation",
+        candidates=eligible,
+    )
+    reference_definition = load_controller_definition(Path(os.environ["ALIGNMENT_REFERENCE"]))
+    selected, _scores, reasons = _select_validation(
+        target=target,
+        reference=reference_definition,
+        outcome=outcome,
+    )
+    if not reasons:
+        _evaluate_fixed_set(
+            config=config,
+            target_path=target_path,
+            run_dir=run_dir,
+            set_name="acceptance",
+            candidates=(selected,),
+        )
 
 
 def _benchmark_settings(

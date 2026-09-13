@@ -63,6 +63,7 @@ training:
 hover:
   policy:
     activation: elu
+    normalize_observations: false
     actor:
       hidden_dims: [128, 128]
       initial_noise_std: 1.0

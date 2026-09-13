@@ -105,9 +105,10 @@ class RlPolicyCriticConfig(_FreezableConfig):
 
 @dataclass
 class RlPolicyConfig(_FreezableConfig):
-    """Task-owned rsl_rl ``ActorCritic`` topology."""
+    """Task-owned actor/critic topology and input normalization."""
 
     activation: str
+    normalize_observations: bool
     actor: RlPolicyActorConfig
     critic: RlPolicyCriticConfig
 
@@ -284,6 +285,9 @@ class PressApproachEvaluationConfig(_FreezableConfig):
     validation_seeds: List[int]
     test_seeds: List[int]
     episodes_per_seed: int
+    feasibility_position_gain_per_s: float
+    feasibility_velocity_damping: float
+    feasibility_yaw_gain_per_s: float
 
 
 @dataclass

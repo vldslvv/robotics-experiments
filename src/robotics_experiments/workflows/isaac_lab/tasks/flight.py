@@ -583,15 +583,28 @@ def _velocity_command_blend(
 
 
 def _velocity_observation_bias(
-    params: _FlightActuationParams, velocity_setpoint: torch.Tensor, /
+    params: _FlightActuationParams,
+    velocity_setpoint: torch.Tensor,
+    physical_velocity: torch.Tensor,
+    /,
 ) -> torch.Tensor:
-    return params.velocity_observation_bias_mps * _velocity_command_blend(params, velocity_setpoint)
+    steady_motion = 1.0 - _velocity_command_blend(params, velocity_setpoint - physical_velocity)
+    return (
+        params.velocity_observation_bias_mps
+        * _velocity_command_blend(params, velocity_setpoint)
+        * steady_motion
+    )
 
 
 def _effective_velocity_observation_scale(
-    params: _FlightActuationParams, velocity_setpoint: torch.Tensor, /
+    params: _FlightActuationParams,
+    velocity_setpoint: torch.Tensor,
+    physical_velocity: torch.Tensor,
+    /,
 ) -> torch.Tensor:
-    blend = _velocity_command_blend(params, velocity_setpoint)
+    blend = _velocity_command_blend(
+        params, torch.maximum(velocity_setpoint.abs(), physical_velocity.abs())
+    )
     return params.velocity_observation_hold_scale + blend * (
         params.velocity_observation_scale - params.velocity_observation_hold_scale
     )
@@ -784,9 +797,11 @@ def _velocity(
         dt_s=outer_loop_period_s,
     )
     observed_velocity_world = (
-        _effective_velocity_observation_scale(params, velocity_setpoint_world)
+        _effective_velocity_observation_scale(
+            params, velocity_setpoint_world, linear_velocity_world
+        )
         * linear_velocity_world
-        + _velocity_observation_bias(params, velocity_setpoint_world)
+        + _velocity_observation_bias(params, velocity_setpoint_world, linear_velocity_world)
         + controller_state.velocity_estimator_bias_world
     )
     candidate_filtered_velocity = controller_state.filtered_velocity_world + velocity_alpha * (
@@ -1418,9 +1433,13 @@ def seed_flight_controller_state(
         velocity_estimator_bias_world=torch.where(
             selected,
             filtered_linear_velocity_world
-            - _effective_velocity_observation_scale(params, velocity_setpoint_world)
+            - _effective_velocity_observation_scale(
+                params, velocity_setpoint_world, physical_linear_velocity_world
+            )
             * physical_linear_velocity_world
-            - _velocity_observation_bias(params, velocity_setpoint_world),
+            - _velocity_observation_bias(
+                params, velocity_setpoint_world, physical_linear_velocity_world
+            ),
             state.velocity_estimator_bias_world,
         ),
         acceleration_world=torch.where(

@@ -887,7 +887,7 @@ def test_seeded_estimator_bias_blends_hold_and_motion_decay_by_command():
         filtered_yaw_torque=0.0,
     )
     initial_bias = np.array(controller.velocity_estimator_bias_enu)
-    assert initial_bias == pytest.approx(np.array([0.1, -0.2, 0.3]) - steady_bias)
+    assert initial_bias == pytest.approx(np.array([0.1, -0.2, 0.3]))
 
     controller, _omega = _step_controller(
         params, controller, np.array([0.02, 0.0, 0.0, 0.0]), _level_rest_state(), 0.004
@@ -900,7 +900,19 @@ def test_seeded_estimator_bias_blends_hold_and_motion_decay_by_command():
     assert controller.velocity_estimator_bias_enu == pytest.approx(initial_bias * expected_decay)
 
 
-def test_seeded_observation_adapters_are_gated_componentwise_by_velocity_setpoint():
+@pytest.mark.parametrize(
+    ("physical_velocity", "expected_scale", "expected_bias_fraction"),
+    [
+        ([0.005, -0.005, 0.005], [1.0, 1.5, 2.0], [0.0, 0.421875, 0.15625]),
+        ([0.02, -0.025, 0.005], [1.5, 1.84375, 2.0], [0.0, 0.5, 0.15625]),
+        ([1.0, -1.0, 1.0], [2.0, 2.0, 2.0], [0.0, 0.0, 0.0]),
+        ([-1.0, 1.0, -1.0], [2.0, 2.0, 2.0], [0.0, 0.0, 0.0]),
+        ([0.0, -0.02, 0.03], [1.0, 1.5, 2.0], [0.0, 0.5, 1.0]),
+    ],
+)
+def test_seeded_observation_adapters_distinguish_hold_and_steady_motion(
+    *, physical_velocity, expected_scale, expected_bias_fraction
+):
     steady_bias = np.array([0.01, -0.02, 0.03])
     params = build_actuation_params(
         geometry=_quad_geometry(),
@@ -919,7 +931,7 @@ def test_seeded_observation_adapters_are_gated_componentwise_by_velocity_setpoin
     controller = seed_actuation_controller_state(
         params=params,
         controller_dt_s=0.004,
-        physical_linear_velocity_enu=np.ones(3),
+        physical_linear_velocity_enu=np.asarray(physical_velocity),
         filtered_linear_velocity_enu=zero,
         velocity_setpoint_enu_mps=np.array([0.0, -0.02, 0.03]),
         angular_velocity_body_flu=zero,
@@ -939,7 +951,8 @@ def test_seeded_observation_adapters_are_gated_componentwise_by_velocity_setpoin
     )
 
     assert controller.velocity_estimator_bias_enu == pytest.approx(
-        -np.array([1.0, 1.5, 2.0]) - np.array([0.0, 0.5 * steady_bias[1], steady_bias[2]])
+        -np.array(expected_scale) * physical_velocity
+        - np.array(expected_bias_fraction) * steady_bias
     )
 
 

@@ -186,6 +186,7 @@ def test_target_candidates_are_streamed_to_atomic_json(tmp_path):
         schema_version=3,
         controller_id="controller",
         definition_fingerprint="definition",
+        reference_sha256="reference-digest",
         image="image",
         candidates={first: (trace,), second: (trace,)},
         failures={module._settings_fingerprint(second): "failed"},  # noqa: SLF001
@@ -228,6 +229,7 @@ def test_worker_spools_merge_in_candidate_order_with_effective_aliases(tmp_path)
         path=path,
         controller_id="controller",
         definition_fingerprint="definition",
+        reference_sha256="reference-digest",
         image="image",
         scores=scores,
         trace_sources={first: first, alias: first},

@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import sys
+from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
 
 from robotics_experiments.config import ExperimentConfig, load_config
+from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.rl import POLICY_FILENAME, prepare_policy_inputs, validate_policy_artifact
 from robotics_experiments.rl.press import (
     create_press_acceptance_criteria,
     evaluate_press_acceptance,
+    press_policy_contract,
 )
 from robotics_experiments.rl.press._fingerprint import _press_comparison_fingerprint
 
@@ -32,6 +37,130 @@ def _report(message: str) -> None:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+class _HoverFeedback:
+    """Position/yaw feedback using only the production schema-2 observation."""
+
+    def __init__(self, *, config: ExperimentConfig, flight_parameters: FlightParameters) -> None:
+        self._action = config.rl.action
+        self._evaluation = config.rl.press.evaluation
+        bounds = flight_parameters.hover.position_error_enu_m
+        self._position_scale = tuple(
+            max(abs(lower), abs(upper))
+            for lower, upper in zip(bounds.lower, bounds.upper, strict=True)
+        )
+
+    def __call__(self, observation: torch.Tensor, /) -> torch.Tensor:
+        # The observation error is actual minus desired position in world ENU.
+        error = observation[:, :3] * observation.new_tensor(self._position_scale)
+        world_velocity = -self._evaluation.feasibility_position_gain_per_s * error
+        # Conjugate body-FLU -> world-ENU quaternion, stored as xyzw at 16:20.
+        vector = -observation[:, 16:19]
+        scalar = observation[:, 19:20]
+        cross = 2.0 * torch.linalg.cross(vector, world_velocity)
+        body_velocity = world_velocity + scalar * cross + torch.linalg.cross(vector, cross)
+        body_velocity -= self._evaluation.feasibility_velocity_damping * observation[:, 10:13]
+        x, y, z, w = observation[:, 3:7].unbind(dim=-1)
+        yaw_error = torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+        yaw_rate = -self._evaluation.feasibility_yaw_gain_per_s * yaw_error
+        return torch.cat(
+            (
+                body_velocity / self._action.max_body_velocity_mps,
+                (yaw_rate / self._action.max_yaw_rate_radps).unsqueeze(-1),
+            ),
+            dim=-1,
+        ).clamp(-1.0, 1.0)
+
+
+def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
+    from robotics_experiments.workflows.isaac_lab import (
+        evaluate_press_approach_policy,
+        make_isaac_lab_env,
+        press_policy_evaluation,
+    )
+
+    stage = config.rl.press.selected_stage()
+    if stage.name != "hover" or config.rl.action.kind != "velocity":
+        raise ValueError("hover feasibility requires the press-hover velocity task")
+    inputs = prepare_policy_inputs(config=config, repo_root=_repo_root())
+    contract = press_policy_contract(config=config, controller=inputs.controller)
+    seeds = tuple(config.rl.press.evaluation.validation_seeds)
+    output_dir.mkdir(parents=True, exist_ok=False)
+    record = {
+        "schema_version": 1,
+        "mode": "hover-feasibility",
+        "set_name": "validation",
+        "seeds": seeds,
+        "episodes_per_seed": config.rl.press.evaluation.episodes_per_seed,
+        "episode_length_s": stage.episode_length_s,
+        "controller_path": str(inputs.controller_path),
+        "controller_digest": inputs.controller_digest,
+        "controller_run_id": inputs.controller.run_id,
+        "flight_parameters_path": str(inputs.flight_parameters_path),
+        "flight_parameters_digest": inputs.flight_parameters_digest,
+        "flight_parameters_run_id": inputs.flight_parameters.run_id,
+        "feedback": {
+            name: getattr(config.rl.press.evaluation, name)
+            for name in (
+                "feasibility_position_gain_per_s",
+                "feasibility_velocity_damping",
+                "feasibility_yaw_gain_per_s",
+            )
+        },
+    }
+    report_path = output_dir / "feasibility.json"
+    report_path.write_text(json.dumps(record, indent=2) + "\n")
+    try:
+        env, _env_cfg = make_isaac_lab_env(
+            task_id=config.rl.training.task_id,
+            training=False,
+            experiment_config=config,
+            controller_settings=inputs.controller.selected_settings,
+            seed=seeds[0],
+            num_envs=config.rl.press.evaluation.episodes_per_seed,
+            policy_contract=contract,
+            flight_parameters=inputs.flight_parameters,
+            hover_reset_samples=inputs.hover_reset_samples,
+        )
+        try:
+            result = evaluate_press_approach_policy(
+                env=env,
+                policy=_HoverFeedback(config=config, flight_parameters=inputs.flight_parameters),
+                seeds=seeds,
+                episodes_per_seed=config.rl.press.evaluation.episodes_per_seed,
+                hold_steps=round(stage.hold_s * config.rl.policy_rate_hz),
+                flight_parameters=inputs.flight_parameters,
+                report=_report,
+                trace_worst_episode=True,
+            )
+        finally:
+            env.close()
+        evaluated = press_policy_evaluation(
+            iteration=0,
+            checkpoint_path=report_path,
+            policy_digest="",
+            result=result,
+            source="hover-feasibility",
+        )
+        acceptance = evaluate_press_acceptance(
+            criteria=create_press_acceptance_criteria(
+                config=config.rl.press.acceptance,
+                flight_parameters=inputs.flight_parameters,
+            ),
+            evaluation=evaluated,
+        )
+        record.update(
+            result=asdict(result), acceptance=asdict(acceptance), passed=acceptance.passed
+        )
+        report_path.write_text(json.dumps(record, indent=2, allow_nan=False) + "\n")
+        if not acceptance.passed:
+            raise AssertionError("hover feasibility failed: " + ", ".join(acceptance.reasons))
+        _report(f"hover feasibility PASSED; report={report_path}")
+    except Exception as exc:
+        record.update(error=str(exc), passed=False)
+        report_path.write_text(json.dumps(record, indent=2, allow_nan=False) + "\n")
+        raise
 
 
 def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvaluationResult:
@@ -165,6 +294,8 @@ def _resolve_artifact_dir(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--hover-feasibility", action="store_true")
+    parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--artifact-dir", type=Path, default=None)
     parser.add_argument("--scene", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--strict", action="store_true", help=argparse.SUPPRESS)
@@ -177,13 +308,20 @@ def main() -> None:
     try:
         config_path = os.environ[_CONFIG_PATH_ENV]
         config = load_config(config_path)
-        _run(
-            config=config,
-            artifact_dir=_resolve_artifact_dir(
-                explicit_artifact_dir=args.artifact_dir,
+        if args.hover_feasibility:
+            run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            _run_feasibility(
                 config=config,
-            ),
-        )
+                output_dir=args.output_dir
+                or _repo_root() / ".build" / "hover-feasibility" / run_id,
+            )
+        else:
+            _run(
+                config=config,
+                artifact_dir=_resolve_artifact_dir(
+                    explicit_artifact_dir=args.artifact_dir, config=config
+                ),
+            )
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
         raise

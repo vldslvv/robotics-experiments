@@ -45,7 +45,9 @@ __all__ = [
 
 class _ActorCritic(Protocol):
     actor: torch.nn.Module
+    actor_obs_normalizer: torch.nn.Module
     critic: torch.nn.Module
+    critic_obs_normalizer: torch.nn.Module
 
     def state_dict(self) -> dict[str, Any]:
         """Return the complete actor-critic parameter state."""
@@ -312,8 +314,8 @@ def _train_cfg(
             "class_name": "ActorCritic",
             "init_noise_std": float(policy_config.actor.initial_noise_std),
             "noise_std_type": "scalar",
-            "actor_obs_normalization": False,
-            "critic_obs_normalization": False,
+            "actor_obs_normalization": bool(policy_config.normalize_observations),
+            "critic_obs_normalization": bool(policy_config.normalize_observations),
             "actor_hidden_dims": [int(d) for d in policy_config.actor.hidden_dims],
             "critic_hidden_dims": [int(d) for d in policy_config.critic.hidden_dims],
             "activation": str(policy_config.activation),
@@ -460,6 +462,13 @@ def save_checkpoint(
 
 def restore_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str) -> int:
     """Restore actor, critic, optimizer, and learner iteration for refinement."""
+    policy = _policy_module(runner)
+    # RSL-RL replaces normalization buffers during inference-mode rollouts.
+    # Loading outside that mode requires writable buffers, including for PPO.
+    for normalizer in (policy.actor_obs_normalizer, policy.critic_obs_normalizer):
+        for name, buffer in normalizer.named_buffers(recurse=False):
+            if buffer.is_inference():
+                normalizer.register_buffer(name, buffer.clone())
     runner.load(
         str(checkpoint_path),
         load_optimizer=True,
@@ -502,13 +511,14 @@ def initialize_actor_output(*, runner: _PolicyRunner, method: str) -> None:
     _refresh_parameter_monitoring(runner=runner)
 
 
-def _actor_module(runner: _PolicyRunner) -> torch.nn.Module:
-    return _policy_module(runner).actor
+def _actor_module(*, runner: _PolicyRunner) -> torch.nn.Module:
+    policy = _policy_module(runner)
+    return torch.nn.Sequential(policy.actor_obs_normalizer, policy.actor)
 
 
 def deterministic_actor(*, runner: _PolicyRunner) -> torch.nn.Module:
     """Return the checkpoint-loaded actor mean in evaluation mode."""
-    actor = _actor_module(runner)
+    actor = _actor_module(runner=runner)
     actor.eval()
     return actor
 
@@ -517,12 +527,12 @@ def export_policy(runner: _PolicyRunner, out_dir: Path, *, metadata: dict[str, A
     """Write the policy artifact: TorchScript actor + metadata sidecar.
 
     The exported module maps a ``[N, obs_dim]`` float32 batch to the
-    ``[N, action_dim]`` action mean (deterministic inference); the metadata is
-    the runtime policy-step loader validates at load time.
+    ``[N, action_dim]`` action mean using the frozen input normalizer and actor.
+    The runtime policy-step loader validates the metadata at load time.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    actor = copy.deepcopy(_actor_module(runner)).to("cpu").eval()
+    actor = copy.deepcopy(_actor_module(runner=runner)).to("cpu").eval()
     example = torch.zeros(1, int(metadata["obs_dim"]), dtype=torch.float32)
     scripted = torch.jit.trace(actor, example)
     scripted.save(str(out_dir / POLICY_FILENAME))

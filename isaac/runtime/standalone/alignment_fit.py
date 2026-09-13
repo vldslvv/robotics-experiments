@@ -13,6 +13,7 @@ from robotics_experiments.alignment import (
     load_controller_definition,
 )
 from robotics_experiments.alignment._artifact import (
+    _PENDING_QUALIFICATION,
     finalize_alignment_bundle,
     publish_controller,
     write_alignment_result,
@@ -64,9 +65,24 @@ def main() -> None:
     result = align(target, reference)
     result = replace(
         result,
-        controller=replace(result.controller, run_id=args.run_id),
+        controller=replace(
+            result.controller,
+            run_id=args.run_id,
+            advisory_quality_passed=False,
+            advisory_quality_reasons=(
+                *result.controller.advisory_quality_reasons,
+                _PENDING_QUALIFICATION,
+            ),
+        ),
     )
     write_alignment_result(result=result, run_dir=args.run_dir)
+    failures = tuple(
+        reason
+        for reason in result.controller.advisory_quality_reasons
+        if reason != _PENDING_QUALIFICATION
+    )
+    if failures:
+        raise SystemExit("controller qualification failed: " + "; ".join(failures))
     print(
         f"alignment {result.controller.alignment_id}/{result.controller.run_id}: "
         f"candidate={result.selected_candidate_index} "

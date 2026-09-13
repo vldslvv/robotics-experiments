@@ -1000,13 +1000,19 @@ def _index_candidate_diagnostics(
 
 
 class _TraceFileEvaluator:
-    def __init__(self, *, backend: str) -> None:
+    def __init__(self, *, backend: str, set_name: str = "fit") -> None:
+        if set_name not in {"fit", "validation", "acceptance"}:
+            raise ValueError(f"unknown alignment recording set {set_name!r}")
+        self._set_name = set_name
         self._backend = backend
         self._retain_traces = False
         self._path: Path | None = None
         self._payload: dict[str, Any] | None = None
         self._candidate_offsets: dict[str, tuple[int, int]] = {}
         self._candidate_failures: dict[str, str] = {}
+
+    def for_set(self, set_name: str, /) -> _TraceFileEvaluator:
+        return _TraceFileEvaluator(backend=self._backend, set_name=set_name)
 
     def _load_payload(self, *, path: Path) -> dict[str, Any]:
         if self._path == path and self._payload is not None:
@@ -1026,6 +1032,10 @@ class _TraceFileEvaluator:
         if self._path == path and self._payload is not None:
             return self._payload
         payload, offsets, failures = _index_candidate_diagnostics(path=path)
+        with (path.parent / "reference.json").open("rb") as reference:
+            reference_sha256 = hashlib.file_digest(reference, "sha256").hexdigest()
+        if payload.get("reference_sha256") != reference_sha256:
+            raise RuntimeError(f"{path} was evaluated against a different reference recording")
         self._path = path
         self._payload = payload
         self._candidate_offsets = offsets
@@ -1063,6 +1073,8 @@ class _TraceFileEvaluator:
                 "or an explicitly injected evaluator"
             )
         run_dir = Path(run_dir_value)
+        if self._set_name != "fit":
+            run_dir /= self._set_name
         if self._backend == "px4-sitl":
             path = run_dir / "reference.json"
             key = "traces"
@@ -1071,6 +1083,8 @@ class _TraceFileEvaluator:
             path = run_dir / "target_candidates.json"
             key = _fingerprint(asdict(settings))
             payload = self._load_candidate_payload(path=path)
+        if payload.get("set_name") != self._set_name:
+            raise RuntimeError(f"{path} was captured for a different recording set")
         if payload.get("schema_version") != _TRACE_SCHEMA_VERSION:
             raise RuntimeError(f"{path} has an unsupported trace schema")
         if payload.get("controller_id") != definition.controller_id:

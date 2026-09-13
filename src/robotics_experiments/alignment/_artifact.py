@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import warnings
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,8 @@ from robotics_experiments.alignment._models import (
 from robotics_experiments.controller import load_controller_artifact
 
 __all__: list[str] = []
+
+_PENDING_QUALIFICATION = "controller audit and integration qualification pending"
 
 _CONTROLLER_SCHEMA_VERSION = 1
 _SELECTION_SCHEMA_VERSION = 1
@@ -158,6 +160,7 @@ def _selection_payload(result: AlignmentResult, /) -> dict[str, Any]:
         "candidates": [
             {
                 "index": candidate.index,
+                "set_name": candidate.set_name,
                 "settings_overrides": {
                     name: value
                     for name, value in asdict(candidate.settings).items()
@@ -208,6 +211,7 @@ def load_selection(*, run_dir: Path, controller: ControllerArtifact) -> Alignmen
         row = _object(value=raw_row, name=name)
         expected_row = {
             "index",
+            "set_name",
             "settings_overrides",
             "metrics",
             "ranking_values",
@@ -216,6 +220,8 @@ def load_selection(*, run_dir: Path, controller: ControllerArtifact) -> Alignmen
         }
         if set(row) != expected_row or row["index"] != row_index:
             raise ValueError(f"{name} fields or index mismatch")
+        if row["set_name"] not in {"fit", "validation"}:
+            raise ValueError(f"{name} has an invalid selection recording set")
         overrides = _object(value=row["settings_overrides"], name=f"{name}.settings_overrides")
         extra = overrides.keys() - _SETTINGS_FIELDS
         if extra:
@@ -233,6 +239,7 @@ def load_selection(*, run_dir: Path, controller: ControllerArtifact) -> Alignmen
         candidates.append(
             CandidateScore(
                 index=row_index,
+                set_name=row["set_name"],
                 settings=_settings(value=settings_payload, name=f"{name}.settings"),
                 usable=usable,
                 metrics={
@@ -325,10 +332,13 @@ def finalize_alignment_bundle(
 
     controller = load_controller_artifact(run_dir)
     load_selection(run_dir=run_dir, controller=controller)
-    if not controller.advisory_quality_passed:
-        raise ValueError(
-            "controller quality gates failed: " + "; ".join(controller.advisory_quality_reasons)
-        )
+    response_failures = tuple(
+        reason for reason in controller.advisory_quality_reasons if reason != _PENDING_QUALIFICATION
+    )
+    if response_failures or (
+        not controller.advisory_quality_passed and not controller.advisory_quality_reasons
+    ):
+        raise ValueError("controller quality gates failed: " + "; ".join(response_failures))
     _require_passed_diagnostic(
         path=run_dir / "actuator_audit.json",
         name="actuator audit",
@@ -337,6 +347,25 @@ def finalize_alignment_bundle(
         path=run_dir / "controller_boundary_replay.json",
         name="controller boundary replay",
     )
+    _require_passed_diagnostic(
+        path=run_dir / "qualification.json", name="fixed benchmark qualification"
+    )
+    for set_name in ("validation", "acceptance"):
+        for filename in ("actuator_audit.json", "controller_boundary_replay.json"):
+            _require_passed_diagnostic(
+                path=run_dir / set_name / filename, name=f"{set_name} {filename}"
+            )
+    _require_passed_diagnostic(path=run_dir / "integration.json", name="controller integration")
+    for filename in ("qualification.json", "integration.json"):
+        report = json.loads((run_dir / filename).read_text())
+        if (
+            report.get("settings_fingerprint") != controller.settings_fingerprint
+            or report.get("flight_parameters_fingerprint")
+            != controller.flight_parameters_fingerprint
+        ):
+            raise ValueError(f"{filename} does not qualify the selected controller inputs")
+    if json.loads((run_dir / "qualification.json").read_text()).get("set_name") != "acceptance":
+        raise ValueError("controller qualification requires acceptance recordings")
     evidence = run_dir / "evidence"
     diagnostics = run_dir / "diagnostics"
     stages = diagnostics / "stages"
@@ -380,6 +409,16 @@ def finalize_alignment_bundle(
             compression_arguments=("-8", "--long=27", "-T0"),
         )
     target_source.unlink()
+    for set_name in ("validation", "acceptance"):
+        source = run_dir / set_name / "target_candidates.json"
+        _compress_file(
+            source=source,
+            destination=source.with_suffix(".json.zst"),
+            compression_arguments=("-8", "--long=27", "-T0"),
+        )
+        source.unlink()
+    controller = replace(controller, advisory_quality_passed=True, advisory_quality_reasons=())
+    (run_dir / "controller.json").write_text(_canonical_json(_plain(controller)) + "\n")
     role_by_path = {
         "controller.json": "controller",
         "selection.json.zst": "selection",
