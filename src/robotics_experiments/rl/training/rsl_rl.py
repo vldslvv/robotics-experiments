@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
+from rsl_rl.networks import EmpiricalNormalization
 from rsl_rl.runners import OnPolicyRunner
 
 from robotics_experiments.config import RlPolicyConfig, RlTrainingConfig, RlTrainingPhaseConfig
@@ -403,12 +404,17 @@ def configure_phase(
     phase: RlTrainingPhaseConfig,
     phase_number: int = 1,
 ) -> None:
-    """Apply declarative optimizer values without replacing optimizer state."""
+    """Apply optimizer and normalization settings without replacing learner state."""
     runner.alg.learning_rate = float(phase.learning_rate)
     runner.alg.entropy_coef = float(phase.entropy_coef)
     runner.alg.schedule = str(phase.schedule)
     for parameter_group in runner.alg.optimizer.param_groups:
         parameter_group["lr"] = float(phase.learning_rate)
+    policy = _policy_module(runner)
+    for normalizer in (policy.actor_obs_normalizer, policy.critic_obs_normalizer):
+        if isinstance(normalizer, EmpiricalNormalization):
+            # RSL-RL enters train mode for every chunk; its sample limit survives that.
+            normalizer.until = None if phase.update_observation_normalization else 0
     if isinstance(getattr(runner, "logger", None), _MetricLogger):
         runner.logger.writer.configure_phase(phase=phase, phase_number=phase_number)
     elif isinstance(getattr(runner, "writer", None), _PresentationWriter):

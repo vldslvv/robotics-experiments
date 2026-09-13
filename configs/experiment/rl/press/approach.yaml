@@ -18,11 +18,13 @@ curriculum:
           learning_rate: 3.0e-4
           schedule: fixed
           entropy_coef: 0.0
+          update_observation_normalization: true
         - max_iterations: 100
           evaluation_interval: 5
-          learning_rate: 1.0e-6
+          learning_rate: 1.0e-5
           schedule: fixed
           entropy_coef: 0.0
+          update_observation_normalization: false
       plateau:
         metric_name: episode_longest_hover_duration_mean_s
         direction: maximize
@@ -42,16 +44,19 @@ curriculum:
           learning_rate: 1.0e-4
           schedule: fixed
           entropy_coef: 0.0
+          update_observation_normalization: true
         - max_iterations: 30
           evaluation_interval: 5
           learning_rate: 3.0e-5
           schedule: fixed
           entropy_coef: 0.0
+          update_observation_normalization: true
         - max_iterations: 100
           evaluation_interval: 5
           learning_rate: 1.0e-5
           schedule: fixed
           entropy_coef: 0.0
+          update_observation_normalization: true
       plateau:
         metric_name: hover_envelope_utilization_mean
         direction: minimize

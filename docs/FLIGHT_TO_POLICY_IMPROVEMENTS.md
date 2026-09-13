@@ -1,9 +1,14 @@
 # Flight-to-policy improvements
 
-Stages 1, 3, 4, and 5 improve experiment traceability, evaluation correctness, and
-configuration for a small number of consecutive policy runs. The implemented
-behavior is described below; impacts are expectations, not measured improvements
-in policy performance.
+The flight-to-policy flow is complete. Controller run `20260912T211745Z` is
+qualified against the fixed flight bundle `20260912T102640Z`. Press-hover campaign
+11, `20260913T095657Z`, is accepted and published as `latest` and `best` after
+300/300 successful reserved-test episodes with every acceptance check passing.
+Test position error is 17.24 mm RMSE, 19.08 mm P95, and 19.62 mm P99.
+
+This document separates implementation expectations from measured execution
+results and retains unsuccessful iterations. The final report and exact campaign
+ledger are under `.build/flight-to-policy/20260912T102640Z/`.
 
 | Change | Implemented behavior | Expected impact |
 | --- | --- | --- |
@@ -18,8 +23,8 @@ remain unchanged. Tests cover provenance serialization and retention without
 launching subprocesses, pooled statistics, NaN and both infinities, completed episode
 masking, and unavailable successful-hold statistics.
 
-Finite checks add evaluation work and device synchronization. GPU overhead and
-policy performance have not been measured for this change. Training does not
+Finite checks add evaluation work and device synchronization. Their isolated GPU
+overhead has not been measured; end-to-end results appear below. Training does not
 collect Git commits, working-tree state or container identity. Keep the checkout
 and configuration fixed during a campaign.
 
@@ -38,7 +43,7 @@ Stage 4 implements recording and dataset separation:
 | Change | Implemented behavior | Expected impact |
 | --- | --- | --- |
 | Record complete hover motion | Raw and verified traces retain pose plus directly measured ENU linear/angular velocity from the same snapshot. Reset loading reads those values directly. | Removes velocity estimation from pose differences and preserves the measured motion at reset. PPO observations and rollout storage retain their existing format. |
-| Assign complete flights to three sets | YAML lists define 30 fitting, 10 validation, and 10 acceptance hover flights, plus one complete general controller-response flight per set. Each recorder uses the same behavior and cadence for all sets, with distinct recorded seeds. | Provides held-out evidence without changing how a set is captured. Hover capture grows from 30 to 50 flights and response capture from one to three complete suites. Actual runtime remains unmeasured. |
+| Assign complete flights to three sets | YAML lists define 30 fitting, 10 validation, and 10 acceptance hover flights, plus one complete general controller-response flight per set. Each recorder uses the same behavior and cadence for all sets, with distinct recorded seeds. | Provides held-out evidence without changing how a set is captured. Hover capture grows from 30 to 50 flights and response capture from one to three complete suites. Measured runtime appears in the execution record. |
 | Keep held-out recordings out of derivation | Bounds and acceptance limits use the 30 fitting hover flights; resets use only their policy windows. Alignment preparation pins all three response flights. All sets retain their original evidence and statistics. | Preserves the reference sample count and prevents held-out measurements from influencing current training inputs or thresholds. Stage 5 uses independent response sets for controller selection and final qualification. |
 | Validate motion and set metadata | Strict loaders reject missing/misaligned/non-finite motion arrays. Campaign derivation requires every configured flight and set/seed assignment; bundle validation checks recorded identities and file hashes. | Invalid or misassigned evidence raises an error before publication or consumption. Old artifacts require a fresh capture; they are never migrated or overwritten. |
 
@@ -68,16 +73,16 @@ Implemented changes:
 - Add `eval-press --hover-feasibility`: deterministic observed position/yaw
   feedback through the normal press-hover velocity action, measured fitting resets,
   validation seeds, configured duration, and unchanged evaluation criteria.
-  Initial feedback gains are position 1.25/s, velocity damping 0.2, and yaw 2.0/s;
-  they are diagnostic starting values, not measured or accepted tuning.
+  Feedback gains are position 1.25/s, velocity damping 0.2, and yaw 2.0/s;
+  their measured feasibility results appear below.
 
 Expected impact: validation now measures transfer to an independent PX4 response
 flight before selection; fixed-benchmark acceptance can reject the frozen
 controller. Feasibility can expose controller/action/reset problems before PPO
-spends a training budget. No improvement in controller accuracy, policy success,
-or GPU utilization has yet been measured for these changes.
+spends a training budget. Measured controller qualification, policy acceptance,
+and GPU utilization appear in the execution record.
 
-## Execution record and remaining work
+## Execution record
 
 The operator confirmed driver resolution and authorized GPU execution on
 2026-09-12. The host reports an NVIDIA GeForce RTX 4090 with driver 580.178.04
@@ -85,9 +90,10 @@ and 24,564 MiB memory. Capture run `20260912T102640Z` started at 10:27 UTC with
 the configured single worker. Its console and one-second GPU samples are under
 `.build/flight-to-policy/20260912T102640Z/`; the published flight bundle is
 under `.build/flight-parameters/holybro-x500-v2-hover-v1/20260912T102640Z/`.
-Existing drone assets are retained using the Make command-line variable
-`MAKEFLAGS=--assume-old=generate-drone-usd`, including in recursive flight
-launches; their starting digests are in `source-assets.sha256`.
+Asset-generation prerequisites are suppressed with top-level
+`make --assume-old=generate-drone-usd` and recursive
+`MAKEFLAGS=--assume-old=generate-drone-usd`; starting asset digests are in
+`source-assets.sha256`.
 Capture completed at approximately 12:01 UTC. All 50 hover flights passed ULog
 verification, preserving 600 samples each (30,000 total). Fitting seeds are
 1001-1030, validation seeds 2001-2010, and acceptance seeds 3001-3010. The three
@@ -833,6 +839,11 @@ epochs, and `boundary_weighted` hover stabilization. Existing tests are updated
 for the selected configuration and all pre-commit checks pass. Host input
 validation confirms unchanged controller and flight-parameter digests.
 
+The original local diagnostics below use the positive world-quaternion
+representation. They are superseded by the production-quaternion correction
+recorded with campaign six below; retained values explain the original
+experiment decisions and must not be treated as production-input derivatives.
+
 `policy-local-feedback-diagnosis.json` records an additional read-only actor
 diagnostic for each completed campaign's best and last evaluated actor. It uses
 the production observation packer at the stationary goal, identity world/body
@@ -1038,3 +1049,437 @@ pinned. The campaign ledger remains five completed campaigns, three consecutive
 campaigns without a qualifying improvement, and best validation mean longest
 hover 7.999500 s. No policy has passed acceptance and no reserved acceptance
 seeds have been used in these procedural checks.
+
+After commit `c180a12`, the user resumes execution. The RTX 4090 responds
+normally with driver 580.178.04, the working tree is clean before launch, and
+input validation passes for the pinned controller and flight bundle.
+Procedural check `20260913T042458Z` starts from scratch to complete the
+normalization verification interrupted in the preceding run. Its operator log
+is `normalization-gpu-smoke-04.log`. The worker crashes during Kit startup
+before environment setup or PPO with SIGSEGV; the recorded native stack runs
+through `getenv`, `XOpenDisplay`, and `omni.platforminfo`. The monitor cannot
+start because the worker has not yet created its monitoring directory. This
+startup failure is excluded from campaign counts. A fresh procedural check
+`20260913T042617Z` starts with the same inputs and configuration, preserving
+the failed run and its integration log. Campaign six remains pending
+completion of this check.
+
+Procedural check `20260913T042617Z` passes completely in 639.3 seconds:
+three full validation workloads, both PPO updates, checkpoint restore,
+refinement reset, exported-actor evaluation, and worker teardown complete.
+The report status is `procedural_smoke_complete`; no final acceptance test is
+run. The normalization integration issue is resolved, while policy learning
+performance remains to be established by a full campaign. No GPU telemetry
+error recurs in this run. Its monitor is stopped and its database retained.
+
+Campaign six is `20260913T043730Z`, with operator log
+`press-hover-campaign-06.log`, scratch seed 42, and empirical actor/critic
+observation normalization enabled. Other settings retain campaign five:
+4096 environments, 256 rollout steps, four PPO epochs, 50 broad updates at
+3e-4 followed by up to 100 refinement updates at 1e-6, evaluation every five
+updates, boundary-weighted pose cost, failure penalty 30, and initial action
+noise standard deviation 0.03. Controller, flight bundle, recorded resets,
+sensor noise, validation/test workloads, and acceptance limits remain pinned.
+The run has its own Trackio database under its `monitoring` directory.
+
+Campaign-six validation at updates 5/10/15 gives mean longest hover
+0.169500/0.183500/0.195000 s, with 4/1/1 flight failures out of 300 and
+zero successes. Update five falls short of the 0.01 s plateau improvement;
+updates ten and fifteen each qualify against the campaign reference. Training
+at update five averages 55.5% GPU utilization: rollout collection takes
+21.23 seconds per update and PPO optimization 0.393 seconds. Simulation
+collection remains the measured bottleneck below the 95% utilization target.
+
+The local actor diagnostic requires a correction. Production canonicalizes the
+relative quaternion to positive scalar, but its world quaternion near this
+reset is [0, 0, 0, -1] in xyzw order. The original diagnostic supplied
+[0, 0, 0, 1] for both. These represent the same physical orientation but are
+different neural-network inputs, especially after empirical normalization.
+The update-15 checkpoint's world-quaternion scalar mean is -0.999929 with
+standard deviation 0.000138, confirming the production representation. The
+original JSON remains preserved; corrected results for the same saved actors
+are in `policy-local-feedback-production-quaternion.json`. No actor or producer
+artifact is changed, and this is still a local diagnostic, not an evaluation.
+
+With the production quaternion, campaign five's best actor has local yaw
+feedback -0.148658 per second, rather than the original diagnostic's
+-0.001086. Campaign six at update 15 reaches -1.984649 per second, near the
+feasibility feedback's -2.0. Its position feedback diagonal remains weak at
+[-0.022737, -0.053686, -0.047178] per second versus -1.25 per second for
+feasibility. The corrected evidence supports a substantial improvement in yaw
+response with normalization while position holding remains unresolved.
+
+Campaign-six updates 20/25/30 record mean longest hover
+0.206667/0.209667/0.225833 s. Flight failures are 1/1/2 out of 300;
+all checkpoints have zero successes, and the maximum individual hold at update
+30 is 0.60 s. Despite occasional 0.01 s improvements, this trajectory remains
+far from a credible 30-second hold within the campaign. The operator stops it
+after update 30 and retains all seven completed validation records and actors.
+Its best 0.225833 s does not improve the previous 7.999500 s overall best.
+Six campaigns are counted, with four consecutive campaigns without a qualifying
+overall improvement. No acceptance test is run.
+
+The next campaign increases only press-hover initial normalized action
+exploration standard deviation from 0.03 to 0.10. Translation exploration
+therefore rises from 0.015 to 0.05 m/s at the unchanged 0.5 m/s action scale;
+yaw-rate exploration changes by the same factor. The position-feedback
+feasibility controller requests 0.0625 m/s for a 5 cm error before damping, so
+the wider exploration can sample corrections that are rare under the previous
+noise. Normalization, phase schedule, reward, seed 42, controller, flight bundle,
+resets, sensor noise, validation/test workload, and quality thresholds remain
+unchanged. This tests the weak position-learning hypothesis; it does not
+establish a learning improvement in advance.
+
+Campaign six's stop exhausts the 60-second container grace and exits 137.
+The root report is interrupted; the last durable worker report retains its
+training status. Its seven completed evaluations and checkpoint references are
+preserved, and its monitor is stopped. Campaign seven is `20260913T051339Z`,
+with operator log `press-hover-campaign-07.log` and a separate Trackio database
+in that run's `monitoring` directory. Full pre-commit passes before launch.
+
+Campaign-seven validation at updates 5/10/15 gives mean longest hover
+0.228000/0.734333/1.992667 s, with zero flight failures and collisions across
+all 300 episodes at each checkpoint, and zero successful 30-second holds.
+The update-ten maximum individual hold is 2.30 s. Wider exploration produces
+substantial early holding progress over campaign six, so the campaign continues.
+
+Campaign-seven updates 20/25/30/35/40/45 record mean longest hover
+2.190000/2.586833/3.140167/3.959500/4.457667/5.860833 s. All have zero
+successes; flight failures remain zero through update 40, then 1/300 at update
+45. Update 50 produces 298/300 successful holds and mean longest hover
+29.803333 s. It fails validation on two flight failures, minimum closest range
+0.398951530 m against 0.400000000 m, and vertical position RMSE
+0.019271377 m against 0.016957235 m. All other checks pass, including pooled
+3D position RMSE 0.023463658 m, P95 0.027722006 m, P99 0.029335901 m,
+and maximum 0.033703472 m. These are validation measurements, not final-test
+acceptance. The complete update-50 learner is restored for refinement at
+learning rate 1e-6. The actor is not published and reserved test seeds remain
+unused. This campaign has already exceeded the previous 7.999500 s overall
+best, so its eventual completed-campaign progress accounting will reset the
+consecutive-no-improvement count.
+
+After five refinement updates (total update 55), campaign seven records
+295/300 successes and mean longest hover 29.507167 s. Vertical RMSE and all
+other pose statistics pass, but five flight failures and minimum closest range
+0.399021149 m fail validation. After ten refinement updates (total 60),
+success falls to 291/300 and mean longest hover 29.111000 s. Minimum range
+0.399353027 m and nine flight failures fail, as do X RMSE 0.039090470 m,
+horizontal RMSE 0.040435027 m, and total position RMSE 0.041154815 m.
+The operator stops this second consecutive refinement regression and preserves
+all 13 completed validation records. No reserved acceptance workload runs.
+The best update-50 validation result raises the overall mean-longest-hover best
+to 29.803333 s, an improvement of 21.803833 s, so the completed-campaign stale
+counter resets to zero after seven campaigns. Policy acceptance is still false.
+
+A read-only diagnostic isolates normalization-statistic drift from weight
+updates using the saved update-50 and update-60 actors. At 27 stationary
+positions around the goal with the production quaternion, total normalized
+X-action change RMS is 0.015882; substituting only update-60 normalization
+statistics into a temporary in-memory copy of the update-50 actor produces
+0.014971 RMS change. The remaining weight-change contribution measured with
+update-60 statistics is 0.001046 RMS. At the exact goal, X action moves from
+0.010952 to 0.027057; the statistics-only substitution gives 0.026177.
+The diagnostic file is `campaign-07-normalization-drift-diagnosis.json`.
+It is not a trajectory qualification, and no saved actor is changed or used
+as external training initialization.
+
+The next campaign changes only the hover refinement learning rate from 1e-6
+to 3e-5. The evidence suggests that the previous rate cannot compensate for
+the moving input normalization during refinement. The higher rate gives the
+actor more capacity to adjust while remaining ten times below the broad-phase
+3e-4 rate. Broad-phase length, exploration 0.10, normalization, reward,
+seed 42, controller, flight bundle, resets, sensor noise, validation and test
+workloads, and all acceptance limits retain campaign-seven values.
+
+Campaign seven's root report is interrupted; the container exits 143 promptly,
+and its last durable worker report retains training status with all 13
+completed evaluations. Its monitor is stopped. Campaign eight is
+`20260913T061756Z`, with operator log `press-hover-campaign-08.log` and its own
+Trackio database under the run's `monitoring` directory. Full pre-commit passes
+before launch. It starts from scratch with seed 42; no campaign-seven learner
+or temporary diagnostic actor initializes it.
+
+Campaign eight reproduces campaign seven exactly through broad update 50: the
+update-50 actor digest and every validation metric match. It records 298/300
+successes and mean longest hover 29.803333 s, with the same range, flight-failure,
+and vertical-RMSE failures listed above. The complete update-50 learner is
+restored and refinement starts at 3e-5. This verifies that the experiment changes
+refinement behavior only; the broad-phase starting point is identical.
+
+Campaign-eight update 55 regresses to 1/300 successes, six flight failures,
+and mean longest hover 17.027167 s, with several horizontal position failures.
+Update 60 recovers to 298/300 successes and 29.803000 s. Its remaining failed
+checks are minimum range 0.399680614 m, two flight failures, X RMSE
+0.033113616 m against 0.028192865 m, and horizontal RMSE 0.036984307 m
+against 0.036455555 m. Vertical RMSE 0.007213045 m and total position RMSE
+0.037681122 m pass. Refinement continues because the second checkpoint
+recovers long holds; neither checkpoint is validation-eligible.
+
+Update 65 regresses again to 53/300 successes, four flight failures, and
+mean longest hover 16.033167 s. X/Y/horizontal/total position RMSE and total
+position P95 fail. The operator stops campaign eight after these three
+refinement checkpoints: the best remains broad update 50 at 29.803333 s,
+with no qualifying overall improvement. Eight campaigns are counted, and the
+consecutive-no-improvement count becomes one. No acceptance test runs.
+
+The read-only `campaign-08-normalization-drift-diagnosis.json` uses the same
+27 production-quaternion goal-neighborhood observations as the campaign-seven
+diagnostic. At update 65, statistics-only X-action change RMS is 0.020732;
+weight changes measured with current statistics contribute Y/Z RMS
+0.028137/0.054807, compared with 0.000228/0.004625 at campaign-seven
+update 60. These local probes support both continuing normalization drift and
+substantially larger weight changes at 3e-5; they are not trajectory evidence.
+No producer actor is modified.
+
+Campaign nine will change only refinement learning rate from 3e-5 to 1e-5,
+between the weak adaptation at 1e-6 and oscillatory refinement at 3e-5. The
+expected impact is smaller refinement weight changes while allowing more
+adaptation than campaign seven. Seed 42, broad schedule, exploration 0.10,
+normalization, reward, controller, flight bundle, resets, sensor noise, and all
+validation/test acceptance rules remain unchanged. It starts from scratch.
+
+Campaign eight exhausts the 60-second Docker stop grace and exits 137; its
+root report is interrupted and all 14 completed worker evaluations remain
+preserved. Its monitor is stopped. Full pre-commit passes before campaign
+nine, `20260913T072658Z`, whose operator log is `press-hover-campaign-09.log`
+and whose run-scoped Trackio database is in its `monitoring` directory.
+The driver check succeeds immediately before launch.
+
+Campaign nine reproduces every broad-phase actor digest and every validation
+metric through update 50 exactly. The starting refinement result is again
+298/300 successes, mean longest hover 29.803333 s, and the same minimum-range,
+flight-failure, and vertical-RMSE failures. The complete update-50 learner is
+restored and refinement begins at 1e-5. Representative Trackio readings near
+update 20 show training GPU utilization 53.2%, validation 46.5%, rollout
+collection 20.77 s/update, and PPO optimization 0.37 s/update. Simulation
+collection remains the limiting factor below the 95% utilization target.
+
+Campaign-nine update 55 regresses to zero successes, four flight failures,
+and mean longest hover 17.414000 s; successful-hold pose statistics are
+unavailable. Update 60 recovers to 295/300 successes, two flight failures,
+three timeouts, and mean longest hover 29.751333 s. Failed checks are minimum
+range 0.399686337 m, flight failures, X RMSE 0.043377382 m, X P95
+0.050601614 m, horizontal RMSE 0.045146378 m, and total position RMSE
+0.048119309 m. The recovery justifies observing one more checkpoint, but the
+intermediate learning rate has not resolved horizontal drift or qualification.
+
+Campaign-nine update 65 regresses to zero successes, four flight failures,
+and mean longest hover 18.169333 s. Successful-hold pose statistics are
+unavailable. The operator stops it after three refinement checkpoints; all
+14 completed evaluations are retained. Docker exhausts the 60-second grace
+and exits 137, the root report is interrupted, and the monitor is stopped.
+The best remains 29.803333 s at broad update 50. Nine campaigns are counted,
+with two consecutive campaigns without a qualifying improvement and no
+reserved acceptance test.
+
+`campaign-09-normalization-drift-diagnosis.json` repeats the read-only
+27-position diagnostic with production quaternion. At update 65, total
+X-action change RMS is 0.017833 and the statistics-only change is 0.021323;
+weight changes with current statistics contribute 0.005063 in X and
+0.068715 in Z. Across refinement rates 1e-6, 3e-5, and 1e-5, input-statistic
+drift persists while larger weight updates do not consistently compensate.
+These local diagnostics support an experiment freezing the input mapping;
+they do not qualify any actor.
+
+The next experiment adds Hydra phase setting
+`update_observation_normalization`. The hover broad phase keeps it true and
+refinement sets it false. After restoring the complete selected learner, the
+adapter sets RSL-RL empirical actor/critic normalizers to stop updating via
+their existing sample-limit control. The means, variances, standard deviations,
+counts, weights, and optimizer state are preserved at the boundary. Unlike
+setting evaluation mode, the sample limit persists when RSL-RL re-enters
+training mode for each chunk. Other phases explicitly keep updates enabled.
+The setting is reapplied from the declared phase after checkpoint restore.
+
+Expected impact: refinement optimizes weights against a fixed observation
+mapping, removing the measured statistics-driven command shift. Learning
+rate remains 1e-5 and every other campaign-nine setting remains unchanged.
+This changes policy training only; controller settings, immutable flight
+evidence, reset sampling, sensor noise, action interface, evaluation criteria,
+and thresholds remain fixed. A focused test covers enabled/disabled
+normalization, frozen buffers after training-mode re-entry, continuing optimizer
+updates, and subsequent phase re-enabling. A fresh GPU procedural check will
+verify the complete restore/refinement flow before the next counted campaign.
+
+Full pre-commit passes for the phase-controlled normalization change. GPU
+procedural run `20260913T083641Z` completes successfully in 621.3 s with
+three complete validation workloads and two PPO updates. It restores
+`phase_01_model_1.pt`, applies frozen normalization, and saves
+`phase_02_model_2.pt`. All eight actor/critic normalization buffers are
+exactly equal across the refinement update, while actor and critic weights
+change and optimizer steps advance from 32 to 64. Exact evidence is in
+`normalization-freeze-gpu-verification.json`; the log is
+`normalization-freeze-gpu-smoke.log`. Teardown succeeds, its monitor is stopped,
+and no reserved test runs. This procedural check is excluded from campaign
+and no-progress counts. Campaign ten will start from scratch using the same
+seed 42 and campaign-nine settings, with only refinement normalization updates
+disabled.
+
+Campaign ten is `20260913T084837Z`, with operator log
+`press-hover-campaign-10.log` and a separate Trackio database in its run
+`monitoring` directory. Full pre-commit and the driver check pass immediately
+before launch. No prior campaign learner initializes this scratch run.
+
+Campaign ten starts successfully. Its initial actor tensors and executable
+TorchScript code are exactly equal to campaign nine, and every initial
+validation metric matches. The serialized actor digest differs: ZIP-member
+comparison isolates the differences to debug metadata and the serialization
+identifier after the adapter source change. Raw artifact digests remain
+recorded; no producer bytes are rewritten to force a match.
+
+Campaign ten reproduces every completed broad-phase validation metric through
+update 50 exactly. Direct comparison of the initial, update-25, and update-50
+actors confirms equal tensors; serialization debug metadata accounts for the
+different raw digests. Update 50 again records 298/300 successes and mean
+longest hover 29.803333 s with the same three qualification failures. The
+complete update-50 learner is restored and actor/critic normalization updates
+are disabled before the refinement reset. Representative readings near update
+20 are training GPU utilization 54.3%, rollout collection 20.86 s/update,
+and PPO optimization 0.37 s/update.
+
+Campaign-ten update 55 records 154/300 successes, two flight failures, and
+mean longest hover 26.852333 s. This improves on campaign-nine update 55,
+but success rate, minimum range 0.399165154 m, flight failures, X RMSE
+0.042058837 m, X P95 0.051360238 m, horizontal RMSE 0.048651443 m,
+and total position RMSE 0.048967229 m fail. Direct learner-checkpoint
+comparison confirms all eight normalization buffers remain exactly fixed
+from update 50 to 55, retaining 52,428,800 samples per normalizer; evidence
+is in `campaign-10-normalization-freeze-verification.json`.
+
+`campaign-10-local-feedback-diagnosis.json` shows that even with fixed
+normalization, nominal X action grows from 0.010952 to 0.022908 and local
+X position feedback weakens from -0.314977 to -0.264607 per second. This
+limits the previous diagnosis: normalization drift contributed to changes, but
+refinement weight updates independently produce command bias. The local probe
+uses the production quaternion and remains separate from trajectory evidence.
+
+Update 60 improves holding to 227/300 successes and 29.573667 s, with three
+flight failures and 70 timeouts. Minimum range 0.399518013 m, success rate,
+flight failures, X RMSE 0.042349803 m, X P95 0.050430745 m, horizontal
+RMSE 0.044700310 m, and total position RMSE 0.046914212 m fail. The
+improving hold duration justifies continuing to the next validation checkpoint.
+
+Campaign-ten update 65 regresses to zero successes, five flight failures,
+and mean longest hover 18.311000 s. Successful-hold statistics are unavailable.
+The operator stops after the third refinement checkpoint and retains all
+14 completed evaluations. The best remains broad update 50 at 29.803333 s,
+so ten completed campaigns have three consecutive campaigns without a
+qualifying overall improvement. No reserved acceptance workload runs.
+
+The deterministic validation action-effort penalty decreases in magnitude
+from 0.000593 at update 50 to 0.000392 at update 65, while stabilization cost
+increases from 0.007791 to 0.018110 and total cost worsens from 0.008701
+to 0.019139. Fixed normalization has not prevented weak horizontal correction
+or command bias. These observations motivate testing delayed credit assignment;
+they do not prove that the action penalty or GAE setting caused failure. Exact
+reward means and decay calculations are in
+`campaign-10-credit-assignment-diagnosis.json`.
+
+Campaign eleven changes only GAE lambda from 0.95 to 0.99. The pinned RSL-RL
+3.1.2 return implementation propagates advantages with gamma times lambda.
+At gamma 0.995 and 20 Hz, the nonterminal decay time to 1/e increases from
+0.888 to 3.319 s; the weight at three seconds increases from 0.034104 to
+0.405039. This gives delayed position effects more weight when estimating
+action advantages. Critic bootstrapping also contributes, so the decay is not
+a hard planning horizon. The expected benefit is stronger credit for delayed
+position correction; the tradeoff is higher advantage-estimate variance.
+Refinement normalization remains frozen, learning rates remain 3e-4/1e-5,
+and reward weights, seed 42, controller, flight bundle, reset distribution,
+sensor noise, action limits, validation/test seeds, and quality thresholds
+remain unchanged. The next campaign starts from scratch.
+
+Campaign ten exhausts the 60-second Docker stop grace and exits 137; its
+root report is interrupted and all 14 worker evaluations remain preserved.
+Its monitor is stopped. Campaign eleven is `20260913T095657Z`, with log
+`press-hover-campaign-11.log` and a separate Trackio database in its run
+`monitoring` directory. Full pre-commit and the driver check pass immediately
+before this scratch launch.
+
+Campaign eleven reproduces the initial actor digest and every baseline metric
+exactly. With lambda 0.99, update 5 reaches mean longest hover 0.448167 s
+with one flight failure out of 300, versus 0.228000 s and zero failures
+previously. Update 10 reaches 3.481667 s with zero failures, versus
+0.734333 s previously. Both checkpoints have zero successful 30-second holds.
+The early increase supports continuing this configuration; it does not qualify
+the policy or establish the proposed causal explanation.
+
+Campaign-eleven updates 15/20 reach mean longest hover 3.785667/7.059500 s
+with zero flight failures and zero successes. Update 25 passes every validation
+check: 300/300 successful 30-second holds, zero failures/collisions/timeouts,
+and mean longest hover 30.000000 s. Minimum closest range is 0.410164833 m.
+Pooled total position error is RMSE 0.017226349 m, P95 0.019054704 m,
+P99 0.019596363 m, and maximum 0.020412661 m. Exact checks and the frozen
+actor digest are preserved in `campaign-11-first-passing-validation.json`.
+This is validation evidence only; reserved test seeds remain unused. The
+existing schedule and plateau stopping continue, while selection retains this
+validation-eligible checkpoint. Representative update-20 telemetry is training
+GPU utilization 53.6%, rollout collection 20.47 s/update, and PPO optimization
+0.37 s/update.
+
+Campaign-eleven updates 30/35/40/45/50 each pass every validation check,
+with 300/300 successes, zero failures/collisions/timeouts, and mean longest
+hover 30.000000 s. The broad phase reaches its five-evaluation plateau at
+update 50. Selection preserves the first exact tie, so refinement restores
+the complete update-25 learner and freezes its normalization statistics.
+Subsequent monitoring steps count all attempted updates, while checkpoint
+iteration numbers follow the restored branch.
+
+Campaign-eleven refinement at total updates 55/60 (restored learner
+iterations 30/35) passes every validation check, with 300/300 successes and
+mean longest hover 30 s. At total 65 all episodes still succeed, but X RMSE
+0.030017259 m fails the 0.028192865 m limit. At total 70 all episodes
+succeed, but X RMSE 0.035726169 m, horizontal RMSE 0.041721162 m, and
+total position RMSE 0.043037370 m fail. These later checkpoints cannot
+replace the earlier validation-passing actor. The configured plateau reaches
+four stale refinement evaluations; the first passing update-25 actor remains
+selected under the existing exact-tie rule.
+
+At total update 75, every validation episode succeeds, but X RMSE
+0.035375462 m, horizontal RMSE 0.041650537 m, and total position RMSE
+0.043747771 m fail. Refinement reaches its five-evaluation plateau and
+training ends after 75 attempted updates. Selection freezes broad update 25,
+`phase_01_model_25.pt`, actor SHA-256
+`14e8651141b58172b53b80193916fd11c72c5651fe922797bca5cda99dbf37ac`.
+The worker tears down cleanly, and the first reserved acceptance workload
+starts with seeds 404/505/606, 100 episodes each. No later failed checkpoint
+is substituted for the selected actor.
+
+## Final accepted outcome
+
+Campaign eleven completes successfully in 4324.5 s. The selected update-25
+actor passes its first fresh reserved test on seeds 404/505/606 with 100 episodes
+each: 300/300 successful 30-second holds, zero collisions, zero flight failures,
+zero timeouts, and all 45 acceptance checks passing. Test minimum closest range
+is 0.413337708 m. Pooled 3D position error is RMSE 0.017243223 m,
+P95 0.019075497 m, P99 0.019622781 m, and maximum 0.020354448 m.
+Vertical RMSE is 0.015679585 m against 0.016957235 m, the closest position
+limit. These are the unchanged successful-hold pooled metrics and thresholds.
+
+The exact selected, tested, and published actor digests match. Both
+`.build/training/press-hover/latest` and `best` resolve to `20260913T095657Z`.
+The accepted controller and flight-parameter payload digests are rechecked and
+unchanged. Eleven training campaigns are counted; startup/procedural checks are
+excluded. The overall best mean longest hover reaches 30 s, an improvement of
+0.196667 s over the previous best, and the stale-campaign counter resets to zero.
+The workflow stops on policy acceptance without another training campaign.
+
+The decisive campaign-eleven change is GAE lambda 0.99: every other setting is
+retained from campaign ten, and the initial actor and validation metrics match.
+The first passing actor occurs in the broad phase, before normalization freezing.
+This establishes the measured result for training seed 42, not repeatability
+across training initializations. Later refinement can degrade position accuracy;
+the unchanged validation-selection rule protects the earlier passing actor.
+
+Final report files are `final_report.json` and `final_report.md` under
+`.build/flight-to-policy/20260912T102640Z/`. They reference all exact producer
+inputs, the campaign ledger, acceptance metrics, and remaining diagnosis.
+The training worker and coordinator exit normally, and the task-owned Trackio
+monitor is stopped after flushing results. Its database remains under
+`.build/training/press-hover/20260913T095657Z/monitoring`. The monitor URL is
+inactive after shutdown:
+
+http://127.0.0.1:7860/?project=press-hover&runs=attempt_01&smoothing=0&accordion=hidden
+
+Full pre-commit checks and GPU workflow checks pass for the implementation;
+final report verification and host-shutdown status are retained in
+`final_report.json`.

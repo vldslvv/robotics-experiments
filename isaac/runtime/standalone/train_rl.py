@@ -1057,6 +1057,7 @@ def _restore_phase_branch(
     training.configure_phase(runner=runner, phase=phase, phase_number=phase_number)
     _report(
         f"refinement configuration COMPLETE learning_rate={phase.learning_rate}; "
+        f"update_observation_normalization={phase.update_observation_normalization}; "
         "resetting environments"
     )
     with torch.inference_mode():
@@ -1610,6 +1611,8 @@ def _train_and_validate_attempt(
                         _report(
                             "initial phase configuration COMPLETE "
                             f"learning_rate={phase.learning_rate}; "
+                            "update_observation_normalization="
+                            f"{phase.update_observation_normalization}; "
                             "resetting environments"
                         )
                         with torch.inference_mode():

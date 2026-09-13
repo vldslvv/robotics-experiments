@@ -57,6 +57,12 @@ Each task's `policy.normalize_observations` Hydra setting controls RSL-RL's
 actor and critic empirical observation normalization. The current press-hover
 configuration enables it. Statistics update from training observations only
 and are part of the complete learner checkpoint restored between phases.
+Each phase's `update_observation_normalization` setting controls further updates
+to both actor and critic statistics. The press-hover broad phase updates them;
+refinement freezes the statistics from its restored validation-selected learner.
+The adapter uses the normalizer's sample limit so repeated training-mode entry
+cannot restart updates. Later phases apply their declared setting after restoring
+the complete learner; actor and critic weights and optimizer state continue training.
 Before restoring a checkpoint, the adapter makes normalization buffers created
 during inference-mode rollouts writable for checkpoint loading. The deterministic
 actor includes the actor normalizer followed by the actor network. Export deep-copies both into the same TorchScript artifact, freezing
@@ -98,8 +104,8 @@ contains relative switch attitude, vehicle motion and attitude, pusher state,
 contact and lamp state, previous action, handoff mode, estimator health, and
 availability bits. Training and runtime calculate the same target error and use
 the same packing function. Its scratch experiment maps a unit
-translation action to 0.5 m/s. Normalized scratch exploration starts at 0.03
-standard deviation, or 0.015 m/s for a
+translation action to 0.5 m/s. Normalized scratch exploration starts at 0.10
+standard deviation, or 0.05 m/s for a
 translation component at the task scale.
 
 `rl.press.curriculum.stages` is an ordered list. A training config selects one
@@ -211,7 +217,7 @@ stale evaluations.
 
 Hover training uses a 40-second episode horizon; approach uses 45 seconds. The
 hover schedule trains up to 50 iterations at `3e-4`, then restores the best complete
-checkpoint and refines it for up to 100 iterations at `1e-6`. Both phases are
+checkpoint and refines it for up to 100 iterations at `1e-5`. Both phases are
 evaluated every five updates. Five stale evaluations stop either phase. Active
 monitoring may interrupt a campaign without a credible path to acceptance.
 The configuration records the maximum budget; experiment decisions and measured
@@ -220,9 +226,8 @@ results are retained in `FLIGHT_TO_POLICY_IMPROVEMENTS.md`.
 Hover uses 4,096 environments with 256 policy steps per environment per update:
 12.8 simulated seconds per rollout and 1,048,576 transitions per PPO update.
 The broad phase allows 640 simulated seconds per environment and refinement
-allows 1,280, including resets. PPO uses four epochs and eight minibatches. Gamma,
-GAE lambda, exploration, action scales, and complete checkpoint restoration
-remain unchanged. GPU utilization and rollout/optimizer timing must be measured
+allows 1,280, including resets. PPO uses four epochs and eight minibatches,
+discount gamma 0.995, and GAE lambda 0.99. GPU utilization and rollout/optimizer timing must be measured
 for each campaign and retained alongside its training results.
 
 Every hover training reset starts its episode clock at zero. The runner does

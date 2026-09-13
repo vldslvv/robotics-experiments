@@ -36,6 +36,11 @@ the host. They are meant to be used in the Dockerized environment.
   tmux CMD so the first pane auto-launches the custom runtime
   (`isaac/runtime/standalone/runapp_custom.sh`) and then drops to a login shell,
   leaving the second pane a plain shell.
+- `make run-isaac`, including through `make run-all`, regenerates the drone
+  USDA files from `configs/airframes/` before starting the container. Generation
+  does not rewrite the warehouse scene or its asset references. The warehouse
+  has no embedded `quadcopter_500mm` object; the configured X500 is spawned by
+  the runtime from `holybro_x500_v2.usda`.
 - The manual GUI launcher enables the pure-observer `experiment_runtime_hud`
   extension. Its dockable `Experiment Runtime HUD` window opens by default and
   can be reopened from `Window > Robotics Experiments > Runtime HUD`. Each

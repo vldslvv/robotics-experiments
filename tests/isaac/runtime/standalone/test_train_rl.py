@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -42,6 +43,7 @@ def _phase(
         learning_rate=1.0e-4,
         schedule="fixed",
         entropy_coef=0.0,
+        update_observation_normalization=True,
     )
 
 
@@ -987,14 +989,21 @@ def test_initial_checkpoint_has_rsl_state_without_calling_runner_logger(tmp_path
     assert payload["optimizer_state_dict"]["param_groups"]
 
 
-def test_phase_configuration_preserves_optimizer_and_updates_values() -> None:
+@pytest.mark.parametrize("normalize", [False, True])
+def test_phase_configuration_preserves_optimizer_and_controls_normalization(
+    *, normalize: bool
+) -> None:
     torch = pytest.importorskip("torch")
     from robotics_experiments.rl.training import rsl_rl
 
     parameter = torch.nn.Parameter(torch.tensor(1.0))
     optimizer = torch.optim.Adam([parameter], lr=1.0e-4)
+    policy = torch.nn.Module()
+    policy.actor_obs_normalizer = EmpiricalNormalization(2) if normalize else torch.nn.Identity()
+    policy.critic_obs_normalizer = EmpiricalNormalization(2) if normalize else torch.nn.Identity()
     runner = SimpleNamespace(
         alg=SimpleNamespace(
+            policy=policy,
             optimizer=optimizer,
             learning_rate=1.0e-4,
             entropy_coef=0.001,
@@ -1008,6 +1017,35 @@ def test_phase_configuration_preserves_optimizer_and_updates_values() -> None:
     assert runner.alg.optimizer.param_groups[0]["lr"] == phase.learning_rate
     assert runner.alg.schedule == "fixed"
     assert runner.alg.entropy_coef == 0.0
+    observations = torch.tensor([[0.1, -0.2], [0.3, 0.4]])
+    if normalize:
+        with torch.inference_mode():
+            policy.actor_obs_normalizer.update(observations)
+            policy.critic_obs_normalizer.update(observations)
+    expected = {key: value.clone() for key, value in policy.state_dict().items()}
+    rsl_rl.configure_phase(
+        runner=runner, phase=replace(phase, update_observation_normalization=False)
+    )
+    policy.train()  # RSL-RL does this at every new learning chunk.
+    if normalize:
+        with torch.inference_mode():
+            policy.actor_obs_normalizer.update(observations + 10)
+            policy.critic_obs_normalizer.update(observations + 10)
+    assert policy.training
+    for key, value in policy.state_dict().items():
+        torch.testing.assert_close(value, expected[key], rtol=0, atol=0)
+    optimizer.zero_grad()
+    parameter.square().backward()
+    optimizer.step()
+    assert parameter.item() != 1.0
+    assert runner.alg.optimizer is original_optimizer
+    rsl_rl.configure_phase(runner=runner, phase=phase)
+    if normalize:
+        with torch.inference_mode():
+            policy.actor_obs_normalizer.update(observations + 10)
+            policy.critic_obs_normalizer.update(observations + 10)
+        assert policy.actor_obs_normalizer.count.item() == 4
+        assert policy.critic_obs_normalizer.count.item() == 4
 
 
 def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: Path) -> None:

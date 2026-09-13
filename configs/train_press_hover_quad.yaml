@@ -22,7 +22,7 @@ rl:
     policy:
       normalize_observations: true
       actor:
-        initial_noise_std: 0.03
+        initial_noise_std: 0.10
   training:
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
@@ -32,7 +32,7 @@ rl:
     gpu_utilization_target_rate: 0.95
     num_steps_per_env: 256
     gamma: 0.995
-    lam: 0.95
+    lam: 0.99
     clip_param: 0.2
     value_loss_coef: 1.0
     num_learning_epochs: 4

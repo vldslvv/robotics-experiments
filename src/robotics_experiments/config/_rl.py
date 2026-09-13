@@ -318,6 +318,7 @@ class RlTrainingPhaseConfig(_FreezableConfig):
     learning_rate: float
     schedule: str
     entropy_coef: float
+    update_observation_normalization: bool
 
 
 @dataclass
