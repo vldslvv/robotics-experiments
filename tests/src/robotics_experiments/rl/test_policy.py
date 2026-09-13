@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+import robotics_experiments.rl.hover as hover_module
 from robotics_experiments.commanding import PolicyInput
+from robotics_experiments.config import load_config
 from robotics_experiments.controller import ControllerArtifact, ControllerSettings
-from robotics_experiments.flight_parameters import FlightParameters, load_flight_parameters
+from robotics_experiments.flight_parameters import (
+    FlightParameters,
+    load_flight_parameters,
+    load_flight_parameters_bundle,
+)
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
@@ -30,6 +36,7 @@ from robotics_experiments.rl import (
     policy_metadata,
     validate_policy_artifact,
 )
+from robotics_experiments.rl.hover import load_hover_reset_bounds
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
     PressObservation,
@@ -42,6 +49,8 @@ from robotics_experiments.runtime._policy import (
 from robotics_experiments.workflows._policy_preflight import _preflight_policy_artifacts
 from tests.support.commanding_fakes import make_routine_observation
 from tests.support.paths import REPO_ROOT
+
+_HOVER_DEPLOY_CONFIG = load_config(REPO_ROOT / "configs/policy_transfer_press_hover_quad.yaml")
 
 
 def _action_cfg(**overrides):
@@ -514,6 +523,7 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
         inference=lambda observation: inference_calls.append(observation) or np.ones(4),  # type: ignore[func-returns-value]  # concise call recording
     )
     adapter = _press_approach_adapter(
+        repo_root=REPO_ROOT,
         config=load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml"),
         loaded=loaded,
     )
@@ -567,6 +577,7 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
         inference=lambda _observation: np.array([1.2, -0.5, 0.25, -0.1]),
     )
     adapter = _press_approach_adapter(
+        repo_root=REPO_ROOT,
         config=load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml"),
         loaded=loaded,
     )
@@ -622,3 +633,54 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
     assert diagnostic["stable_goal_count"] == 1
     assert diagnostic["contact"] is False
     assert diagnostic["complete"] is False
+
+
+@pytest.mark.parametrize("mismatch", ["run_id", "digest"])
+def test_hover_handoff_rejects_mismatched_producer(mismatch: str) -> None:
+    path = REPO_ROOT / "tests/fixtures/flight_parameters"
+    bundle = load_flight_parameters_bundle(path=path)
+    with pytest.raises(ValueError, match="pinned input"):
+        load_hover_reset_bounds(
+            path=path.resolve(),
+            run_id="wrong" if mismatch == "run_id" else bundle.flight_parameters.run_id,
+            digest="wrong" if mismatch == "digest" else bundle.flight_parameters_digest,
+        )
+
+
+def test_hover_reset_loading_is_cached_before_live_adapter_construction(
+    tmp_path: Path, monkeypatch
+) -> None:
+    bundle = load_flight_parameters_bundle(path=REPO_ROOT / "tests/fixtures/flight_parameters")
+    metadata = _metadata(interface=PolicyInterface.PRESS)
+    metadata["curriculum_stage"] = "hover"
+    metadata["flight_parameters"]["digest"] = bundle.flight_parameters_digest
+    artifact = _write_metadata_artifact(tmp_path, metadata)
+    config = _HOVER_DEPLOY_CONFIG
+    vehicle = config.vehicles["x500_01"]
+    config = replace(
+        config,
+        vehicles={
+            "x500_01": replace(
+                vehicle,
+                routine=replace(
+                    vehicle.routine,
+                    steps=({"kind": "policy", "artifact": str(artifact), "switch_index": 0},),
+                ),
+            )
+        },
+        rl=replace(
+            config.rl,
+            inputs=replace(config.rl.inputs, flight_parameters_artifact=str(bundle.run_dir)),
+        ),
+    )
+    _preflight_policy_artifacts(config=config, repo_root=REPO_ROOT)
+
+    def unexpected_load(**_kwargs):
+        raise AssertionError("reset traces must not be read during live routine construction")
+
+    monkeypatch.setattr(hover_module, "load_flight_parameters_bundle", unexpected_load)
+    loaded = LoadedPolicy(
+        metadata=load_policy_metadata(artifact_dir=artifact), inference=lambda obs: np.zeros(4)
+    )
+    adapter = _press_approach_adapter(config=config, loaded=loaded, repo_root=REPO_ROOT)
+    assert adapter.policy_rate_hz == loaded.contract.policy_rate_hz

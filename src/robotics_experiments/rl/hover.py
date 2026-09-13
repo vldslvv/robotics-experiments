@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Generic, TypeVar, cast
 
 import numpy as np
@@ -11,14 +13,17 @@ import torch
 from robotics_experiments.flight_parameters import (
     FlightParameters,
     FlightParametersBundle,
+    load_flight_parameters_bundle,
     load_flight_trace,
 )
 
 __all__ = [
     "HoverEnvelopeEvaluation",
     "HoverResetSamples",
+    "HoverResetBounds",
     "evaluate_hover_envelope",
     "load_hover_reset_samples",
+    "load_hover_reset_bounds",
 ]
 
 ArrayT = TypeVar("ArrayT", np.ndarray, torch.Tensor)
@@ -40,6 +45,71 @@ class HoverEnvelopeEvaluation(Generic[ArrayT]):
 
 
 @dataclass(frozen=True)
+class HoverResetBounds:
+    """Component extrema of the exact paired states used for PPO resets.
+
+    These bounds describe the population's extent, not a uniform distribution
+    or a guarantee that every combination inside it was sampled.
+    Position tuples contain ENU X/Y/Z followed by horizontal and total norms;
+    attitude tuples contain roll/pitch/yaw followed by tilt and rotation angle.
+    """
+
+    position_min_m: tuple[float, ...]
+    position_max_m: tuple[float, ...]
+    attitude_min_rad: tuple[float, ...]
+    attitude_max_rad: tuple[float, ...]
+    linear_velocity_min_mps: tuple[float, ...]
+    linear_velocity_max_mps: tuple[float, ...]
+    angular_velocity_min_radps: tuple[float, ...]
+    angular_velocity_max_radps: tuple[float, ...]
+
+    def rejection_reason(
+        self,
+        *,
+        position_error_enu_m: np.ndarray,
+        attitude_error_wxyz: np.ndarray,
+        linear_velocity_enu_mps: np.ndarray,
+        angular_velocity_enu_radps: np.ndarray,
+    ) -> str | None:
+        """Return the first state component outside the recorded reset extent."""
+        rpy, tilt, orientation = _relative_attitude(quaternion_wxyz=attitude_error_wxyz)
+        checks = (
+            (
+                np.r_[
+                    position_error_enu_m,
+                    np.linalg.norm(position_error_enu_m[:2]),
+                    np.linalg.norm(position_error_enu_m),
+                ],
+                self.position_min_m,
+                self.position_max_m,
+                "position",
+            ),
+            (
+                np.r_[rpy, tilt, orientation],
+                self.attitude_min_rad,
+                self.attitude_max_rad,
+                "attitude",
+            ),
+            (
+                linear_velocity_enu_mps,
+                self.linear_velocity_min_mps,
+                self.linear_velocity_max_mps,
+                "linear_speed",
+            ),
+            (
+                angular_velocity_enu_radps,
+                self.angular_velocity_min_radps,
+                self.angular_velocity_max_radps,
+                "angular_speed",
+            ),
+        )
+        for value, lower, upper, reason in checks:
+            if not np.all(np.isfinite(value) & (value >= lower) & (value <= upper)):
+                return reason
+        return None
+
+
+@dataclass(frozen=True)
 class HoverResetSamples:
     """Matched pose and motion samples from the measured policy windows."""
 
@@ -47,6 +117,30 @@ class HoverResetSamples:
     attitude_error_flu_enu_wxyz: tuple[tuple[float, float, float, float], ...]
     linear_velocity_enu_mps: tuple[tuple[float, float, float], ...]
     angular_velocity_enu_radps: tuple[tuple[float, float, float], ...]
+
+    def bounds(self) -> HoverResetBounds:
+        """Derive deployment limits without margins or held-out flight samples."""
+        position = np.asarray(self.position_error_enu_m)
+        rpy, tilt, orientation = _relative_attitude(
+            quaternion_wxyz=np.asarray(self.attitude_error_flu_enu_wxyz)
+        )
+        # Include aggregate errors to exclude corners outside the observed norms.
+        position = np.column_stack(
+            (position, np.linalg.norm(position[:, :2], axis=-1), np.linalg.norm(position, axis=-1))
+        )
+        attitude = np.column_stack((rpy, tilt, orientation))
+        linear = np.asarray(self.linear_velocity_enu_mps)
+        angular = np.asarray(self.angular_velocity_enu_radps)
+        return HoverResetBounds(
+            position_min_m=tuple(position[:, :3].min(axis=0)) + (0.0, 0.0),
+            position_max_m=tuple(position.max(axis=0)),
+            attitude_min_rad=tuple(attitude[:, :3].min(axis=0)) + (0.0, 0.0),
+            attitude_max_rad=tuple(attitude.max(axis=0)),
+            linear_velocity_min_mps=tuple(linear.min(axis=0)),
+            linear_velocity_max_mps=tuple(linear.max(axis=0)),
+            angular_velocity_min_radps=tuple(angular.min(axis=0)),
+            angular_velocity_max_radps=tuple(angular.max(axis=0)),
+        )
 
     def summary(self, *, flight_parameters: FlightParameters) -> dict[str, float]:
         """Summarize the fixed reset population for metadata and monitoring."""
@@ -189,6 +283,15 @@ def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSam
         linear_velocity_enu_mps=tuple(linear_velocities),
         angular_velocity_enu_radps=tuple(angular_velocities),
     )
+
+
+@lru_cache(maxsize=None)
+def load_hover_reset_bounds(*, path: Path, run_id: str, digest: str) -> HoverResetBounds:
+    """Validate immutable producer data before the bridge starts ticking."""
+    bundle = load_flight_parameters_bundle(path=path)
+    if bundle.flight_parameters_digest != digest or bundle.flight_parameters.run_id != run_id:
+        raise ValueError("hover handoff flight bundle does not match the policy's pinned input")
+    return load_hover_reset_samples(bundle=bundle).bounds()
 
 
 def _as_array(*, values: tuple[float, ...], reference: ArrayT) -> ArrayT:

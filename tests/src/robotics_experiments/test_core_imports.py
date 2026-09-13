@@ -483,6 +483,7 @@ def test_config_eagerly_imports_hydra() -> None:
         "PressCurriculumConfig",
         "PressCurriculumResetSourceConfig",
         "PressCurriculumStageConfig",
+        "PressHandoffConfig",
         "PressResetConfig",
         "Px4BridgeConfig",
         "RlActionConfig",

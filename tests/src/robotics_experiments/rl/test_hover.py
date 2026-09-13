@@ -114,3 +114,51 @@ def test_hover_reset_motion_comes_from_the_same_trace(tmp_path: Path) -> None:
     assert samples.position_error_enu_m == ((2.0, 0.0, 0.0),)
     assert samples.linear_velocity_enu_mps == ((9.0, 10.0, 11.0),)
     assert samples.angular_velocity_enu_radps[0] == pytest.approx((0.7, 0.8, 0.9))
+
+
+def test_handoff_bounds_exclude_held_out_flights_and_contain_reset_states() -> None:
+    bundle = load_flight_parameters_bundle(
+        path=Path(__file__).parents[3] / "fixtures/flight_parameters"
+    )
+    hover = bundle.flight_parameters.hover
+    held_out = tuple(
+        replace(hover.trace_statistics[0], trial_index=index, set_name=name)
+        for index, name in ((2, "validation"), (3, "acceptance"))
+    )
+    bundle = replace(
+        bundle,
+        flight_parameters=replace(
+            bundle.flight_parameters,
+            hover=replace(hover, trace_statistics=hover.trace_statistics + held_out),
+        ),
+    )
+    # No files for held-out trials are present. Loading bounds must use exactly
+    # the same fit-only loader as PPO, without attempting to read those trials.
+    samples = load_hover_reset_samples(bundle=bundle)
+    bounds = samples.bounds()
+    for pos, quat, linear, angular in zip(
+        samples.position_error_enu_m,
+        samples.attitude_error_flu_enu_wxyz,
+        samples.linear_velocity_enu_mps,
+        samples.angular_velocity_enu_radps,
+        strict=True,
+    ):
+        assert (
+            bounds.rejection_reason(
+                position_error_enu_m=np.asarray(pos),
+                attitude_error_wxyz=np.asarray(quat),
+                linear_velocity_enu_mps=np.asarray(linear),
+                angular_velocity_enu_radps=np.asarray(angular),
+            )
+            is None
+        )
+    assert bounds.position_max_m == (0.0, 0.0, 0.0, 0.0, 0.0)
+    assert (
+        bounds.rejection_reason(
+            position_error_enu_m=np.array([0.001, 0.0, 0.0]),
+            attitude_error_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+            linear_velocity_enu_mps=np.zeros(3),
+            angular_velocity_enu_radps=np.zeros(3),
+        )
+        == "position"
+    )

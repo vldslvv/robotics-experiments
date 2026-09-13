@@ -10,6 +10,7 @@ import numpy as np
 from robotics_experiments.config import (
     PressApproachGoalConfig,
     PressApproachVelocityReferenceConfig,
+    load_config,
 )
 from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.press import (
@@ -22,6 +23,7 @@ from robotics_experiments.rl.press import (
     advance_press_approach_execution,
     initial_press_approach_execution_state,
 )
+from tests.support.paths import REPO_ROOT
 
 _GOAL = PressApproachGoalConfig(
     range_min_m=0.40,
@@ -106,6 +108,11 @@ def _params(*, inference=lambda _obs: np.array([0.2, 0.0, 0.0, 0.0])):
         handoff_gate=_GATE,
         goal=_GOAL,
         flight_parameters=_ENVELOPE,
+        handoff_feedback=load_config(
+            REPO_ROOT / "configs/train_press_hover_quad.yaml"
+        ).rl.press.handoff,
+        max_body_velocity_mps=0.5,
+        max_yaw_rate_radps=1.5,
     )
 
 
@@ -124,6 +131,9 @@ def test_public_records_are_approach_specific() -> None:
         "handoff_gate",
         "goal",
         "flight_parameters",
+        "handoff_feedback",
+        "max_body_velocity_mps",
+        "max_yaw_rate_radps",
     ]
     assert [field.name for field in fields(PressApproachExecutionResult)] == [
         "state",
@@ -147,9 +157,9 @@ def test_public_records_are_approach_specific() -> None:
     ]
 
 
-def test_holds_zero_until_handoff_gate_passes() -> None:
+def test_corrects_position_while_waiting_for_handoff() -> None:
     result = _advance(observation=_observation(range_m=0.48, linear_velocity=(0.10, 0.0, 0.0)))
-    np.testing.assert_array_equal(result.action, np.zeros(4))
+    assert result.action[0] > 0.0
     assert not result.state.handoff_latched
     assert len(result.state.entry_observation) == 34
     assert result.state.actor_evaluations == 0
@@ -158,7 +168,7 @@ def test_holds_zero_until_handoff_gate_passes() -> None:
 
 def test_minimum_range_must_pass_before_actor_or_goal_progress() -> None:
     result = _advance(observation=_observation(range_m=0.44))
-    np.testing.assert_array_equal(result.action, np.zeros(4))
+    assert result.action[0] > 0.0
     assert not result.state.handoff_latched
     assert result.state.stable_goal_steps == 0
     assert result.handoff_reason == "too_close"
@@ -282,3 +292,41 @@ def test_invalid_inference_output_fails() -> None:
     result = _advance(params=_params(inference=lambda _obs: np.zeros(3)))
     assert result.failure_reason is not None
     assert "shape" in result.failure_reason
+
+
+def test_wait_feedback_corrects_world_position_and_yaw_with_rotated_body() -> None:
+    yaw = np.pi / 2 - 0.04
+    obs = replace(
+        _observation(range_m=0.60, lateral_m=0.03),
+        relative_switch_quat_xyzw=np.array([0.0, 0.0, np.sin(-0.02), np.cos(-0.02)]),
+        attitude_quat_xyzw=np.array([0.0, 0.0, np.sin(yaw / 2), np.cos(yaw / 2)]),
+    )
+    result = _advance(observation=obs)
+    assert not result.state.handoff_latched
+    assert result.state.actor_evaluations == 0
+    assert result.state.previous_action == (0.0, 0.0, 0.0, 0.0)
+    # Target is ahead and to the left in the contact frame. Correct both,
+    # and turn counterclockwise toward world +Y.
+    assert result.action[0] > 0.0
+    assert result.action[1] > 0.0
+    assert result.action[3] > 0.0
+    assert np.max(abs(result.action[:3])) <= 0.10 / 0.5
+
+
+def test_wait_feedback_retreats_when_too_close_and_clips_actions() -> None:
+    obs = replace(
+        _observation(range_m=0.1),
+        relative_switch_quat_xyzw=np.array([0.0, 0.0, 1.0, 0.0]),
+        attitude_quat_xyzw=np.array([0.0, 0.0, 1.0, 0.0]),
+    )
+    result = _advance(observation=obs)
+    # Facing backwards: positive body-X moves away from the switch.
+    assert result.action[0] > 0.0
+    assert result.action[3] == -1.0
+    assert np.max(abs(result.action)) <= 1.0
+
+
+def test_stale_pose_does_not_drive_wait_feedback() -> None:
+    result = _advance(observation=replace(_observation(range_m=0.6), pose_age_s=1.0))
+    np.testing.assert_array_equal(result.action, np.zeros(4))
+    assert result.handoff_reason == "stale"

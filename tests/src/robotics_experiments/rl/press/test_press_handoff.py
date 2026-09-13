@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
 import pytest
 
+from robotics_experiments.rl.hover import HoverResetSamples
 from robotics_experiments.rl.press import (
     HandoffGate,
     HandoffReason,
@@ -166,3 +168,35 @@ def test_gate_from_config_duck_types() -> None:
     gate = HandoffGate.from_config(Cfg())
     assert gate.pose_confidence_min == 0.9
     assert gate.angular_speed_max_radps == 0.20
+
+
+def test_hover_handoff_uses_reset_extrema_in_world_frame() -> None:
+    samples = HoverResetSamples(
+        position_error_enu_m=((-0.03, -0.01, -0.02), (0.04, 0.02, 0.03)),
+        attitude_error_flu_enu_wxyz=(
+            (np.cos(0.015), 0.0, 0.0, -np.sin(0.015)),
+            (np.cos(0.02), 0.0, 0.0, np.sin(0.02)),
+        ),
+        linear_velocity_enu_mps=((-0.01, -0.03, -0.02), (0.02, 0.04, 0.01)),
+        angular_velocity_enu_radps=((-0.01, -0.02, -0.03), (0.03, 0.02, 0.01)),
+    )
+    gate = replace(_GATE, hover_reset_bounds=samples.bounds())
+    # +90 degree body yaw: body-forward velocity is world +Y. The old
+    # contact-speed limit rejects this 0.03 m/s state; the recorded reset allows it.
+    obs = _calm_close_observation(
+        relative_switch_pos_m=np.array([0.52, 0.0, 0.0]),
+        attitude_quat_xyzw=np.array([0.0, 0.0, np.sin(np.pi / 4), np.cos(np.pi / 4)]),
+        body_lin_vel_mps=np.array([0.03, 0.0, 0.0]),
+        body_ang_vel_radps=np.zeros(3),
+    )
+    assert handoff_ready(obs, gate, np.zeros(3)).ready
+    for position in (np.array([-0.0301, 0.0, 0.0]), np.array([0.0401, 0.0, 0.0])):
+        assert handoff_ready(obs, gate, position).reason is HandoffReason.POSITION
+    fast = replace(obs, body_lin_vel_mps=np.array([0.0401, 0.0, 0.0]))
+    assert handoff_ready(fast, gate, np.zeros(3)).reason is HandoffReason.LINEAR_SPEED
+    tilted = replace(
+        obs, relative_switch_quat_xyzw=np.array([0.0, 0.0, np.sin(0.025), np.cos(0.025)])
+    )
+    assert handoff_ready(tilted, gate, np.zeros(3)).reason is HandoffReason.ATTITUDE
+    with pytest.raises(ValueError, match="world-ENU"):
+        handoff_ready(obs, gate)

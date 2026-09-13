@@ -140,12 +140,36 @@ failure still terminates the episode. Training resolves the envelope bundle
 once and policy metadata pins its exact fingerprint and digest, so a later
 `latest` measurement cannot change an active campaign.
 
+Hover deployment derives its handoff bounds from the same fitting-flight
+policy-window states returned by `load_hover_reset_samples` for PPO resets.
+The runtime validates the selected flight bundle against the policy's embedded
+run ID and digest before reading these states. This work runs during startup
+validation and is cached by canonical bundle path, run ID, and digest so routine
+construction cannot stall live PX4 lockstep by rereading the traces.
+It uses their asymmetric ENU
+position extrema, horizontal/total position maxima, relative roll/pitch/yaw
+extrema, tilt/orientation maxima, and ENU linear/angular velocity extrema.
+No margins or validation/acceptance flights expand this region. These are
+bounds on a paired empirical population, not a claim that every combination
+within the bounds was sampled. Approach deployment retains the navigation
+reset bounds from `rl.press.handoff`.
+
+While waiting, both press stages apply position and yaw feedback toward the
+common target through the normal normalized velocity action interface. The
+`rl.press.handoff.feedback_*` gains, damping, and speed cap are deployment-only
+Hydra settings and do not alter the training comparison fingerprint. Invalid
+or stale pose observations never drive this feedback. Handoff is checked on
+each policy tick and latches before the first actor call. The previous-policy
+action remains zero until that call, matching PPO episode starts; preparation
+commands do not become actor history. Completion and acceptance bounds remain
+those embedded in the actor artifact.
+
 The accepted 2026-08-12 schema-2 production campaign recorded ten successful
 arrivals: switch range 0.464594-0.498991 m, maximum combined lateral/vertical
 error 0.033746 m, and maximum full relative-attitude error 0.016339 rad
 (0.93616 degree). With the explicit 0.005 m position and 0.25 degree rotation
 margins, that evidence requires 0.44-0.52 m range, a 0.08 m alignment disk, and
-a 0.020702 rad (1.18616 degree) rotation ball. The current handoff gate extends
+a 0.020702 rad (1.18616 degree) rotation ball. The approach handoff gate extends
 the range maximum to 0.67 m for the nominal 0.60 m waypoint route; its accepted
 measurement must replace the older route evidence before approach training.
 The accepted prior-route sample summary is

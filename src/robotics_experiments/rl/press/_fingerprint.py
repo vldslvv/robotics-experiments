@@ -34,7 +34,11 @@ def _press_comparison_fingerprint(
             if not name.startswith("feasibility_")
         },
         "goal": asdict(config.rl.press.goal),
-        "handoff": asdict(config.rl.press.handoff),
+        "handoff": {
+            name: value
+            for name, value in asdict(config.rl.press.handoff).items()
+            if not name.startswith("feedback_")
+        },
         "reset": asdict(config.rl.press.reset),
         "termination": asdict(config.rl.press.termination),
         "scene": config.scene,

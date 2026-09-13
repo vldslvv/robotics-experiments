@@ -1483,3 +1483,80 @@ http://127.0.0.1:7860/?project=press-hover&runs=attempt_01&smoothing=0&accordion
 Full pre-commit checks and GPU workflow checks pass for the implementation;
 final report verification and host-shutdown status are retained in
 `final_report.json`.
+
+## Press-hover deployment handoff (2026-09-13)
+
+The manual `15_01_24` flight reached its first policy step but never invoked
+its actor. The old approach handoff rejected approximately two degrees of yaw
+error, and zero-velocity/zero-yaw-rate waiting commands did not correct the
+heading or position. It timed out after 45 seconds and landed.
+
+Hover deployment now loads the same 14,400 fitting-flight final-window states
+used for PPO resets. Its position, relative attitude, and ENU linear/angular
+velocity bounds are their component extrema, additionally constrained by the
+observed horizontal/total position and tilt/orientation maxima. No margins,
+held-out flight samples, or expanded reset mixtures are introduced. These bounds
+are an extent of a paired empirical population, not a density/support estimate
+for arbitrary combinations. The exact producer run and digest must match the
+actor metadata. All 14,400 recorded reset states pass the derived bounds.
+`hover-handoff-reset-bounds.json` under the existing flight-to-policy report
+root records the bounds and that verification.
+
+Waiting now applies proportional world-position feedback (1.25/s), body-velocity
+damping (0.2), and relative-yaw feedback (2.0/s), with a 0.10 m/s component cap
+and the actor artifact's normalized action limits. Hydra owns these
+`rl.press.handoff.feedback_*` settings. Preparation commands are excluded from
+previous-policy-action history so the first actor observation retains the same
+zero previous action as PPO resets. The training fingerprint remains
+`677bd7d7dc4e20fcbea062409fc9a1b0625d95f342c2957b8c237ee2925ee90d`.
+Controller, flight bundle, actor bytes, sensor noise, and acceptance limits are
+unchanged.
+
+Verification used:
+
+```bash
+make -o generate-drone-usd test-integration-press-policy-transfer \
+  HYDRA_CONFIG=configs/policy_transfer_press_hover_quad.yaml
+```
+
+The existing generated assets were reused. First integration run
+`test-integration-press-policy-transfer.20260913T151356Z.27576` stopped before
+flight because loading and validating the reset population during routine
+construction delayed live simulator messages. Loading now occurs in startup
+validation and is cached by canonical producer path, run ID, and digest.
+A regression test prevents trace reads during subsequent adapter construction.
+
+Second integration run
+`test-integration-press-policy-transfer.20260913T151723Z.34422` proves the handoff
+fix: preparation starts at simulation time 29.404 s and the first actor call
+occurs at 30.364 s, a 0.96 s wait. The entry passes every derived reset bound.
+Its ENU position error is [0.031005656, 0.003719559, -0.001529694] m.
+The exact observation and first action are preserved in
+`hover-handoff-transfer-entry.json` under the flight-to-policy report root.
+
+The complete transfer test still fails after actor entry: the actor initially
+commands raw normalized action [-1.159964, 0.224928, -0.676906, -0.151615],
+clipped to a -0.5 m/s body-forward command with 0.338453 m/s descent. The routine
+exceeds its unchanged 2 m lateral-drift limit and landing recovery completes.
+This is downstream failure evidence, not another policy acceptance or a reason
+to replace the accepted Lab artifact.
+
+A read-only replay of that observation identifies sensitivity to absolute
+world attitude and quaternion sign. Replacing only its world-attitude input
+with the training-frame quaternion reduces the raw action to approximately
+[-0.009343, 0.004903, 0.002985, 0.012435]. Flipping only quaternion sign or
+changing only heading with the positive-sign representation is insufficient.
+`hover-handoff-actor-frame-diagnosis.json` retains these counterfactuals. They
+are diagnostic inputs only; no runtime observation, actor, or producer artifact
+is rewritten. Matching position and relative-attitude reset bounds does not
+establish generalization to another absolute warehouse heading/quaternion
+representation. The remaining deployment issue requires a consistent policy
+observation-frame contract and separate qualification.
+
+Host verification includes 970 passing tests and one skip, plus the complete
+pre-commit checks. Regression coverage includes fit-set isolation, inclusive
+reset bounds, ENU/body transformations, corrective action signs and limits,
+zero actor history at handoff, producer-lineage rejection, and loading evidence
+before the live bridge. Integration workers and temporary PX4 containers are
+stopped; the failed transfer evidence remains available for the observation-frame
+follow-up.

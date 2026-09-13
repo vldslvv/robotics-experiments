@@ -8,7 +8,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from robotics_experiments.config import PressApproachGoalConfig
+from robotics_experiments.config import PressApproachGoalConfig, PressHandoffConfig
 from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.px4_bridge import (
     quat_conjugate_wxyz,
@@ -16,7 +16,7 @@ from robotics_experiments.px4_bridge import (
     rotate_vector_wxyz,
 )
 from robotics_experiments.rl import evaluate_hover_envelope
-from robotics_experiments.rl.press.handoff import HandoffGate, handoff_ready
+from robotics_experiments.rl.press.handoff import HandoffGate, HandoffReason, handoff_ready
 from robotics_experiments.rl.press.observation import (
     PRESS_OBSERVATION_DIM,
     PressObservation,
@@ -42,6 +42,9 @@ class PressApproachExecutionParams:
     handoff_gate: HandoffGate
     goal: PressApproachGoalConfig
     flight_parameters: FlightParameters
+    handoff_feedback: PressHandoffConfig
+    max_body_velocity_mps: float
+    max_yaw_rate_radps: float
 
 
 @dataclass(frozen=True)
@@ -163,7 +166,7 @@ def advance_press_approach_execution(
     closest_switch_range_m = (
         switch_range_m if first_sample else min(state.closest_switch_range_m, switch_range_m)
     )
-    handoff = handoff_ready(observation, params.handoff_gate)
+    handoff = handoff_ready(observation, params.handoff_gate, position_error_enu_m)
     handoff_latched = state.handoff_latched or handoff.ready
     action = zero
     actor_observation: tuple[float, ...] = ()
@@ -182,6 +185,34 @@ def advance_press_approach_execution(
                 raw_action=raw_action,
             )
         action = np.clip(action, -1.0, 1.0)
+    elif handoff.reason in {
+        HandoffReason.POSITION,
+        HandoffReason.ATTITUDE,
+        HandoffReason.LINEAR_SPEED,
+        HandoffReason.ANGULAR_SPEED,
+        HandoffReason.TOO_CLOSE,
+        HandoffReason.TOO_FAR,
+        HandoffReason.LATERAL,
+        HandoffReason.WALL_NORMAL_SPEED,
+        HandoffReason.LATERAL_SPEED,
+    }:
+        feedback = params.handoff_feedback
+        world_velocity = -feedback.feedback_position_gain_per_s * position_error_enu_m
+        body_velocity = rotate_vector_wxyz(quat_conjugate_wxyz(body_to_world_wxyz), world_velocity)
+        body_velocity -= feedback.feedback_velocity_damping * observation.body_lin_vel_mps
+        body_velocity = np.clip(
+            body_velocity, -feedback.feedback_max_velocity_mps, feedback.feedback_max_velocity_mps
+        )
+        w, x, y, z = body_to_contact_wxyz
+        yaw_error = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+        action = np.clip(
+            np.r_[
+                body_velocity / params.max_body_velocity_mps,
+                -feedback.feedback_yaw_gain_per_s * yaw_error / params.max_yaw_rate_radps,
+            ],
+            -1.0,
+            1.0,
+        )
 
     envelope = evaluate_hover_envelope(
         flight_parameters=params.flight_parameters,
@@ -192,7 +223,7 @@ def advance_press_approach_execution(
     stable_goal_steps = state.stable_goal_steps + 1 if stable_goal else 0
     complete = stable_goal_steps >= params.goal.stable_steps
     successor = PressApproachExecutionState(
-        previous_action=tuple(float(value) for value in action),
+        previous_action=tuple(float(value) for value in (action if handoff_latched else zero)),
         handoff_latched=handoff_latched,
         entry_observation=entry_observation,
         actor_evaluations=state.actor_evaluations + int(bool(actor_observation)),

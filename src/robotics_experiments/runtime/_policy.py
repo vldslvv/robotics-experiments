@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +20,7 @@ from robotics_experiments.rl import (
     policy_action_to_offboard,
     validate_policy_artifact,
 )
+from robotics_experiments.rl.hover import load_hover_reset_bounds
 from robotics_experiments.rl.press import (
     HandoffGate,
     PressApproachExecutionParams,
@@ -91,6 +92,15 @@ def _preflight_policy_artifacts(
                         f"stage {config.rl.press.curriculum.active_stage!r}"
                     )
                 press_rates.add(contract.policy_rate_hz)
+                if contract.curriculum_stage == "hover":
+                    load_hover_reset_bounds(
+                        path=_artifact_path(
+                            artifact=config.rl.inputs.flight_parameters_artifact,
+                            repo_root=repo_root,
+                        ).resolve(strict=True),
+                        run_id=metadata.flight_parameters.run_id,
+                        digest=metadata.flight_parameters_digest,
+                    )
             policies.append(
                 _ConfiguredPolicy(
                     vehicle_label=label,
@@ -149,16 +159,49 @@ def _press_approach_adapter(
     *,
     config: ExperimentConfig,
     loaded: LoadedPolicy,
+    repo_root: Path,
 ) -> PolicyAdapter:
     contract = loaded.contract
     if contract.curriculum_stage not in {"hover", "approach"}:
         raise ValueError("unsupported press curriculum_stage=" f"{contract.curriculum_stage!r}")
+    handoff_gate = HandoffGate.from_config(config.rl.press.handoff)
+    if contract.curriculum_stage == "hover":
+        handoff_gate = replace(
+            handoff_gate,
+            hover_reset_bounds=load_hover_reset_bounds(
+                path=_artifact_path(
+                    artifact=config.rl.inputs.flight_parameters_artifact,
+                    repo_root=repo_root,
+                ).resolve(strict=True),
+                run_id=loaded.metadata.flight_parameters.run_id,
+                digest=loaded.metadata.flight_parameters_digest,
+            ),
+        )
+    feedback = config.rl.press.handoff
+    if (
+        not all(
+            np.isfinite(value) and value > 0.0
+            for value in (
+                feedback.feedback_position_gain_per_s,
+                feedback.feedback_yaw_gain_per_s,
+                feedback.feedback_max_velocity_mps,
+            )
+        )
+        or not np.isfinite(feedback.feedback_velocity_damping)
+        or feedback.feedback_velocity_damping < 0.0
+    ):
+        raise ValueError(
+            "handoff feedback requires positive gains/velocity limit and nonnegative damping"
+        )
     params = PressApproachExecutionParams(
         inference=loaded.inference,
         action_dim=contract.action_dim,
-        handoff_gate=HandoffGate.from_config(config.rl.press.handoff),
+        handoff_gate=handoff_gate,
         goal=config.rl.press.goal,
         flight_parameters=loaded.metadata.flight_parameters,
+        handoff_feedback=feedback,
+        max_body_velocity_mps=contract.max_body_velocity_mps,
+        max_yaw_rate_radps=contract.max_yaw_rate_radps,
     )
 
     def advance(*, policy_input: PolicyInput, state: object) -> PolicyResult:
@@ -239,7 +282,7 @@ def _make_policy_adapter(
     if interface is PolicyInterface.HOVER:
         return _hover_adapter(hold_s=hold_s, loaded=loaded)
     if interface is PolicyInterface.PRESS:
-        return _press_approach_adapter(config=config, loaded=loaded)
+        return _press_approach_adapter(config=config, loaded=loaded, repo_root=repo_root)
     raise ValueError(
         f"unsupported policy_interface={interface.value!r} in artifact {artifact_path}"
     )

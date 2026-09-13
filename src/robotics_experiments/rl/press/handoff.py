@@ -16,6 +16,7 @@ from typing import Optional
 import numpy as np
 
 from robotics_experiments.px4_bridge import rotate_vector_wxyz
+from robotics_experiments.rl.hover import HoverResetBounds
 from robotics_experiments.rl.press.observation import PressObservation
 from robotics_experiments.rl.press.task import quaternion_geodesic_error_rad
 
@@ -41,6 +42,8 @@ class HandoffReason(enum.Enum):
     PREVIOUS_ACTION = "previous_action"
     MODE = "mode"
     ESTIMATOR = "estimator"
+    POSITION = "position"
+    LINEAR_SPEED = "linear_speed"
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,7 @@ class HandoffGate:
     relative_attitude_error_max_rad: float
     body_z_alignment_min: float
     estimator_health_min: float
+    hover_reset_bounds: HoverResetBounds | None = None
 
     @classmethod
     def from_config(cls, cfg) -> "HandoffGate":
@@ -99,7 +103,27 @@ def _body_z_world_z(obs: PressObservation) -> float:
     return float(1.0 - 2.0 * (x * x + y * y))
 
 
-def handoff_ready(obs: PressObservation, gate: HandoffGate) -> HandoffResult:
+def _handoff_health(obs: PressObservation, gate: HandoffGate) -> HandoffResult:
+    if _body_z_world_z(obs) < gate.body_z_alignment_min:
+        return HandoffResult(False, HandoffReason.NOT_UPRIGHT)
+    if not obs.contact_valid:
+        return HandoffResult(False, HandoffReason.CONTACT_UNAVAILABLE)
+    if obs.contact_flag:
+        return HandoffResult(False, HandoffReason.CONTACT)
+    if np.any(np.asarray(obs.previous_action, dtype=np.float64) != 0.0):
+        return HandoffResult(False, HandoffReason.PREVIOUS_ACTION)
+    if obs.handoff_mode != 1:
+        return HandoffResult(False, HandoffReason.MODE)
+    if obs.estimator_health < gate.estimator_health_min:
+        return HandoffResult(False, HandoffReason.ESTIMATOR)
+    return HandoffResult(True, None)
+
+
+def handoff_ready(
+    obs: PressObservation,
+    gate: HandoffGate,
+    position_error_enu_m: np.ndarray | None = None,
+) -> HandoffResult:
     """Decide whether the nav -> contact handoff may proceed.
 
     Checks run in a fixed order and the first violation is the reason:
@@ -113,6 +137,24 @@ def handoff_ready(obs: PressObservation, gate: HandoffGate) -> HandoffResult:
         return HandoffResult(False, HandoffReason.LOW_CONFIDENCE)
     if obs.pose_age_s > gate.pose_age_max_s:
         return HandoffResult(False, HandoffReason.STALE)
+    if gate.hover_reset_bounds is not None:
+        if position_error_enu_m is None:
+            raise ValueError("hover handoff requires world-ENU target position error")
+        bounds = gate.hover_reset_bounds
+        body_to_world = np.asarray(obs.attitude_quat_xyzw)[[3, 0, 1, 2]]
+        reason = bounds.rejection_reason(
+            position_error_enu_m=position_error_enu_m,
+            attitude_error_wxyz=np.asarray(obs.relative_switch_quat_xyzw)[[3, 0, 1, 2]],
+            linear_velocity_enu_mps=rotate_vector_wxyz(
+                body_to_world, np.asarray(obs.body_lin_vel_mps)
+            ),
+            angular_velocity_enu_radps=rotate_vector_wxyz(
+                body_to_world, np.asarray(obs.body_ang_vel_radps)
+            ),
+        )
+        if reason is not None:
+            return HandoffResult(False, HandoffReason(reason))
+        return _handoff_health(obs, gate)
     rel_pos = np.asarray(obs.relative_switch_pos_m, dtype=np.float64)
     if rel_pos[0] < gate.switch_range_min_m:
         return HandoffResult(False, HandoffReason.TOO_CLOSE)
@@ -135,16 +177,4 @@ def handoff_ready(obs: PressObservation, gate: HandoffGate) -> HandoffResult:
     )
     if relative_attitude_error > gate.relative_attitude_error_max_rad:
         return HandoffResult(False, HandoffReason.ATTITUDE)
-    if _body_z_world_z(obs) < gate.body_z_alignment_min:
-        return HandoffResult(False, HandoffReason.NOT_UPRIGHT)
-    if not obs.contact_valid:
-        return HandoffResult(False, HandoffReason.CONTACT_UNAVAILABLE)
-    if obs.contact_flag:
-        return HandoffResult(False, HandoffReason.CONTACT)
-    if np.any(np.asarray(obs.previous_action, dtype=np.float64) != 0.0):
-        return HandoffResult(False, HandoffReason.PREVIOUS_ACTION)
-    if obs.handoff_mode != 1:
-        return HandoffResult(False, HandoffReason.MODE)
-    if obs.estimator_health < gate.estimator_health_min:
-        return HandoffResult(False, HandoffReason.ESTIMATOR)
-    return HandoffResult(True, None)
+    return _handoff_health(obs, gate)

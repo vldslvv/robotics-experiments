@@ -165,7 +165,11 @@ the entire fleet cycle.
   omitted, and requires `hold_s`; its adapter completes after that duration.
   `press-approach` consumes the injected exact 34-value `PressObservation`;
   `curriculum_stage` selects the stage-specific adapter. The implemented
-  `approach` adapter waits for the configured handoff gate, fails on contact or
+  press adapter uses the fitting-flight reset bounds for `hover` and the
+  configured navigation reset bounds for `approach`. It applies bounded
+  position/yaw feedback while waiting, with gains in
+  `rl.press.handoff.feedback_*`. The first actor observation retains zero
+  previous policy action, matching an episode reset. It fails on contact or
   invalid observation, and completes with a zero terminal setpoint after the
   configured 600 continuous samples inside the complete hover envelope embedded
   in the policy artifact from its pinned flight-parameters run. The adapter

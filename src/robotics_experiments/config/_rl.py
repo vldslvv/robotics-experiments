@@ -180,6 +180,10 @@ class PressHandoffConfig(_FreezableConfig):
     relative_attitude_error_max_rad: float
     body_z_alignment_min: float
     estimator_health_min: float
+    feedback_position_gain_per_s: float
+    feedback_velocity_damping: float
+    feedback_yaw_gain_per_s: float
+    feedback_max_velocity_mps: float
 
 
 @dataclass
