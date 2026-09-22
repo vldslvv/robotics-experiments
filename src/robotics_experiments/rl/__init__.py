@@ -12,6 +12,7 @@ from robotics_experiments.rl.observation import (
     HOVER_OBSERVATION_SCHEMA_VERSION,
     hover_observation_from_state,
     pack_hover_observation,
+    pack_pose_observation,
 )
 from robotics_experiments.rl.offboard import policy_action_to_offboard
 from robotics_experiments.rl.policy import (
@@ -49,6 +50,7 @@ __all__ = [
     "load_policy",
     "load_policy_metadata",
     "pack_hover_observation",
+    "pack_pose_observation",
     "policy_action_to_offboard",
     "policy_metadata",
     "prepare_policy_inputs",

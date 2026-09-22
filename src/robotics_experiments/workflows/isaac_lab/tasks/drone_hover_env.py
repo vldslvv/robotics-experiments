@@ -6,7 +6,7 @@ the host-tested ``robotics_experiments.rl``), with no PX4 lockstep
 per env. Training takes the action level from ``rl.action.kind`` (``velocity`` /
 ``ctbr``); artifact-backed evaluation supplies it through ``PolicyContract``.
 The env class is thin wiring: the frozen ``actuation_params`` plus the pure
-per-step math (``_hover_observation`` / ``_hover_reward`` /
+per-step math (``_hover_reward`` /
 ``_hover_terminated``) do the work, so external composition (rollout/eval
 scripts, the standalone gate) can run the same function chain. The reward here
 is a temporary hover-tracking shaping term so the env is trainable end-to-end
@@ -33,6 +33,7 @@ from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
     PolicyContract,
+    pack_hover_observation,
 )
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
 from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
@@ -42,23 +43,6 @@ from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
 )
 
 __all__ = ["DroneHoverEnvCfg", "DroneHoverEnv", "make_drone_hover_env_cfg"]
-
-
-def _hover_observation(
-    position_w: torch.Tensor,
-    target_w: torch.Tensor,
-    quat_w: torch.Tensor,
-    lin_vel_w: torch.Tensor,
-    ang_vel_b: torch.Tensor,
-) -> torch.Tensor:
-    """Pack the 13-dim hover observation ``[pos_err, quat, lin_vel_w, ang_vel_b]``.
-
-    The batched twin of the pure ``rl.pack_hover_observation``
-    layout (`HOVER_OBSERVATION_SCHEMA_VERSION`): the angular velocity is
-    body-frame, matching ``VehicleState.angular_velocity_flu`` so the same
-    vector is assemblable at deploy time.
-    """
-    return torch.cat((position_w - target_w, quat_w, lin_vel_w, ang_vel_b), dim=-1)
 
 
 def _hover_reward(
@@ -208,12 +192,11 @@ class DroneHoverEnv(_FlightDirectRLEnv):
         self.scene.articulations["drone"] = self.drone
 
     def _get_observations(self) -> dict[str, torch.Tensor]:
-        observations = _hover_observation(
-            self.drone.data.root_pos_w,
-            self._hover_target_w,
-            self.drone.data.root_quat_w,
-            self.drone.data.root_lin_vel_w,
-            self.drone.data.root_ang_vel_b,
+        observations = pack_hover_observation(
+            goal_offset_enu_m=self._hover_target_w - self.drone.data.root_pos_w,
+            quat_flu_enu_wxyz=self.drone.data.root_quat_w,
+            linear_velocity_body_flu=self.drone.data.root_lin_vel_b,
+            angular_velocity_body_flu=self.drone.data.root_ang_vel_b,
         )
         return {"policy": observations}
 

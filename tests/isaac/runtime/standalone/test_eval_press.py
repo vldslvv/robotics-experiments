@@ -29,8 +29,8 @@ def _contract():
 
     return PolicyContract(
         policy_interface=PolicyInterface.PRESS,
-        obs_schema_version=2,
-        obs_dim=34,
+        obs_schema_version=3,
+        obs_dim=35,
         policy_rate_hz=20.0,
         action_kind="velocity",
         action_dim=4,
@@ -218,7 +218,7 @@ def test_seed_rollout_reseeds_and_uses_each_successful_hold_window(*, success_en
     assert {reward.name for reward in result.reward_means} == set(reward_names)
     assert {reward.mean for reward in result.reward_means} == {1.0}
     assert any("worst trace seed=202 episode=0 step=0" in message for message in reports)
-    assert any("normalized_target_error_enu=" in message for message in reports)
+    assert any("goal_offset_body_m=" in message for message in reports)
     assert not any("range_before_m=" in message or "lateral_m=" in message for message in reports)
 
 
@@ -400,8 +400,8 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
     def fake_factory(**kwargs):
         factory_calls.append(kwargs)
         return env, SimpleNamespace(
-            observation_schema_version=2,
-            observation_space=34,
+            observation_schema_version=3,
+            observation_space=35,
             policy_interface="press",
         )
 
@@ -512,8 +512,8 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: (
             env,
             SimpleNamespace(
-                observation_schema_version=2,
-                observation_space=34,
+                observation_schema_version=3,
+                observation_space=35,
                 policy_interface="press",
             ),
         ),
@@ -581,27 +581,41 @@ def test_hover_feedback_signs_frames_and_limits():
 
     module = _load_eval_press_module()
     config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
-    policy = module._HoverFeedback(  # noqa: SLF001 - host test of the CLI feedback policy
-        config=config,
-        flight_parameters=_FLIGHT_PARAMETERS,
+    from robotics_experiments.rl import pack_pose_observation
+
+    policy = module._HoverFeedback(config=config)  # noqa: SLF001 - CLI feedback test
+    body_quats = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)],
+            [math.cos(0.1), 0.0, 0.0, math.sin(0.1)],
+            [math.cos(1.0), 0.0, 0.0, math.sin(1.0)],
+            [1.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=torch.float64,
     )
-    observation = torch.zeros((5, 34), dtype=torch.float64)
-    observation[:, 6] = 1.0
-    observation[:, 19] = 1.0
-    observation[0, 0] = 1.0
-    observation[1, 0] = 1.0
-    observation[1, 18:20] = math.sqrt(0.5)
-    observation[2, 5:7] = torch.tensor([math.sin(0.1), math.cos(0.1)])
+    offsets = torch.zeros((5, 3), dtype=torch.float64)
+    offsets[:2, 0] = 0.1
+    velocities = torch.zeros_like(offsets)
+    velocities[4] = torch.tensor([0.1, -0.1, 0.1])
+    pose = pack_pose_observation(
+        goal_offset_enu_m=offsets,
+        quat_flu_enu_wxyz=body_quats,
+        goal_quat_world_wxyz=torch.tensor([[1.0, 0.0, 0.0, 0.0]], dtype=torch.float64).expand(
+            5, -1
+        ),
+        linear_velocity_body_flu=velocities,
+        angular_velocity_body_flu=torch.zeros_like(offsets),
+    )
+    observation = torch.cat((pose, torch.zeros((5, 17), dtype=torch.float64)), dim=-1)
     observation[3, :3] = 1e6
-    observation[3, 5:7] = torch.tensor([math.sin(1.0), math.cos(1.0)])
-    observation[4, 10:13] = torch.tensor([0.1, -0.1, 0.1])
     action = policy(observation)
-    assert action[0, 0] < 0.0
+    assert action[0, 0] > 0.0
     assert action[0, 1:].tolist() == [0.0, 0.0, 0.0]
     assert action[1, 0].item() == pytest.approx(0.0, abs=1e-12)
     assert action[1, 1].item() == pytest.approx(-action[0, 0].item())
     assert action[2, 3] < 0.0
-    assert action[3].tolist() == [-1.0, -1.0, -1.0, -1.0]
+    assert action[3].tolist() == [1.0, 1.0, 1.0, -1.0]
     assert action[4, :3].tolist() == pytest.approx([-0.04, 0.04, -0.04])
     assert torch.equal(action, policy(observation))
 

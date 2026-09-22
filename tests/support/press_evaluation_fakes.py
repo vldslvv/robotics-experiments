@@ -35,7 +35,7 @@ class PressEvaluationEnv:
     def reset(self, *, seed):
         self.seeds.append(seed)
         self.step_count = 0
-        return {"policy": torch.zeros((self.episode_count, 34))}, {}
+        return {"policy": torch.zeros((self.episode_count, 35))}, {}
 
     def step(self, _action, /):
         self.step_count += 1
@@ -95,7 +95,7 @@ class PressEvaluationEnv:
             ),
         )
         return (
-            {"policy": torch.zeros((self.episode_count, 34))},
+            {"policy": torch.zeros((self.episode_count, 35))},
             torch.zeros(self.episode_count),
             success | collision,
             timeout,

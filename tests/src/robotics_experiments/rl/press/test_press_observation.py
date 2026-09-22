@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 
-from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
     PRESS_OBSERVATION_DIM,
@@ -23,9 +21,6 @@ from robotics_experiments.rl.press import (
 _IDENTITY_WXYZ = np.array([1.0, 0.0, 0.0, 0.0])
 # Rotation of pi about world Z (switch outward normal facing world -X).
 _Z180_WXYZ = np.array([0.0, 0.0, 0.0, 1.0])
-_ENVELOPE = load_flight_parameters(
-    Path(__file__).parents[4] / "fixtures/flight_parameters/flight_parameters.json"
-)
 _POSITION_ERROR_ENU_M = np.array([0.05, -0.02, 0.1])
 
 
@@ -80,30 +75,27 @@ def test_contact_frame_lateral_and_vertical_offsets() -> None:
 
 
 def test_press_observation_to_vector_length_and_slots() -> None:
-    assert OBSERVATION_SCHEMA_VERSION == 2
+    assert OBSERVATION_SCHEMA_VERSION == 3
     obs = _press_observation()
     vector = to_vector(
         obs=obs,
         position_error_enu_m=_POSITION_ERROR_ENU_M,
-        flight_parameters=_ENVELOPE,
     )
     assert vector.shape == (PRESS_OBSERVATION_DIM,)
-    np.testing.assert_allclose(vector[0:3], [0.5, -0.2, 1.0])
-    # detection_valid occupies slot 9; flipping it changes exactly that slot.
+    np.testing.assert_allclose(vector[0:3], [-0.05, 0.02, -0.1])
+    # detection_valid occupies slot 20; flipping it changes exactly that slot.
     flipped = to_vector(
         obs=_press_observation(detection_valid=False),
         position_error_enu_m=_POSITION_ERROR_ENU_M,
-        flight_parameters=_ENVELOPE,
     )
     diff = np.nonzero(flipped - vector)[0]
-    assert diff.tolist() == [9]
-    # lamp_state occupies slot 24.
+    assert diff.tolist() == [20]
+    # lamp_state occupies slot 25.
     lamp = to_vector(
         obs=_press_observation(lamp_state=1),
         position_error_enu_m=_POSITION_ERROR_ENU_M,
-        flight_parameters=_ENVELOPE,
     )
-    assert np.nonzero(lamp - vector)[0].tolist() == [24]
+    assert np.nonzero(lamp - vector)[0].tolist() == [25]
 
 
 def test_press_observation_mask_bits_are_named_and_composable() -> None:
@@ -125,12 +117,10 @@ def test_press_observation_torch_numpy_packing_parity() -> None:
     expected = to_vector(
         obs=obs,
         position_error_enu_m=_POSITION_ERROR_ENU_M,
-        flight_parameters=_ENVELOPE,
     )
     actual = pack_press_observation(
         position_error_enu_m=torch.tensor(_POSITION_ERROR_ENU_M).reshape(1, 3),
-        flight_parameters=_ENVELOPE,
-        relative_switch_quat_xyzw=torch.tensor(obs.relative_switch_quat_xyzw).reshape(1, 4),
+        goal_quat_world_wxyz=torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=torch.float64).reshape(1, 4),
         pose_confidence=torch.tensor([obs.pose_confidence]),
         pose_age_s=torch.tensor([obs.pose_age_s]),
         detection_valid=torch.tensor([obs.detection_valid]),
@@ -177,3 +167,49 @@ def test_press_observation_field_order_is_stable() -> None:
         "estimator_health",
         "obs_mask",
     ]
+
+
+@pytest.mark.parametrize("yaw", [0.0, 90.0, -90.0, 180.0])
+@pytest.mark.parametrize("batched", [False, True])
+def test_press_provider_and_lab_pose_packing_agree_across_world_frames(yaw, batched):
+    import torch
+    from scipy.spatial.transform import Rotation
+
+    goal = Rotation.from_euler("zyx", [yaw, 3.0, -2.0], degrees=True)
+    body = goal * Rotation.from_euler("xyz", [0.02, -0.01, 0.03])
+    drone_position = np.array([7.0, -4.0, 3.0])
+    contact_position = np.array([0.49, -0.02, 0.01])
+    switch_position = drone_position + goal.apply(contact_position)
+    switch = goal * Rotation.from_euler("z", np.pi)
+    relative_position, relative_quat = world_switch_to_contact_frame(
+        drone_pose=(drone_position, body.as_quat()[[3, 0, 1, 2]]),
+        switch_pose=(switch_position, switch.as_quat()[[3, 0, 1, 2]]),
+    )
+    position_error = drone_position - (switch_position - goal.apply([0.48, 0.0, 0.0]))
+    obs = _press_observation(
+        relative_switch_pos_m=relative_position,
+        relative_switch_quat_xyzw=relative_quat,
+        attitude_quat_xyzw=body.as_quat(),
+        body_lin_vel_mps=np.array([0.01, 0.02, -0.03]),
+    )
+    expected = to_vector(obs=obs, position_error_enu_m=position_error)
+    np.testing.assert_allclose(expected[:3], body.inv().apply(-position_error), atol=1e-12)
+    kwargs = dataclasses.asdict(obs)
+    del kwargs["relative_switch_pos_m"]
+    del kwargs["relative_switch_quat_xyzw"]
+    kwargs.update(
+        position_error_enu_m=position_error, goal_quat_world_wxyz=goal.as_quat()[[3, 0, 1, 2]]
+    )
+    tensors = {name: torch.as_tensor(value, dtype=torch.float64) for name, value in kwargs.items()}
+    if batched:
+        tensors = {name: tensor.unsqueeze(0) for name, tensor in tensors.items()}
+    actual = pack_press_observation(**tensors).numpy()
+    np.testing.assert_allclose(actual[0] if batched else actual, expected, atol=1e-12)
+    flipped = dataclasses.replace(
+        obs,
+        attitude_quat_xyzw=-obs.attitude_quat_xyzw,
+        relative_switch_quat_xyzw=-obs.relative_switch_quat_xyzw,
+    )
+    np.testing.assert_allclose(
+        to_vector(obs=flipped, position_error_enu_m=position_error), expected, atol=1e-12
+    )

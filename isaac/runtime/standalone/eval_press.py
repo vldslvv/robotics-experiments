@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 import torch
 
 from robotics_experiments.config import ExperimentConfig, load_config
-from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.rl import POLICY_FILENAME, prepare_policy_inputs, validate_policy_artifact
 from robotics_experiments.rl.press import (
     create_press_acceptance_criteria,
@@ -40,29 +39,17 @@ def _repo_root() -> Path:
 
 
 class _HoverFeedback:
-    """Position/yaw feedback using only the production schema-2 observation."""
+    """Position/yaw feedback using only the production schema-3 observation."""
 
-    def __init__(self, *, config: ExperimentConfig, flight_parameters: FlightParameters) -> None:
+    def __init__(self, *, config: ExperimentConfig) -> None:
         self._action = config.rl.action
         self._evaluation = config.rl.press.evaluation
-        bounds = flight_parameters.hover.position_error_enu_m
-        self._position_scale = tuple(
-            max(abs(lower), abs(upper))
-            for lower, upper in zip(bounds.lower, bounds.upper, strict=True)
-        )
 
     def __call__(self, observation: torch.Tensor, /) -> torch.Tensor:
-        # The observation error is actual minus desired position in world ENU.
-        error = observation[:, :3] * observation.new_tensor(self._position_scale)
-        world_velocity = -self._evaluation.feasibility_position_gain_per_s * error
-        # Conjugate body-FLU -> world-ENU quaternion, stored as xyzw at 16:20.
-        vector = -observation[:, 16:19]
-        scalar = observation[:, 19:20]
-        cross = 2.0 * torch.linalg.cross(vector, world_velocity)
-        body_velocity = world_velocity + scalar * cross + torch.linalg.cross(vector, cross)
-        body_velocity -= self._evaluation.feasibility_velocity_damping * observation[:, 10:13]
-        x, y, z, w = observation[:, 3:7].unbind(dim=-1)
-        yaw_error = torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+        body_velocity = self._evaluation.feasibility_position_gain_per_s * observation[:, :3]
+        body_velocity -= self._evaluation.feasibility_velocity_damping * observation[:, 3:6]
+        # Transpose the goal-to-body rotation to recover drone yaw in the goal frame.
+        yaw_error = torch.atan2(observation[:, 15], observation[:, 12])
         yaw_rate = -self._evaluation.feasibility_yaw_gain_per_s * yaw_error
         return torch.cat(
             (
@@ -126,7 +113,7 @@ def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
         try:
             result = evaluate_press_approach_policy(
                 env=env,
-                policy=_HoverFeedback(config=config, flight_parameters=inputs.flight_parameters),
+                policy=_HoverFeedback(config=config),
                 seeds=seeds,
                 episodes_per_seed=config.rl.press.evaluation.episodes_per_seed,
                 hold_steps=round(stage.hold_s * config.rl.policy_rate_hz),

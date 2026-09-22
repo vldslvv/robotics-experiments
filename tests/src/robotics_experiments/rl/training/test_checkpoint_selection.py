@@ -166,8 +166,8 @@ def test_comparison_fingerprint_tracks_effective_press_settings(*, stage_name: s
     config = load_config(REPO_ROOT / "configs" / f"train_press_{stage_name}_quad.yaml")
     contract = PolicyContract(
         policy_interface=PolicyInterface.PRESS,
-        obs_schema_version=1,
-        obs_dim=34,
+        obs_schema_version=3,
+        obs_dim=35,
         policy_rate_hz=20.0,
         action_kind="velocity",
         action_dim=4,
@@ -189,7 +189,7 @@ def test_comparison_fingerprint_tracks_effective_press_settings(*, stage_name: s
     )
     assert fingerprint != _press_comparison_fingerprint(
         config=config,
-        contract=replace(contract, obs_dim=35),
+        contract=replace(contract, obs_dim=contract.obs_dim + 1),
         flight_parameters_fingerprint="envelope-a",
     )
     assert fingerprint != _press_comparison_fingerprint(
@@ -343,20 +343,21 @@ def test_plateau_accumulates_small_improvements_against_material_reference() -> 
     assert second.state == PlateauState(reference_value=0.997, stale_evaluations=0)
 
 
-def test_plateau_requires_all_ten_consecutive_stale_evaluations() -> None:
+@pytest.mark.parametrize("patience", [5, 10])
+def test_plateau_requires_all_consecutive_stale_evaluations(*, patience: int) -> None:
     state = PlateauState(reference_value=1.0, stale_evaluations=0)
-    for iteration in range(1, 10):
+    for iteration in range(1, patience):
         update = advance_plateau(
-            criteria=_criteria(),
+            criteria=_criteria(patience=patience),
             state=state,
             evaluation=_evaluation(iteration=iteration, cost=1.0),
         )
         state = update.state
         assert not update.plateau_reached
     update = advance_plateau(
-        criteria=_criteria(),
+        criteria=_criteria(patience=patience),
         state=state,
-        evaluation=_evaluation(iteration=10, cost=1.0),
+        evaluation=_evaluation(iteration=patience, cost=1.0),
     )
     assert update.plateau_reached
 
@@ -382,6 +383,44 @@ def test_validation_passing_candidate_ranks_ahead_of_lower_cost_failure() -> Non
         eligible_policy_digests=frozenset({passing.policy_digest}),
     )
     assert selected is passing
+
+
+def test_successful_hover_selection_minimizes_error_and_preserves_passing_ties() -> None:
+    from robotics_experiments.config import load_config
+
+    config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    candidates = tuple(
+        replace(
+            _scored(
+                success_rate=1.0,
+                collision_rate=collision,
+                timeout_rate=0.0,
+                episode_longest_hover_duration_mean_s=30.0,
+                hover_envelope_utilization_mean=error,
+            ),
+            iteration=index,
+            policy_digest=f"actor-{index}",
+        )
+        for index, (error, collision) in enumerate(
+            ((0.3, 0.0), (0.2, 0.0), (0.2, 0.0), (0.1, 0.01))
+        )
+    )
+    eligible = frozenset(
+        candidate.policy_digest
+        for candidate in candidates
+        if evaluate_press_acceptance(
+            criteria=_acceptance_criteria(config), evaluation=candidate
+        ).passed
+    )
+    assert eligible == frozenset({"actor-0", "actor-1", "actor-2"})
+    assert (
+        select_best_evaluation(
+            criteria=config.rl.press.selected_stage().plateau,
+            evaluations=candidates,
+            eligible_policy_digests=eligible,
+        )
+        is candidates[1]
+    )
 
 
 def _report(*, fingerprint: str, value: float) -> str:

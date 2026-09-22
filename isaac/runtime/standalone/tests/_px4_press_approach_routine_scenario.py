@@ -7,8 +7,10 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import numpy as np
 from _px4_takeoff_scenario import Px4TakeoffScenarioOptions, run_px4_takeoff_scenario
 from _runtime import SceneTestContext
+from scipy.spatial.transform import Rotation
 
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
@@ -93,13 +95,19 @@ def _measurement_payload(
         raise AssertionError(
             "navigation handoff measurement has no exact entry observation: " f"{evidence!r}"
         )
+    first = np.asarray(observation[12:15])
+    second = np.asarray(observation[15:18])
+    body_to_contact = np.column_stack((first, second, np.cross(first, second))).T
+    target_range = context.config.rl.press.goal.velocity_reference.range_center_m
+    switch_position = body_to_contact @ np.asarray(observation[:3]) + [target_range, 0.0, 0.0]
+    switch_quat = Rotation.from_matrix(body_to_contact).as_quat(canonical=True)
     return {
         "artifact_kind": "press-navigation-handoff-sample",
         "schema_version": 2,
         "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
         "observation": list(observation),
-        "relative_switch_pos_m": list(observation[:3]),
-        "relative_switch_quat_xyzw": list(observation[3:7]),
+        "relative_switch_pos_m": switch_position.tolist(),
+        "relative_switch_quat_xyzw": switch_quat.tolist(),
         "route": {
             "goto": dict(goto),
             "settle_hold_s": float(hover["hold_s"]),
@@ -119,7 +127,7 @@ def _validate_invocation(
     context.report(
         "approach routine verified final waypoint, settling, handoff latch, one valid "
         "actor evaluation, and transmission of that evaluation's setpoint; "
-        f"entry_position_m={evidence.entry_observation[:3]}"
+        f"entry_goal_offset_body_m={evidence.entry_observation[:3]}"
     )
 
 

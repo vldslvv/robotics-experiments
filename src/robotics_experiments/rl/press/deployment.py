@@ -134,7 +134,6 @@ def advance_press_approach_execution(
     observation_vector = to_vector(
         obs=observation,
         position_error_enu_m=position_error_enu_m,
-        flight_parameters=params.flight_parameters,
     )
     invalid = _invalid_reason(
         observation=observation,

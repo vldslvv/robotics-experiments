@@ -1,5 +1,9 @@
 # F2 -- Observation Interface + pose-provider seam + handoff gate
 
+> Historical implementation record. Current observation schemas, artifact
+> requirements, and training commands are documented in
+> [the RL workflow](../RL_WORKFLOW.md).
+
 Status: COMPLETE (2026-07-05). The pure stack (`PressObservation`/`to_vector`,
 contact frame, `AbstractPoseProvider`/`PoseSample`, `handoff_ready` +
 `rl.press.handoff` config, the lazy `GroundTruthPoseProvider` Isaac leaf) is

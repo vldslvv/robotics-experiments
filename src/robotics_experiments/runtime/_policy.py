@@ -135,8 +135,8 @@ def _hover_adapter(
         successor = _HoverPolicyExecutionState(started_us=started_us)
         action = loaded.inference(
             hover_observation_from_state(
-                policy_input.vehicle_state,
-                np.asarray(policy_input.reference_position_enu, dtype=np.float64),
+                state=policy_input.vehicle_state,
+                target_enu=np.asarray(policy_input.reference_position_enu, dtype=np.float64),
             )
         )
         return PolicyResult(

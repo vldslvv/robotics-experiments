@@ -179,7 +179,7 @@ def test_drone_hover_task_import_and_config_when_isaac_lab_available():
     assert module.DroneHoverEnvCfg is DroneHoverEnvCfg
     cfg = make_drone_hover_env_cfg(experiment_config=load_config("configs/takeoff_quad.yaml"))
     assert cfg.action_space == 4
-    assert cfg.observation_space == 13
+    assert cfg.observation_space == 12
     assert cfg.policy_config.actor.hidden_dims == (128, 128)
     assert cfg.policy_config.critic.hidden_dims == (128, 128)
     assert not hasattr(cfg, "physics_rate_hz")

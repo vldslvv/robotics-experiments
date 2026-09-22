@@ -43,7 +43,7 @@ def _fleet(
     policy_state = PressApproachExecutionState(
         previous_action=(0.0, 0.0, 0.0, 0.0),
         handoff_latched=handoff_latched,
-        entry_observation=(0.48,) + (0.0,) * 33,
+        entry_observation=(0.0,) * 12 + (1.0, 0.0, 0.0, 0.0, 1.0, 0.0) + (0.0,) * 17,
         actor_evaluations=actor_evaluations,
         contact_failure=contact_failure,
     )
@@ -117,3 +117,38 @@ def test_actor_result_must_be_transmitted_but_later_quality_is_irrelevant(
 
     assert evidence.actor_setpoint_transmitted
     assert module._actor_invoked(evidence=evidence)  # noqa: SLF001
+
+
+@pytest.mark.parametrize("yaw", [0.0, 90.0, -90.0, 180.0])
+def test_measurement_recovers_physical_contact_pose(monkeypatch, yaw):
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl import pack_pose_observation
+
+    module = _load_scenario(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml")
+    target_range = config.rl.press.goal.velocity_reference.range_center_m
+    goal = Rotation.from_euler("z", yaw, degrees=True)
+    relative = Rotation.from_euler("xyz", [0.01, -0.02, 0.03])
+    body = goal * relative
+    contact_position = np.array([0.49, 0.02, -0.01])
+    vector = pack_pose_observation(
+        goal_offset_enu_m=goal.apply(contact_position - [target_range, 0.0, 0.0]),
+        quat_flu_enu_wxyz=body.as_quat()[[3, 0, 1, 2]],
+        goal_quat_world_wxyz=goal.as_quat()[[3, 0, 1, 2]],
+        linear_velocity_body_flu=np.zeros(3),
+        angular_velocity_body_flu=np.zeros(3),
+    )
+    evidence = module._HandoffEvidence(  # noqa: SLF001 - measurement boundary test
+        entry_observation=tuple(vector) + (0.0,) * 17
+    )
+    payload = module._measurement_payload(  # noqa: SLF001 - measurement boundary test
+        context=SimpleNamespace(config=config), evidence=evidence
+    )
+    assert payload["observation_schema_version"] == 3
+    np.testing.assert_allclose(payload["relative_switch_pos_m"], contact_position, atol=1e-12)
+    np.testing.assert_allclose(
+        payload["relative_switch_quat_xyzw"], relative.as_quat(canonical=True), atol=1e-12
+    )

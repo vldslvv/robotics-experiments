@@ -1,5 +1,9 @@
 # F3b -- Generic contact-policy deployment and scripted baseline
 
+> Historical implementation record. Current observation schemas, artifact
+> requirements, and training commands are documented in
+> [the RL workflow](../RL_WORKFLOW.md).
+
 Status: PARTIALLY IMPLEMENTED; LEARNED-POLICY MISSION AWAITS AN ACCEPTED F3
 ARTIFACT; SCRIPTED BASELINE REMAINS PLANNED.
 

@@ -166,7 +166,7 @@ def _metadata(
     rate_hz: float = 20.0,
 ) -> dict:
     action_cfg = _action_cfg() if action_cfg is None else action_cfg
-    obs_dim = HOVER_OBSERVATION_DIM if interface is PolicyInterface.HOVER else 34
+    obs_dim = HOVER_OBSERVATION_DIM if interface is PolicyInterface.HOVER else 35
     obs_schema_version = (
         HOVER_OBSERVATION_SCHEMA_VERSION
         if interface is PolicyInterface.HOVER
@@ -290,8 +290,8 @@ def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
 
     loaded = load_policy(artifact_dir=artifact)
     observation = hover_observation_from_state(
-        VehicleState.hover_at(),
-        np.array([0.0, 0.0, 1.0]),
+        state=VehicleState.hover_at(),
+        target_enu=np.array([0.0, 0.0, 1.0]),
     )
     setpoint = policy_action_to_offboard(
         np.clip(loaded.inference(observation), -1.0, 1.0),
@@ -318,8 +318,8 @@ def test_load_policy_carries_metadata_contract_and_accepts_batches(tmp_path: Pat
     assert isinstance(loaded.contract, PolicyContract)
     assert loaded.contract.policy_rate_hz == 20.0
     assert loaded.contract.curriculum_stage == "approach"
-    assert loaded.inference(np.zeros(34)).shape == (4,)
-    assert loaded.inference(np.zeros((3, 34))).shape == (3, 4)
+    assert loaded.inference(np.zeros(35)).shape == (4,)
+    assert loaded.inference(np.zeros((3, 35))).shape == (3, 4)
     with pytest.raises(ValueError, match="observation shape"):
         loaded.inference(np.zeros((2, 17)))
 
@@ -465,7 +465,7 @@ def test_hover_adapter_requires_hold_duration() -> None:
         metadata=PolicyMetadata(
             contract=PolicyContract(
                 policy_interface=PolicyInterface.HOVER,
-                obs_schema_version=1,
+                obs_schema_version=2,
                 obs_dim=HOVER_OBSERVATION_DIM,
                 policy_rate_hz=20.0,
                 action_kind="velocity",
@@ -501,8 +501,8 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
         metadata=PolicyMetadata(
             contract=PolicyContract(
                 policy_interface=PolicyInterface.PRESS,
-                obs_schema_version=1,
-                obs_dim=34,
+                obs_schema_version=3,
+                obs_dim=35,
                 policy_rate_hz=20.0,
                 action_kind="velocity",
                 action_dim=4,
@@ -555,8 +555,8 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
         metadata=PolicyMetadata(
             contract=PolicyContract(
                 policy_interface=PolicyInterface.PRESS,
-                obs_schema_version=1,
-                obs_dim=34,
+                obs_schema_version=3,
+                obs_dim=35,
                 policy_rate_hz=20.0,
                 action_kind="velocity",
                 action_dim=4,
@@ -618,9 +618,9 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
     diagnostic = json.loads(result.diagnostics[0].split("PRESS_POLICY ", maxsplit=1)[1])
     assert diagnostic["event"] == "actor_evaluation"
     assert diagnostic["actor_entry"] is True
-    assert len(diagnostic["observation"]) == 34
-    assert diagnostic["observation"][27:31] == [0.0, 0.0, 0.0, 0.0]
-    assert diagnostic["observation"][31] == 1.0
+    assert len(diagnostic["observation"]) == 35
+    assert diagnostic["observation"][28:32] == [0.0, 0.0, 0.0, 0.0]
+    assert diagnostic["observation"][32] == 1.0
     assert diagnostic["raw_normalized_action"] == [1.2, -0.5, 0.25, -0.1]
     assert diagnostic["normalized_action"] == [1.0, -0.5, 0.25, -0.1]
     assert diagnostic["setpoint"] == {
@@ -684,3 +684,19 @@ def test_hover_reset_loading_is_cached_before_live_adapter_construction(
     )
     adapter = _press_approach_adapter(config=config, loaded=loaded, repo_root=REPO_ROOT)
     assert adapter.policy_rate_hz == loaded.contract.policy_rate_hz
+
+
+@pytest.mark.parametrize(
+    ("interface", "old_schema", "old_dim"),
+    [(PolicyInterface.HOVER, 1, 13), (PolicyInterface.PRESS, 2, 34)],
+)
+def test_old_observation_artifacts_are_rejected_without_modifying_evidence(
+    tmp_path, interface, old_schema, old_dim
+):
+    metadata = _metadata(interface=interface)
+    metadata.update(obs_schema_version=old_schema, obs_dim=old_dim)
+    artifact = _write_metadata_artifact(tmp_path, metadata)
+    before = {path.name: path.read_bytes() for path in artifact.iterdir()}
+    with pytest.raises(ValueError, match="unsupported .* observation"):
+        validate_policy_artifact(artifact_dir=artifact)
+    assert {path.name: path.read_bytes() for path in artifact.iterdir()} == before

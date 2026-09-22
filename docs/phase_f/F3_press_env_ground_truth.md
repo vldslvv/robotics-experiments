@@ -1,5 +1,9 @@
 # F3 -- Ground-truth switch-press task and first policy
 
+> Historical implementation record. Current observation schemas, artifact
+> requirements, and training commands are documented in
+> [the RL workflow](../RL_WORKFLOW.md).
+
 Status: IMPLEMENTED; POLICY TRAINED; ACCEPTANCE TUNING IN PROGRESS (2026-07-22).
 
 F3 provides the easy, ground-truth contact task that precedes curriculum,

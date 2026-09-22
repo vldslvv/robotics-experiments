@@ -43,6 +43,7 @@ from robotics_experiments.flight_parameters import (
     FlightParameters,
     load_flight_parameters_bundle,
 )
+from robotics_experiments.rl import HoverResetSamples, load_hover_reset_samples
 
 if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab import (
@@ -431,6 +432,7 @@ def _run_contact_chain(
     config: ExperimentConfig,
     controller_settings: ControllerSettings,
     flight_parameters: FlightParameters,
+    hover_reset_samples: HoverResetSamples,
 ) -> None:
     from pxr import UsdLux
 
@@ -470,6 +472,8 @@ def _run_contact_chain(
         experiment_config=config,
         controller_settings=controller_settings,
         flight_parameters=flight_parameters,
+        hover_reset_samples=hover_reset_samples,
+        training=False,
     )
     try:
         _reset_env(env, args.seed)
@@ -768,7 +772,7 @@ def _controller_settings(*, config: ExperimentConfig) -> ControllerSettings:
 
 def _contact_chain_inputs(
     *, config: ExperimentConfig
-) -> tuple[ControllerSettings, FlightParameters]:
+) -> tuple[ControllerSettings, FlightParameters, HoverResetSamples]:
     repo_root = Path(__file__).resolve().parents[4]
     controller, controller_path = _controller_artifact(config=config)
     flight_parameters_path = Path(config.rl.inputs.flight_parameters_artifact)
@@ -823,17 +827,20 @@ def _contact_chain_inputs(
         f"flight_parameters_run_id={flight_parameters.run_id} "
         f"flight_parameters_digest={bundle.flight_parameters_digest}"
     )
-    return controller.selected_settings, flight_parameters
+    return controller.selected_settings, flight_parameters, load_hover_reset_samples(bundle=bundle)
 
 
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     if args.contact_chain:
-        controller_settings, flight_parameters = _contact_chain_inputs(config=config)
+        controller_settings, flight_parameters, hover_reset_samples = _contact_chain_inputs(
+            config=config
+        )
         _run_contact_chain(
             args=args,
             config=config,
             controller_settings=controller_settings,
             flight_parameters=flight_parameters,
+            hover_reset_samples=hover_reset_samples,
         )
         return
     controller_settings = _controller_settings(config=config)

@@ -227,13 +227,13 @@ def _report_worst_episode_trace(
             continue
         observation = observation_trace[step][episode]
         action = action_trace[step][episode]
-        normalized_target_error = observation[:3].tolist()
-        body_velocity = observation[10:13].tolist()
-        body_angular_velocity = observation[13:16].tolist()
+        goal_offset_body = observation[:3].tolist()
+        body_velocity = observation[3:6].tolist()
+        body_angular_velocity = observation[6:9].tolist()
         report(
             f"press approach worst trace seed={seed} episode={episode} step={step} "
             f"time_s={(step + 1) * step_dt:.3f} "
-            f"normalized_target_error_enu={normalized_target_error} "
+            f"goal_offset_body_m={goal_offset_body} "
             f"range_after_m={float(range_trace[step][episode].item()):.6f} "
             f"body_velocity_mps={body_velocity} "
             f"body_angular_velocity_radps={body_angular_velocity} "

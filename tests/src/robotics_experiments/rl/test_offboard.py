@@ -18,8 +18,8 @@ from robotics_experiments.rl import (
 def _contract(*, action_kind: str) -> PolicyContract:
     return PolicyContract(
         policy_interface=PolicyInterface.HOVER,
-        obs_schema_version=1,
-        obs_dim=13,
+        obs_schema_version=2,
+        obs_dim=12,
         policy_rate_hz=20.0,
         action_kind=action_kind,
         action_dim=4,

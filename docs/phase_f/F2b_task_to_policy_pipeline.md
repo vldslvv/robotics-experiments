@@ -1,5 +1,9 @@
 # F2b -- Task -> policy pipeline proof on the hover task
 
+> Historical implementation record. Current observation schemas, artifact
+> requirements, and training commands are documented in
+> [the RL workflow](../RL_WORKFLOW.md).
+
 Status: COMPLETE (2026-07-05). `make train-rl` (1500 iterations, ~9 min on
 the Isaac Lab image) converged the hover task from mean reward 1.15 to 92.12
 with mean episode length 249/250, and `make test-integration-press-policy`

@@ -84,7 +84,9 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   resolves the config's accepted controller and complete flight-parameters
   bundle to immutable run paths, validates their shared qualification lineage,
   and reports those canonical inputs before constructing the environment. It
-  does not load or execute the policy named by that config. It is part of
+  does not load or execute the policy named by that config. Its environment
+  receives the fitting-flight reset samples and explicit evaluation mode,
+  matching the production constructor contract. It is part of
   `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
   Isaac Lab image. It needs the automatically published artifact from
@@ -138,8 +140,9 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   downstream transfer gate and never fits or publishes controller settings. It
   is artifact-dependent and excluded from `test-integration-all`. The shared
   transfer routine derives its artifact from the active curriculum stage and
-  gives each policy step 45 seconds, enough for the 30-second/600-sample
-  completion hold. The approach config remains the target default; qualify the
+  gives each policy step 45 seconds for handoff, settling, and the continuous
+  30-second/600-sample completion hold. Leaving the envelope restarts the hold;
+  the budget does not guarantee completion. The approach config remains the target default; qualify the
   first press stage with:
 
   ```bash

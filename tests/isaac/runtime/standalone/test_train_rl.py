@@ -13,7 +13,7 @@ import pytest
 import torch
 from rsl_rl.networks import EmpiricalNormalization
 
-from robotics_experiments.config import RlTrainingPhaseConfig
+from robotics_experiments.config import RlPlateauCriteriaConfig, RlTrainingPhaseConfig
 from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
 from robotics_experiments.rl.press import create_press_acceptance_criteria
@@ -156,8 +156,8 @@ def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
     config = load_config(REPO_ROOT / "configs/train_press_approach_quad.yaml")
     contract = PolicyContract(
         policy_interface=PolicyInterface.PRESS,
-        obs_schema_version=2,
-        obs_dim=34,
+        obs_schema_version=3,
+        obs_dim=35,
         policy_rate_hz=20.0,
         action_kind="velocity",
         action_dim=4,
@@ -260,8 +260,8 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
     assert report["reward_configuration"] == {
         "hover_stabilization": "boundary_weighted",
         "position_progress_weight": 0.1,
-        "stabilization_weight": 0.01,
-        "outside_envelope_weight": 0.03,
+        "stabilization_weight": 0.03,
+        "outside_envelope_weight": 0.09,
         "predictive_barrier_weight": 0.1,
         "action_effort_weight": 1.0,
         "hold_progress_weight": 0.01,
@@ -746,6 +746,7 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
         policy_digest="digest",
         metrics=(
             EvaluationMetric("episode_longest_hover_duration_mean_s", 15.0),
+            EvaluationMetric("hover_envelope_utilization_mean", 0.25),
             EvaluationMetric("success_rate", 0.95),
             EvaluationMetric("collision_rate", 0.01),
             EvaluationMetric("other_flight_failure_rate", 0.0),
@@ -770,12 +771,21 @@ def test_evaluation_log_reports_plateau_only_after_the_decision(capsys, tmp_path
     assert "stale=" not in metrics_log
 
     train_rl._report_plateau(  # noqa: SLF001
+        criteria=RlPlateauCriteriaConfig(
+            metric_name="hover_envelope_utilization_mean",
+            direction="minimize",
+            minimum_delta=0.003,
+            patience_evaluations=5,
+        ),
         evaluation=evaluation,
         made_progress=True,
         plateau_state=train_rl.PlateauState(reference_value=0.25, stale_evaluations=0),
         plateau_reached=False,
     )
     plateau_log = capsys.readouterr().err
+    assert (
+        "metric=hover_envelope_utilization_mean direction=minimize current=0.250000" in plateau_log
+    )
     assert "progress=true reference=0.250000 stale=0 reached=false" in plateau_log
 
 
@@ -1177,7 +1187,7 @@ def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> No
     from robotics_experiments.rl.training import rsl_rl
 
     actor = torch.nn.Sequential(
-        torch.nn.Linear(34, 256),
+        torch.nn.Linear(35, 256),
         torch.nn.ELU(),
         torch.nn.Linear(256, 4),
     )
@@ -1185,16 +1195,16 @@ def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> No
     rsl_rl.initialize_actor_output(runner=runner, method="scratch-neutral-output")
     output = actor[-1]
     assert torch.count_nonzero(output.bias) == 0
-    action_mean = actor(torch.zeros((128, 34)))
+    action_mean = actor(torch.zeros((128, 35)))
     assert float(action_mean.abs().max()) < 0.01
 
 
 @pytest.mark.parametrize("normalize", [False, True])
 def test_export_freezes_actor_input_normalization(*, tmp_path: Path, normalize) -> None:
-    actor = torch.nn.Sequential(torch.nn.Linear(34, 4))
-    critic = torch.nn.Sequential(torch.nn.Linear(34, 1))
-    normalizer = EmpiricalNormalization(34) if normalize else torch.nn.Identity()
-    observations = torch.linspace(-0.02, 0.04, 68).reshape(2, 34)
+    actor = torch.nn.Sequential(torch.nn.Linear(35, 4))
+    critic = torch.nn.Sequential(torch.nn.Linear(35, 1))
+    normalizer = EmpiricalNormalization(35) if normalize else torch.nn.Identity()
+    observations = torch.linspace(-0.02, 0.04, 70).reshape(2, 35)
     if normalize:
         normalizer.update(observations)
     runner = SimpleNamespace(
@@ -1203,7 +1213,7 @@ def test_export_freezes_actor_input_normalization(*, tmp_path: Path, normalize) 
         )
     )
     expected = actor(normalizer(observations)).detach()
-    metadata = {"obs_dim": 34, "marker": "contract"}
+    metadata = {"obs_dim": 35, "marker": "contract"}
     rsl_rl.export_policy(runner, tmp_path, metadata=metadata)
     module = torch.jit.load(str(tmp_path / "policy.pt"))
     torch.testing.assert_close(module(observations), expected)

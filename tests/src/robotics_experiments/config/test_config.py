@@ -297,9 +297,9 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
         False,
     )
     assert tuple(phase.evaluation_interval for phase in hover_stage.phases) == (5, 5)
-    assert hover_stage.plateau.metric_name == "episode_longest_hover_duration_mean_s"
-    assert hover_stage.plateau.direction == "maximize"
-    assert hover_stage.plateau.minimum_delta == 0.01
+    assert hover_stage.plateau.metric_name == "hover_envelope_utilization_mean"
+    assert hover_stage.plateau.direction == "minimize"
+    assert hover_stage.plateau.minimum_delta == 0.003
     assert hover_stage.plateau.patience_evaluations == 5
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
@@ -314,6 +314,12 @@ def test_press_hover_training_configuration():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "train_press_hover_quad.yaml")
+    approach = load_config(_ROOT / "train_press_approach_quad.yaml")
+    assert approach.rl.press.reward.stabilization_weight == 0.01
+    assert approach.rl.press.reward.outside_envelope_weight == 0.03
+    assert approach.rl.press.reward.action_effort_weight == 1.0
+    assert config.rl.press.acceptance == approach.rl.press.acceptance
+    assert config.rl.press.evaluation == approach.rl.press.evaluation
     policy = config.rl.press.policy
     reward = config.rl.press.reward
     assert config.rl.training.num_learning_epochs == 4
@@ -326,8 +332,8 @@ def test_press_hover_training_configuration():
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
     assert reward.hover_stabilization == "boundary_weighted"
-    assert reward.stabilization_weight == 0.01
-    assert reward.outside_envelope_weight == 0.03
+    assert reward.stabilization_weight == 0.03
+    assert reward.outside_envelope_weight == 0.09
     assert reward.action_effort_weight == 1.0
     assert reward.predictive_barrier_weight == 0.1
     assert reward.hold_progress_weight == 0.01

@@ -243,7 +243,7 @@ class PressObservationIO:
         vehicle_state: VehicleState,
         sim_time_s: float,
     ) -> PressObservation:
-        """Assemble the exact 34-value policy input from live resources."""
+        """Read physical press measurements for observation packing and handoff."""
         self._initialize()
         assert self._drone is not None
         self._drone.apply_action(

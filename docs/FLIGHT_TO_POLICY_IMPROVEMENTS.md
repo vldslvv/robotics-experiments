@@ -1560,3 +1560,587 @@ zero actor history at handoff, producer-lineage rejection, and loading evidence
 before the live bridge. Integration workers and temporary PX4 containers are
 stopped; the failed transfer evidence remains available for the observation-frame
 follow-up.
+
+## 2026-09-13: shared body-relative flight observations
+Checkpoint commit `7bfce5d` preserves the recorded-reset handoff fix before
+observation changes. No PPO training or actor publication was performed.
+The previous warehouse failure exposed sensitivity to world heading and
+quaternion sign. Hover now uses schema 2 with a shared 12-value body-relative
+flight observation; press uses schema 3 with 35 values. The generic pose packer
+adds six goal-to-body rotation-matrix values, with no scene or switch knowledge.
+Press supplies its desired drone pose and appends its existing sensor fields.
+Position offsets are desired minus actual, in metres. The configured empirical
+normalizer remains unchanged; ENU acceptance bounds are not used as body-axis
+input scales. Physical resets, controller settings, noise, rewards, and acceptance
+criteria retain their existing values and frames. Comparison revision is 37.
+Expected benefit: remove quaternion-sign sensitivity and make equivalent global
+yaw rotations share flight observations, reducing the geometric relationships
+the actor must learn. This is representation verification and deterministic
+feedback feasibility, not evidence that a newly trained actor transfers to PX4.
+Exact inputs and workload:
+
+- Controller: `.build/alignment/x500-px4-v1/20260912T211745Z/controller.json`,
+  SHA-256 `f293d818ef9925d6f6f89bc070e84614dd91f9d9073ad4f50aa2958d7e871c12`.
+- Flight bundle: `.build/flight-parameters/holybro-x500-v2-hover-v1/20260912T102640Z`,
+  payload SHA-256 `65f02c5e5bfe6d74291329967033510839acad8b5d6254961b10e39e36c73661`.
+- Config: `configs/train_press_hover_quad.yaml`; validation seeds 101/202/303,
+  100 episodes each, 40-second episode limit and 30-second required hover.
+- Feedback gains: position 1.25/s, velocity damping 0.2, yaw 2.0/s. Existing
+  normalized action limits and the production reset/evaluation logic apply.
+- GPU: RTX 4090, driver 580.178.04; no assets regenerated.
+Measured feedback result: 300/300 successful episodes, mean longest hover
+30 seconds, zero collisions, other flight failures, or timeouts; all 45
+acceptance checks passed. Pooled production-window position statistics:
+
+| Error | RMSE (mm) | P95 (mm) | P99 (mm) | Maximum (mm) |
+| --- | ---: | ---: | ---: | ---: |
+| position_error_enu_x | 1.7480 | 3.7752 | 5.2142 | 5.8685 |
+| position_error_enu_y | 1.4388 | 2.1500 | 2.7587 | 3.4990 |
+| position_error_enu_z | 0.3521 | 0.9488 | 1.5014 | 1.6943 |
+| horizontal_position_error | 2.2640 | 4.2714 | 5.3160 | 5.9495 |
+| position_error | 2.2912 | 4.3832 | 5.4705 | 6.1787 |
+
+Verification evidence:
+
+- `.build/hover-feasibility/20260913T220033604090Z/feasibility.json` retains
+  all feedback metrics, acceptance checks, and pinned inputs.
+- `.build/body-relative-observations/recorded-reset-verification.json` verifies
+  all 14,400 fitting reset states: maximum NumPy/Torch difference
+  `6.94e-18`, maximum global-yaw difference `7.78e-16`, and unchanged physical
+  envelope classifications after reconstructing ENU offsets.
+- Host tests cover batched and individual packing, frame signs, arbitrary goal
+  rotations, quaternion sign and 180-degree continuity, production-provider
+  parity, physical contact-pose reconstruction, feedback limits, and old-schema
+  rejection without artifact mutation.
+Iteration notes: the first feedback run passed all 300 episodes but its explicit
+relative report path was outside the persistent mount. The repeat used the
+default producer output directory and retained the complete report. The initial
+aggregate integration run passed seven checks and exposed an outdated
+contact-chain constructor, which omitted `hover_reset_samples` and `training`.
+The test now receives samples from its already validated fitting-flight bundle
+and explicitly uses evaluation mode. Failed logs remain under
+`.build/body-relative-observations/`; physical contact criteria were not relaxed.
+The original accepted actor remains byte-identical, SHA-256
+`14e8651141b58172b53b80193916fd11c72c5651fe922797bca5cda99dbf37ac`, and both
+`latest` and `best` still resolve to run `20260913T095657Z`. Current code rejects
+its `(schema=2, dimension=34)` observation contract. Retraining is required before
+policy demonstration or actor-based transfer checks can use the new layout.
+
+Final GPU integration outcome: the aggregate run passed seven of eight targets;
+the corrected contact-chain rerun passed the eighth. Its real pusher/button
+sequence produced exactly one lamp toggle and completed the required 600-step
+stable retreat. Maximum button travel was 6.07 mm and maximum pusher compression
+was 7.69 mm. Logs preserve both the initial constructor failure and the passing
+rerun (`integration-all.log`, `contact-chain-recheck.log`).
+
+Concurrent independent verification workloads reached 98% sampled GPU
+utilization. The fixed 100-environment feedback workload alone ran around
+45-49%; sequential Python/physics stepping and the fixed evaluation workload
+limit utilization. Running independent integration checks alongside it raised
+utilization but increased per-seed feedback wall time from about 54 seconds to
+70-111 seconds. Workload size and deterministic sampling were not inflated.
+Raw five-second samples are retained in `gpu-utilization.csv`.
+
+Full host verification is retained in
+`.build/body-relative-observations/precommit-verification.log`. The first
+sandboxed sweeps passed the host tests and static checks but could not fetch
+the TOML schema. An unrestricted sweep fetched it successfully, and the final
+repeat passed all checks. Verification workers and the GPU sampler were stopped
+before the separately authorized training campaign below.
+
+## 2026-09-13: body-relative press-hover PPO qualification
+
+Campaign `20260913T222441Z` starts from scratch with seed 42 using
+`configs/train_press_hover_quad.yaml`, the controller and flight bundle recorded
+above, and press observation schema 3 (35 values). The first campaign retains
+the previously successful PPO settings to isolate the representation change:
+4,096 environments, 256 steps per rollout, gamma 0.995, GAE lambda 0.99,
+initial action standard deviation 0.10, and empirical observation normalization.
+The schedule allows 50 broad updates at learning rate 0.0003 and 100 refinement
+updates at 0.00001, with validation every five updates and five-evaluation
+plateau patience at a 0.01-second minimum improvement. Refinement restores the
+complete validation-selected learner and freezes its observation statistics.
+Reset samples, sensor noise, rewards, controller parameters, and all 45 quality
+requirements retain their existing settings.
+
+Validation uses seeds 101/202/303 and acceptance uses disjoint seeds 404/505/606,
+100 episodes per seed, with a 40-second episode limit and a 30-second hover hold.
+Exact resolved inputs and configuration are in the producer training report.
+The source patch and its digest are retained in
+`.build/body-relative-training/20260913T222441Z.operator-record.json`.
+The run-scoped monitoring directory is
+`.build/training/press-hover/20260913T222441Z/monitoring`.
+Trackio displays complete metric names with zero smoothing:
+http://127.0.0.1:7860/?project=press-hover&runs=attempt_01&smoothing=0&accordion=hidden
+
+Initial validation progression:
+
+| Broad update | Mean longest hover (s) | Successful episodes | Flight failures |
+| --- | ---: | ---: | ---: |
+| 0 | 0.1523 | 0/300 | 32/300 |
+| 5 | 0.2287 | 0/300 | 1/300 |
+| 10 | 4.3925 | 0/300 | 0/300 |
+| 15 | 6.1538 | 0/300 | 0/300 |
+| 20 | 30.0000 | 300/300 | 0/300 |
+
+Update 20 passes all 45 validation checks. Its pooled 3D position RMSE is
+18.0602 mm, P95 21.9912 mm, P99 23.1159 mm, and maximum 27.3334 mm.
+The campaign completed 45 broad updates and 25 refinement updates, both ending
+on the configured five-checkpoint plateau. Every subsequent validation
+checkpoint achieved 300/300 successful 30-second holds. Selection retained the
+first passing actor at broad update 20 under the existing ranking rule.
+Refinement restored that complete learner; it did not replace the selected
+actor. No additional campaign or training-configuration change was needed.
+
+Final acceptance passed all 45 checks on 300 fresh episodes with seeds
+404/505/606: 300 successful 30-second holds, zero collisions, other flight
+failures, or timeouts. Pooled production-window position statistics:
+
+| Error | RMSE (mm) | P95 (mm) | P99 (mm) | Maximum (mm) |
+| --- | ---: | ---: | ---: | ---: |
+| position_error_enu_x | 11.7620 | 16.1634 | 17.5806 | 18.8403 |
+| position_error_enu_y | 8.8744 | 14.0672 | 18.8870 | 24.9624 |
+| position_error_enu_z | 10.4334 | 12.2174 | 12.5665 | 13.0365 |
+| horizontal_position_error | 14.7343 | 18.6757 | 20.5664 | 25.8713 |
+| position_error | 18.0542 | 21.9303 | 23.0384 | 26.5895 |
+
+The exact tested actor SHA-256 is
+`3f8f934091b75017d5eb7276f03a8eab3a88ef6c5857e95b86f991bb3d6aa6b5`.
+Both `latest` and `best` now resolve to the immutable producer run
+`.build/training/press-hover/20260913T222441Z`. Its `training_report.json`
+retains every checkpoint evaluation and the final independent test; its strict
+schema-1 policy artifact declares press observation schema 3 and 35 inputs.
+This establishes press-hover acceptance in Isaac Lab. PX4 warehouse transfer
+of this new actor has not been evaluated in this campaign.
+
+The Docker workload completed successfully in 4,202 seconds. Duration-weighted
+GPU utilization averaged 55.09% during training and 48.20% during validation;
+mean CPU usage was about 1.45 cores. Updates spent approximately 21 seconds
+collecting rollouts and 0.39 seconds optimizing PPO. The measured limit is the
+sequential rollout/physics workload, rather than PPO optimization. The 95%
+diagnostic GPU target was not met; no extra environments, sampling changes, or
+meaningless work were added to inflate utilization. The producer telemetry and
+run-scoped Trackio database retain the raw measurements.
+
+## Hover correction and repeated PX4 qualification
+
+The correction experiment retains press observation schema 3, the controller,
+reset mixtures, sensor noise, PPO settings, 30-second continuous hold, and
+45-second warehouse policy timeout. Hover checkpoint selection and plateau
+stopping now minimize `hover_envelope_utilization_mean`, with minimum material
+improvement 0.003 and five stale evaluations. Validation-passing actors retain
+priority; the lowest error wins, with the earlier actor retained on exact ties.
+This distinguishes actors that all reach the 30-second hold.
+
+Only `configs/train_press_hover_quad.yaml` overrides reward strengths. Campaign
+one uses inside/outside stabilization weights 0.03/0.09 and action effort 1.0.
+After diagnosis, campaigns two and three may use 0.10/0.30 and 0.30/0.90,
+respectively. Each starts from scratch with seed 42, 4,096 environments, up to
+50 broad and 100 refinement updates, and validation every five updates.
+Refinement restores the complete validation-selected learner and freezes
+observation statistics. Validation uses 101/202/303 and fresh acceptance uses
+404/505/606, 100 episodes per seed; all existing 45 checks remain binding.
+
+The exact input controller is `20260912T211745Z`, SHA-256
+`f293d818ef9925d6f6f89bc070e84614dd91f9d9073ad4f50aa2958d7e871c12`.
+The flight bundle is `20260912T102640Z`, payload SHA-256
+`65f02c5e5bfe6d74291329967033510839acad8b5d6254961b10e39e36c73661`.
+Baseline deployment `20260913T222441Z` is preserved, actor SHA-256
+`3f8f934091b75017d5eb7276f03a8eab3a88ef6c5857e95b86f991bb3d6aa6b5`.
+Operator records, source patches, checks, and separate transfer qualification
+records are retained under `.build/hover-correction/`.
+
+Each Lab-accepted actor requires three consecutive fresh warehouse transfer
+executions with the same canonical run and actor digest. Every execution must
+complete all three policy segments without contact, lamp transitions, timeout,
+or flight failure. One failed execution ends that candidate's qualification.
+The 45-second timeout includes handoff, settling, and restarted holds. It is
+not a guarantee that a 30-second hold will finish. Training and transfer run
+sequentially; oscillation, excessive correction, or a controller-model
+discrepancy ends this experiment pending a separate intervention plan.
+Lab publication remains unchanged and PX4 qualification is recorded separately.
+If none qualifies, `latest` returns to the preserved baseline; `best` continues
+Lab ranking and all candidates remain available. Driver failures pause work
+without counting as campaigns.
+
+Cleanup is limited to correcting the timeout descriptions and making plateau
+console messages identify their configured metric, direction, current value,
+and reference through the existing criteria object. Inspection found the
+selector, evaluator, and publication functions already implement the required
+ranking and comparison; no forwarding helpers or parallel selection path were
+added.
+
+### Campaign one outcome: stopped after repeated validation failure
+
+Scratch campaign `20260914T003428Z` used the first 0.03/0.09/1.0 reward setting.
+Source revision was `7bfce5db71f00cadd902e5138a286abaebd31b6a` plus the retained
+working-tree patch, SHA-256
+`45a171d8cdc2f1dd59024aa1ec55ba26a4f4534014828bc47f95d019ac0cd770`.
+The exact configuration snapshot has SHA-256
+`f3362eb8d73a0f68c2494c6dd5e4604b66298ec6ba3b9f8c9c323af7f48c4860`.
+The operator record, source patch, and configuration are named with this run ID
+under `.build/hover-correction/`; the producer reports and actors remain under
+`.build/training/press-hover/20260914T003428Z`.
+
+| Broad update | Mean envelope utilization | Mean longest hold (s) | Flight failures | Minimum-range violations |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 9.080429 | 0.152333 | 32/300 | 12/300 |
+| 5 | 4.810156 | 0.129500 | 300/300 | 133/300 |
+| 10 | 2.971979 | 0.110000 | 300/300 | 287/300 |
+| 15 | 2.227477 | 0.124833 | 300/300 | 300/300 |
+
+Every trained validation checkpoint had zero successful holds and passed only
+2/45 checks (finite traces and no collisions). The update-15 actor digest is
+`5d1477bb4e23a083d0c030d86e0d75f95ceb294bf5fad894dc8803cb902ae1b3`.
+It is retained as diagnostic evidence, not a deployable qualification result.
+The metric decreased while episodes failed earlier; it averages each episode's
+observed samples and does not penalize unobserved time after termination.
+Validation priority protects a passing actor once one exists, but none existed
+in this campaign. This explains why apparent scalar progress was not evidence
+of improving hover.
+
+A CPU diagnostic replayed the same 854 recorded baseline third-segment actor
+observations through the frozen update-0/5/10/15 actors. Input and actor hashes
+are recorded in `20260914T003428Z.actor-command-diagnostic.json`. This is an
+observation probe, not a new rollout or acceptance workload. Mean body-up
+velocity intent increased from 0.014 mm/s initially to 17.48, 31.68, and
+47.92 mm/s. At update 15 it requested 42.40-53.65 mm/s upward and
+13.22-21.32 mm/s forward over these near-hover states. The fresh Lab validation
+independently confirms all episodes cross the minimum-range limit. The evidence
+supports an early-failure behavior with persistent unwanted commands, rather
+than improving disturbance rejection. A changed balance between accumulated
+running cost and the unchanged terminal penalty is a plausible mechanism;
+these measurements do not establish that mechanism uniquely.
+
+The campaign was interrupted after diagnosing update 15. Trackio retained
+18 completed training updates, including those collected during diagnosis and
+shutdown; no checkpoint after update 15 was evaluated. Refinement and fresh
+acceptance were not reached, so reserved seeds 404/505/606 were not used.
+Campaigns two and three were not launched: increasing stabilization strength
+again was not justified by the measured behavior. Further reward/termination
+analysis requires a separate intervention decision. No controller fitting,
+disturbance-model change, reset change, or relaxed acceptance was applied.
+
+The campaign report records `interrupted`; the worker report retains its last
+`training` snapshot at validation update 15. SIGINT stopped the coordinator and
+training worker; the remaining idle evaluator was stopped with its container.
+Neither producer report was rewritten to manufacture a completed attempt.
+This was an operator interruption, not a driver failure. Task-owned training,
+evaluation, and monitoring containers were stopped; the pre-existing persistent
+Isaac, ROS, and PX4 containers were left available.
+
+The run-scoped Trackio database is retained at
+`.build/training/press-hover/20260914T003428Z/monitoring/press-hover.db`.
+Its server is stopped. During the campaign it used zero smoothing and complete
+metric names at:
+http://127.0.0.1:7860/?project=press-hover&runs=attempt_01&smoothing=0&accordion=hidden
+
+Completed telemetry intervals averaged 54.69% GPU utilization during training
+and 47.89% during validation, using about 1.46 and 1.45 CPU cores respectively.
+Across 18 recorded updates, mean rollout time was 22.13 seconds and PPO
+optimization 0.396 seconds. Sequential rollout/physics work remains the measured
+limit; the 95% utilization target was not met and no extra workload was added.
+
+### Qualification and remaining transfer discrepancy
+
+No new actor passed Lab validation, so there were zero acceptance runs and zero
+PX4 transfer executions in this experiment. Consequently there are no new
+handoff, hold-reset, bound-violation, velocity-estimation, or recovery measurements
+to claim. The separate operator qualification record is
+`.build/hover-correction/20260914T003428Z.qualification.json`.
+It pins producer report hashes, all validation results, telemetry, input hashes,
+and the final deployment labels.
+
+The prior baseline diagnosis remains the observed transfer discrepancy; its
+files are referenced in place under
+`.build/hover-demo-diagnosis/20260913T235535Z/`. That flight's three handoffs took
+0.80/1.40/2.36 seconds and achieved longest holds of 30/30/21 seconds. The third
+hold reset after westward error crossed 43.512 mm, peaked at 57.005 mm, and
+spent 7.85 seconds outside. Its final hold reached only 13.85 seconds before
+the 45-second timeout. At one recorded sample, the actor requested +4.22 mm/s
+east, PX4's setpoint was +4.21 mm/s, true velocity was -11.69 mm/s, and PX4
+estimated +0.95 mm/s. Third-segment east velocity-estimation error P95 was
+14.15 mm/s. Landing recovery was accepted and ended in disarm. These are prior
+baseline measurements, not one of the three required qualification executions.
+
+Final digest checks confirm the controller, flight payload, and baseline actor
+are unchanged. Both `latest` and `best` still resolve to `20260913T222441Z`;
+no restoration was necessary because no new actor was published. The baseline
+retains Lab acceptance and its known PX4 timeout; a fully qualified replacement
+was not obtained. The retained baseline warehouse demo command is:
+
+```bash
+make -o generate-drone-usd run-all \
+  HYDRA_CONFIG=configs/policy_transfer_press_hover_quad.yaml
+```
+
+Verification: 162 focused tests passed, covering tighter-error selection,
+failing-actor exclusion, exact ties, five/ten-evaluation plateau behavior,
+complete checkpoint restoration, frozen normalization, publication comparison,
+and metric-aware console reporting. The full host suite passed 995 tests with
+one skip. The complete `uv run pre-commit run --all-files` sweep passed; its
+logs are retained under `.build/hover-correction/`. No assets were regenerated.
+
+### Continuing the first reward setting after the premature stop
+
+The early-stop interpretation above was too strong: failures at updates 5/10/15
+did not establish that learning could not recover. The prior accepted baseline
+first passed validation at update 20. The user requested continuation with the
+same tighter-hover objective. A fresh scratch invocation repeats the first
+0.03/0.09/1.0 setting because interrupted campaigns cannot resume. The earlier
+producer artifacts remain unchanged. This repeats the first reward setting; it
+does not advance to the stronger second setting.
+
+The replacement retains 50 broad updates, up to 100 refinement updates, and the
+configured plateau rules. Early failed checkpoints alone will not trigger
+another interruption. Validation-passing actors still take priority, and a
+Lab-accepted actor still needs three consecutive complete PX4 warehouse
+executions before this experiment succeeds. No timeout, acceptance bound, reset
+mixture, sensor noise, or controller setting is changed.
+
+### Completed stronger-reward run and source comparison
+
+Replacement scratch run `20260914T010214Z` completed normally with
+`validation_failed`. It used 45 broad updates and 25 refinement updates; both
+phases ended under the configured five-evaluation plateau rule. No operator
+interruption occurred. No checkpoint passed validation, so the fresh acceptance
+workload and PX4 transfer executions were not run.
+
+At broad update 20, mean envelope utilization reached its best value, 1.929922,
+but mean longest hold was only 0.232167 s. By broad update 45, mean longest hold
+had increased to 2.513667 s while utilization was 2.351913. Every episode still
+ended in flight failure. Refinement restored the complete update-20 learner and
+froze observation normalization. Its final checkpoint reached a 1.596833 s mean
+longest hold and utilization 2.425281, again with 300 flight failures.
+
+This exposes a limitation of error-only ranking before any actor passes:
+short failed episodes can have lower mean error than actors that stay near the
+goal longer. Passing actors retain priority, but this run never produced one.
+The selected short-lived checkpoint also determined refinement's starting
+point. That explains the restoration choice; it does not explain the earlier
+broad-phase regression, where the reward change was already affecting learning.
+
+The accepted source snapshot was reconstructed from commit
+`7bfce5db71f00cadd902e5138a286abaebd31b6a` and its recorded diff. The observation,
+controller, environment, and runtime edits in the working tree were already
+present in the accepted run. The only effective experiment differences were
+two reward weights and three plateau fields. The other production changes were
+metric-aware console reporting and a transfer-budget comment. Exact comparisons
+are retained in `20260914T010214Z.source-audit.json` and
+`20260914T010214Z.accepted-source-comparison.patch` under
+`.build/hover-correction/`.
+
+Measured GPU utilization averaged 54.6% during training and 47.8% during
+validation. Rollout collection took about 21-22 s per update, versus about
+0.39 s for PPO optimization. The sequential simulation/rollout work dominated;
+no workload or deterministic settings were changed to increase utilization.
+
+The run-scoped Trackio database is
+`.build/training/press-hover/20260914T010214Z/monitoring/press-hover.db`.
+During execution its plain URL was
+http://127.0.0.1:7860/?project=press-hover&runs=attempt_01&smoothing=0&accordion=hidden
+with zero smoothing and full metric names. Its server was stopped after the
+run completed. The qualification record retains report digests and the unchanged
+baseline deployment labels.
+
+### Repeating the previously accepted settings
+
+The user requested a fresh verification of the old reward and experiment
+settings, followed by a separate longer-horizon experiment after the failed
+stronger-reward run. Control run `20260914T014233Z` starts from scratch with the
+complete resolved configuration of accepted run `20260913T222441Z`: inside and
+outside weights 0.01/0.03, action effort 1.0, gamma 0.995, lambda 0.99, and
+longest-hold selection with a 0.01 s improvement threshold. No old checkpoint
+initializes training. Input digests, seed 42, phases, validation and acceptance
+workloads remain identical. The full resolved configurations were checked equal
+before launch.
+
+Control run `20260914T014233Z` completed 45 broad and 25 refinement updates.
+Every metric, reward contribution, and acceptance check at all 15 validation
+checkpoints exactly matches the original accepted run. The selected update-20
+actor has identical learned tensors, normalization data, and executable
+TorchScript code; only debug/export metadata differs. Its exact actor digest is
+`10333c014fa9a5a1d72f3d814b0c629d140768ee8edff0b5001204c9a0d03d8f`.
+The frozen actor then passed all 45 checks on 300 fresh acceptance episodes,
+with every episode completing the 30-second hold. All acceptance metrics and
+reward means also exactly match the original run. Horizontal position RMSE is
+0.014734291 m and total position RMSE is 0.018054230 m.
+
+This reproduces accepted training under the current source. The regression in
+the stronger-reward run is attributable to its changed experiment settings,
+not an unaccounted change in the observation or controller implementation.
+The control is retained as a Lab-accepted reproduction, not a tighter-hover
+candidate. No new PX4 qualification is claimed. Automatic publication advanced
+`latest`; the operator restored it to baseline `20260913T222441Z` for the next
+experiment. `best` remains that baseline under the existing ranking semantics.
+
+Control evidence is retained in `20260914T014233Z.qualification.json`,
+`20260914T014233Z.control-reproduction.json`, and
+`20260914T014233Z.selected-actor-comparison.json` under
+`.build/hover-correction/`. Its Trackio database is
+`.build/training/press-hover/20260914T014233Z/monitoring/press-hover.db`.
+The server used the same plain URL above, zero smoothing, and complete metric
+names; it was stopped after acceptance completed.
+
+### Longer-horizon trial
+
+After the stronger-reward run failed and the accepted-settings control passed,
+the user authorized trying gamma 0.999 and GAE lambda 0.995. The scratch
+run retains the first correction weights 0.03/0.09/1.0 and envelope-error
+selection, changing only gamma and lambda relative to `20260914T010214Z`.
+At the unchanged 20 Hz policy cadence, the nominal discounted reward span
+increases from 10 to 50 s, and the geometric GAE trace span from about 3.34 to
+8.34 s. These are weighting summaries, not hard planning horizons; rollout
+length remains 256 steps and critic bootstrapping remains active. Longer traces
+can assign more weight to delayed consequences but can increase variance. This
+trial does not change acceptance limits, episode length, or the PX4 timer.
+Its purpose is to test whether delayed correction consequences can be learned
+with the stronger dense penalty. It does not change the selection metric's
+behavior for failing actors.
+
+The longer-horizon invocation is `20260914T025723Z`. Its complete resolved
+configuration differs from `20260914T010214Z` only in gamma and lambda, checked
+before launch. Input validation and the full pre-commit sweep passed. The
+revision, source diff, configuration, justification, and exact input digests are
+recorded in `.build/hover-correction/20260914T025723Z.operator-record.json`.
+The initial actor's validation measurements match the previous runs. At update
+five, mean envelope utilization was 4.372144, mean longest hold was 0.100500 s,
+and all 300 episodes ended in flight failure. This early result does not
+establish whether longer-horizon training can eventually pass.
+
+The user requested an immediate stop and a fresh run later. The coordinator
+records `interrupted`; nine training updates were recorded, and update five is
+the last completed validation. The worker report retains its last training
+snapshot. No fresh acceptance or PX4 transfer test ran. All task-owned training,
+evaluation, and monitoring processes were stopped. The retained run-scoped
+Trackio database is
+`.build/training/press-hover/20260914T025723Z/monitoring/press-hover.db`.
+Its server used zero smoothing and complete metric names at
+http://127.0.0.1:7860/?project=press-hover&runs=attempt_01&smoothing=0&accordion=hidden
+and is now stopped. The final interruption record is
+`.build/hover-correction/20260914T025723Z.qualification.json`.
+
+Both `latest` and `best` remain on baseline `20260913T222441Z`, whose actor
+digest remains
+`3f8f934091b75017d5eb7276f03a8eab3a88ef6c5857e95b86f991bb3d6aa6b5`.
+The original settings have been verified to train another Lab-accepted policy;
+the tighter-hover plus three-consecutive-PX4 objective remains unfinished.
+Configuration retains 0.03/0.09/1.0 rewards, envelope-error selection, gamma
+0.999, and lambda 0.995 for the later authorized scratch restart. No checkpoint
+resume is planned. `.build/hover-correction/continuation-plan.json` records
+that execution must wait for the user to request it. The baseline demo command
+remains:
+
+```bash
+make -o generate-drone-usd run-all \
+  HYDRA_CONFIG=configs/policy_transfer_press_hover_quad.yaml
+```
+
+### Fresh restart requested by the user
+
+Run `20260914T135916Z` repeats the interrupted longer-horizon experiment from scratch.
+The complete resolved configuration equals run `20260914T025723Z`; controller,
+flight bundle, and baseline actor digests were verified unchanged. No previous
+checkpoint initializes this run. The user requested continuation after the
+earlier stop. The existing Lab acceptance and three-consecutive-PX4 requirements
+remain in force. The full pre-commit sweep passed before launch.
+
+The operator record, source diff, configuration, and runtime log are retained
+under `.build/hover-correction/20260914T135916Z.*`. Its monitoring directory is
+`.build/training/press-hover/20260914T135916Z/monitoring`, with a run-scoped
+`press-hover.db` and zero smoothing at
+http://127.0.0.1:7860/?project=press-hover&runs=attempt_01&smoothing=0&accordion=hidden
+
+### Longer-horizon restart result and final deployment
+
+Run `20260914T135916Z` ended normally with `validation_failed` after 135
+updates: 50 broad updates reached their configured maximum and 85 refinement
+updates ended at the configured five-stale-evaluation plateau. No operator
+interruption occurred. Refinement restored the complete broad update-50 learner
+and froze observation statistics. Every trained checkpoint had zero successes
+and 300 flight failures. Its initial and update-five measurements exactly
+reproduced the earlier interrupted invocation.
+
+| Experiment | Inside/outside cost | Gamma / lambda | Best mean longest hold | Lab result |
+| --- | --- | --- | ---: | --- |
+| Previous-settings control `20260914T014233Z` | 0.01 / 0.03 | 0.995 / 0.99 | 30.000000 s | All 45 fresh acceptance checks passed |
+| Stronger reward `20260914T010214Z` | 0.03 / 0.09 | 0.995 / 0.99 | 2.513667 s | Validation failed |
+| Longer horizon `20260914T135916Z` | 0.03 / 0.09 | 0.999 / 0.995 | 1.559500 s | Validation failed |
+
+The longer-horizon run selected refinement update 75 (learner update 125), with
+mean envelope utilization 0.839837, mean longest hold 1.559500 s, and longest
+hold in any episode 3.85 s. All 300 episodes crossed the 0.40 m minimum distance;
+minimum closest range was 0.396228 m. Only two of the 45 validation checks
+passed. Successful-hold accuracy statistics were unavailable because no episode
+completed the hold. The selected actor digest is
+`0fe4d24e09ce465db1476829fd4051982a1d5c755c3574e0254a8f2c3680284d`.
+The final update reached a 1.551000 s mean longest hold and utilization 0.843910.
+The five final evaluations did not improve by the required 0.003 relative to
+the material-progress reference 0.842211. Selection can retain a smaller
+improvement while the plateau reference remains unchanged.
+
+A CPU-only command comparison replays 854 fixed observations from the baseline
+warehouse third segment. The input trace digest is
+`51503fff0ab9e5bf4a2ef8ba6138db970bb0ffad5d0bb68c98cbef31b5b67cb9`.
+This compares actor outputs on identical inputs; it is not a candidate flight,
+a validation workload, or PX4 qualification. The selected longer-horizon actor
+commands upward body velocity averaging 0.070598 m/s, ranging from 0.006387 to
+0.114827 m/s. The baseline averages 0.000494 m/s, with both upward and downward
+commands. The candidate commands upward in every replay sample, including the
+91.9% where the target lies below the drone along its body vertical axis.
+Its final checkpoint still averages 0.069997 m/s upward. Mean commands along the
+other two body axes at the selected checkpoint are -0.001481 and -0.005365 m/s.
+These outputs, together with persistent validation distance failures, do not
+support simply increasing correction penalties again. The diagnosis is a
+learned-command problem under the changed reward/experiment settings; it does
+not establish a new controller-model discrepancy.
+
+The exact previous-settings control reproduces acceptance under the same
+production implementation, including identical learned tensors and executable
+actor code. Thus the current observation/controller edits are not an unexplained
+training regression. Longer gamma/lambda weighting did not repair the stronger
+reward experiment. Error-only ranking among failed actors remains a limitation:
+mean error below one did not predict complete holds, and short failed episodes
+must not be interpreted as acceptance. Validation-passing priority remains
+correct and unchanged.
+
+Training consumed 2995.69 s and validation 562.19 s in measured intervals;
+overall execution took about 3594 s. Mean GPU utilization was 54.8% during
+training and 48.3% during validation, below the 95% diagnostic target. Rollout
+collection remained about 21-22 s per update versus 0.38-0.40 s for PPO
+optimization. Sequential simulation and rollout collection dominated. No extra
+work or changed experiment settings were added to inflate utilization.
+
+The final record is
+`.build/hover-correction/20260914T135916Z.qualification.json`. It includes every
+validation result, selected digest, phase restoration, stopping reasons,
+producer report hashes, telemetry, and deployment labels. The fixed-input
+command comparison is
+`.build/hover-correction/20260914T135916Z.final-actor-command-diagnostic.json`;
+earlier snapshots are also retained. The run-scoped Trackio database remains
+in `.build/training/press-hover/20260914T135916Z/monitoring/press-hover.db`.
+Its server and all task-owned training/evaluation workers are stopped.
+
+No fresh acceptance workload or PX4 transfer execution ran for this failed
+candidate, so there are no new PX4 handoff, timer-reset, estimator, or recovery
+measurements to claim. The earlier baseline warehouse measurements remain
+separate evidence. The tighter-hover and three-consecutive-transfer objective
+is unmet. The escalation rule stops here because persistent excessive commands
+require a different intervention; weights 0.10/0.30 and 0.30/0.90 were not run.
+Controller fitting and disturbance-model changes remain outside this plan.
+
+Both `latest` and `best` remain `20260913T222441Z`, with the original baseline
+actor digest verified unchanged. All candidates, logs, reports, snapshots, and
+monitoring databases are retained. The final baseline demo command is:
+
+```bash
+make -o generate-drone-usd run-all \
+  HYDRA_CONFIG=configs/policy_transfer_press_hover_quad.yaml
+```
+
+The full pre-commit sweep passed before this restart; the completion sweep is
+recorded in `.build/hover-correction/precommit-final.log`. Existing selection,
+plateau, restoration, frozen-normalization, publication, console-reporting, and
+configuration regression tests remain in the complete quality check. No assets
+were regenerated and no controller, observation, or public API change was added
+by the longer-horizon experiment.

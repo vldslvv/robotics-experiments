@@ -97,16 +97,39 @@ matching deployment through PX4's body-NED MAVLink receiver.
 
 ## Press policy curriculum
 
-The press policy consumes the schema-2 34-value observation and emits four
-normalized velocity actions. Its first three values are world-ENU hover position
-error divided by the measured flight-parameter envelope on each axis. The rest
-contains relative switch attitude, vehicle motion and attitude, pusher state,
-contact and lamp state, previous action, handoff mode, estimator health, and
-availability bits. Training and runtime calculate the same target error and use
-the same packing function. Its scratch experiment maps a unit
-translation action to 0.5 m/s. Normalized scratch exploration starts at 0.10
-standard deviation, or 0.05 m/s for a
-translation component at the task scale.
+Both policy interfaces use shared NumPy/Torch body-relative calculations.
+Hover observation schema 2 has 12 values: desired-minus-actual position in body
+FLU (metres, 0:3), body linear velocity (m/s, 3:6), body angular velocity (rad/s,
+6:9), and unit gravity direction in body coordinates (9:12). Standalone hover
+retains its position-only objective and has no desired-heading input.
+
+The task-neutral `pack_pose_observation` appends columns 0 and 1 of the
+goal-to-body rotation matrix (12:18), concatenated column by column. It receives
+actual and desired world orientations from callers and reads no scene or switch.
+Quaternion signs do not affect the packed values. Consistent translation and
+global yaw rotation of the drone, target, and motion leave these flight features
+unchanged; rotating only the drone changes them. Gravity retains roll/pitch
+information even when the goal is tilted.
+
+Press observation schema 3 has 35 values. It starts with this 18-value pose block,
+then contains pose confidence/age/validity (18:21), pusher compression/rate
+(21:23), contact validity/state (23:25), lamp state/confidence/age (25:28), previous
+action (28:32), and handoff mode/estimator health/availability mask (32:35).
+The press task supplies the contact frame as the desired drone orientation.
+Raw `PressObservation` measurements remain available for physical handoff and
+completion checks; their dataclass order is not the actor's vector layout.
+
+Position inputs are metres, without per-axis flight-envelope division. The
+configured empirical normalizer remains part of training and the exported actor.
+Physical reset samples, rewards, sensor noise, and asymmetric ENU acceptance
+bounds are independent of this input representation and retain their original
+frames and values. Actor schemas are strict: hover schema 1 and press schema 2
+actors require retraining, and their bytes and qualification records are never
+migrated. The outer policy artifact schema remains version 1.
+
+The press policy emits four normalized velocity actions. Its scratch experiment
+maps a unit translation action to 0.5 m/s. Normalized scratch exploration starts
+at 0.10 standard deviation, or 0.05 m/s for a translation component.
 
 `rl.press.curriculum.stages` is an ordered list. A training config selects one
 entry by name; there are no parent or child links. The first entry starts from
@@ -233,17 +256,22 @@ The evaluator and phase driver have separate contracts. Validation receives an
 exact exported actor and returns raw named metrics.
 The plateau detector reads only the configured metric, direction, minimum delta,
 and patience. It never reads the PPO reward or any acceptance check. The active
-curriculum stage owns the rule. Hover maximizes mean longest continuous-hover
-duration, requires a `0.01` second improvement, and declares a plateau after
-five stale evaluations. Approach minimizes mean measured pose-envelope
-utilization, requires a `0.003` improvement, and declares a plateau after 10
-stale evaluations.
+curriculum stage owns the rule. Hover minimizes `hover_envelope_utilization_mean`,
+requires a `0.003` improvement, and declares a plateau after five stale
+evaluations. Approach uses the same metric, direction, and improvement with
+10 stale evaluations. Checkpoint selection prioritizes validation-passing actors,
+then the lowest configured error, preserving the earlier actor on exact ties.
+Plateau console records identify the configured metric, direction, current
+value, and material-progress reference.
 
 Hover training uses a 40-second episode horizon; approach uses 45 seconds. The
 hover schedule trains up to 50 iterations at `3e-4`, then restores the best complete
 checkpoint and refines it for up to 100 iterations at `1e-5`. Both phases are
 evaluated every five updates. Five stale evaluations stop either phase. Active
 monitoring may interrupt a campaign without a credible path to acceptance.
+Early failures in scratch training alone do not establish that condition;
+assess later validation and the configured phase schedule before declaring
+that learning will not recover.
 The configuration records the maximum budget; experiment decisions and measured
 results are retained in `FLIGHT_TO_POLICY_IMPROVEMENTS.md`.
 
@@ -251,7 +279,8 @@ Hover uses 4,096 environments with 256 policy steps per environment per update:
 12.8 simulated seconds per rollout and 1,048,576 transitions per PPO update.
 The broad phase allows 640 simulated seconds per environment and refinement
 allows 1,280, including resets. PPO uses four epochs and eight minibatches,
-discount gamma 0.995, and GAE lambda 0.99. GPU utilization and rollout/optimizer timing must be measured
+discount gamma 0.999, and GAE lambda 0.995 for the longer-horizon trial.
+GPU utilization and rollout/optimizer timing must be measured
 for each campaign and retained alongside its training results.
 
 Every hover training reset starts its episode clock at zero. The runner does
@@ -304,10 +333,10 @@ This mode loads the same accepted controller, fitting-flight reset samples,
 selected stage duration, action interface, and production evaluation logic as
 training validation. It uses validation seeds 101/202/303 with 100 episodes per
 seed and applies the existing acceptance criteria. It does not load a trained
-actor or use test seeds. Feedback reads the schema-2 observed ENU position error,
-body velocity, body-to-world attitude, and contact-relative yaw. It converts the
-corrective velocity into body FLU, normalizes by policy action scales, and clips
-to the production action limits. Sensor noise and reset mixtures are unchanged.
+actor or use test seeds. Feedback reads the schema-3 body goal offset and body velocity directly. It
+recovers drone yaw in the goal frame from the relative rotation columns,
+normalizes commands by policy action scales, and clips to production action
+limits. Sensor noise and reset mixtures are unchanged.
 
 The three `rl.press.evaluation.feasibility_*` gains are Hydra-owned and excluded
 from the policy comparison fingerprint because they affect only this diagnostic.
@@ -389,11 +418,13 @@ as the measured bottleneck and never changes policy qualification.
 
 The press PPO reward reports six signed contributions. Hover adds position
 and attitude utilization so both remain visible to the optimizer independently.
-Its `hover_stabilization` config selects `uniform` (weight 0.01 everywhere),
-`boundary_weighted` (0.01 inside the full measured envelope, 0.03 outside), or
-`outside_only` (zero inside, 0.03 outside). The current hover setup selects
-`boundary_weighted`: the cost is the sum of position and attitude utilization,
-multiplied by -0.01 inside the complete envelope and -0.03 outside. This cost
+Its `hover_stabilization` config selects `uniform` (the configured stabilization
+weight everywhere), `boundary_weighted` (the configured inside/outside weights),
+or `outside_only` (zero inside, the configured outside weight elsewhere). The current hover setup selects
+`boundary_weighted`: `configs/train_press_hover_quad.yaml` overrides the cost
+weights to 0.03 inside the complete envelope and 0.09 outside for the first
+correction campaign. The cost is the negative weighted sum of position and
+attitude utilization. Shared approach reward weights remain unchanged. This cost
 remains active for nonzero error inside the envelope and reaches zero at the
 desired pose. It never chooses the larger of position and attitude.
 
@@ -420,8 +451,12 @@ and position and attitude error relative to their hover limits. A value of 1
 is the measured limit; all fraction charts use `[0, 1]`. Hardware telemetry
 uses `system/training/`, `system/validation/`, and `system/test/`.
 
-Use **`validation/Mean longest continuous hover (seconds)`** to compare each
-checkpoint: it averages each evaluated episode's longest uninterrupted hold.
+Use `hover_envelope_utilization_mean` in `training_report.json` to audit
+checkpoint selection. The validation chart
+`Mean worst pose error relative to hover limit (1 = limit)` shows this error;
+lower is better.
+**`validation/Mean longest continuous hover (seconds)`** averages each evaluated
+episode's longest uninterrupted hold and remains a qualification diagnostic.
 `validation/Longest continuous hover in any episode (seconds)` shows the
 maximum. `training/Mean longest hover so far in active episodes (seconds)`
 reports ongoing training episodes and has a different averaging population.
@@ -600,3 +635,24 @@ embedded from the pinned flight-parameters artifact. Deploy-time completion
 uses that exact envelope for the configured 600 continuous samples, matching
 evaluation and training qualification counters. It should not touch the
 switch, climb away, or perform a learned retreat. The routine's later `goto` step owns any return motion.
+
+For hover correction qualification, retain Lab publication semantics and record
+PX4 results separately. A candidate must pass the existing fresh Lab acceptance
+workload, then three consecutive complete warehouse transfer executions using
+the same canonical policy run and actor digest. Each execution must complete all
+three policy segments without contact, lamp transitions, timeout, or flight
+failure. The 45-second policy budget includes handoff, settling, and any restarted
+30-second continuous hold; it does not guarantee completion. A failed execution
+ends that candidate's transfer qualification. On failure to qualify, restore the
+baseline deployment through `latest`; retain candidates and Lab-ranked `best`.
+
+The correction experiment retains the 0.03/0.09 reward override, gamma 0.999,
+and lambda 0.995 for reproducibility. Both completed stronger-reward trials
+failed validation, including the longer-horizon restart, which ended normally
+after 50 broad and 85 refinement updates. A fresh control using the previous
+complete experiment settings reproduced its Lab acceptance exactly. Recorded-input
+command comparisons show persistent excessive upward commands near the goal;
+increasing reward strength further is not justified by insufficient correction.
+No tighter-hover candidate qualified for PX4 testing. All task-owned workers and
+monitors are stopped, and `latest` remains baseline `20260913T222441Z`.
+See `FLIGHT_TO_POLICY_IMPROVEMENTS.md` for exact inputs and results.

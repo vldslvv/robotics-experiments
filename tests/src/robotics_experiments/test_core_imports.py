@@ -205,6 +205,7 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "load_policy",
             "load_policy_metadata",
             "pack_hover_observation",
+            "pack_pose_observation",
             "policy_action_to_offboard",
             "policy_metadata",
             "prepare_policy_inputs",

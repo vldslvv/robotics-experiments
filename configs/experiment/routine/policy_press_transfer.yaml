@@ -4,7 +4,8 @@ defaults:
 takeoff_timeout_s: 30.0
 
 # Exercise the active press curriculum stage from three distinct policy-entry
-# ranges. Each policy gets enough time to satisfy the 30 second stable hold.
+# ranges. The 45 second budget includes handoff, settling, and any restarted
+# 30 second continuous hold; completion is not guaranteed by the timeout.
 steps:
   - kind: arm
   - kind: takeoff

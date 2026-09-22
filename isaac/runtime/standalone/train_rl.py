@@ -691,6 +691,7 @@ def _report_evaluation(
 
 def _report_plateau(
     *,
+    criteria: RlPlateauCriteriaConfig,
     evaluation: PolicyEvaluation,
     made_progress: bool,
     plateau_state: PlateauState,
@@ -698,6 +699,8 @@ def _report_plateau(
 ) -> None:
     _report(
         f"plateau iteration={evaluation.iteration} "
+        f"metric={criteria.metric_name} direction={criteria.direction} "
+        f"current={evaluation.metric(criteria.metric_name):.6f} "
         f"progress={str(made_progress).lower()} "
         f"reference={plateau_state.reference_value:.6f} "
         f"stale={plateau_state.stale_evaluations} "
@@ -1577,6 +1580,7 @@ def _train_and_validate_attempt(
                     "reached": False,
                 }
                 _report_plateau(
+                    criteria=plateau_criteria,
                     evaluation=initial,
                     made_progress=True,
                     plateau_state=PlateauState(
@@ -1704,6 +1708,7 @@ def _train_and_validate_attempt(
                             "reached": plateau.plateau_reached,
                         }
                         _report_plateau(
+                            criteria=plateau_criteria,
                             evaluation=evaluation,
                             made_progress=plateau.made_progress,
                             plateau_state=plateau.state,

@@ -6,9 +6,8 @@ in the exported policy artifact's metadata and validated at load time, so a
 policy can never silently run against a layout it was not trained on.
 
 PARITY INVARIANT: the same packing function is fed from Lab tensors in training
-and from :class:`~robotics_experiments.px4_bridge.VehicleState` (plus a target
-position) at deploy. Any field a deploy-side caller cannot assemble from
-``VehicleState`` is forbidden in a layout.
+and from deployment state plus task-provider measurements. Shared flight
+features are calculated by the task-neutral pose packer.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from typing import TypeVar
 import numpy as np
 import torch
 
-from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.px4_bridge import (
     normalize_quat_wxyz,
     quat_conjugate_wxyz,
@@ -28,6 +26,7 @@ from robotics_experiments.px4_bridge import (
     quat_wxyz_to_xyzw,
     rotate_vector_wxyz,
 )
+from robotics_experiments.rl import pack_pose_observation
 from robotics_experiments.rl._interfaces import (
     PRESS_OBSERVATION_DIM,
     PRESS_OBSERVATION_SCHEMA_VERSION,
@@ -85,7 +84,7 @@ def world_switch_to_contact_frame(
         quat_conjugate_wxyz(contact_quat), normalize_quat_wxyz(drone_quat)
     )
     # Canonicalize the double cover (q and -q are the same rotation) to a
-    # non-negative w so the policy input is continuous across identity.
+    # non-negative w for physical pose measurements near identity.
     if rel_quat_wxyz[0] < 0.0:
         rel_quat_wxyz = -rel_quat_wxyz
     return rel_pos, quat_wxyz_to_xyzw(rel_quat_wxyz)
@@ -111,9 +110,9 @@ class PressObservationMask(IntFlag):
 class PressObservation:
     """Task-relative, provider-agnostic policy input for the press task.
 
-    The policy never sees raw sensors or simulator internals -- only this
-    normalized observation, so the pose source can change (ground truth ->
-    synthetic noise -> real perception) with "policy API change: none".
+    These physical measurements feed shared body-relative actor packing and
+    task-specific handoff/completion checks. The pose source can change from
+    ground truth to perception without changing the actor layout.
     Perception uncertainty is explicit control state
     (``pose_confidence`` / ``pose_age_s`` / ``detection_valid``).
 
@@ -165,19 +164,14 @@ def to_vector(
     *,
     obs: PressObservation,
     position_error_enu_m: np.ndarray,
-    flight_parameters: FlightParameters,
 ) -> np.ndarray:
-    """Flatten a :class:`PressObservation` to the schema-v2 float vector.
-
-    The first three values are world-ENU target-position error divided by the
-    measured hover envelope on each axis. Remaining fields follow the dataclass
-    declaration order, starting at ``relative_switch_quat_xyzw``. Bools and
-    ints are cast to float. Length is ``30 + len(previous_action)``.
-    """
+    """Pack the shared body-relative pose and press sensor fields (schema 3)."""
+    body_quat = np.asarray(obs.attitude_quat_xyzw)[[3, 0, 1, 2]]
+    body_in_goal = np.asarray(obs.relative_switch_quat_xyzw)[[3, 0, 1, 2]]
+    goal_quat = quat_multiply_wxyz(body_quat, quat_conjugate_wxyz(body_in_goal))
     return pack_press_observation(
         position_error_enu_m=position_error_enu_m,
-        flight_parameters=flight_parameters,
-        relative_switch_quat_xyzw=obs.relative_switch_quat_xyzw,
+        goal_quat_world_wxyz=goal_quat,
         pose_confidence=obs.pose_confidence,
         pose_age_s=obs.pose_age_s,
         detection_valid=obs.detection_valid,
@@ -201,8 +195,7 @@ def to_vector(
 def pack_press_observation(
     *,
     position_error_enu_m: ArrayT,
-    flight_parameters: FlightParameters,
-    relative_switch_quat_xyzw: ArrayT,
+    goal_quat_world_wxyz: ArrayT,
     pose_confidence: ArrayT | float,
     pose_age_s: ArrayT | float,
     detection_valid: ArrayT | bool,
@@ -222,34 +215,27 @@ def pack_press_observation(
     obs_mask: ArrayT | int,
 ) -> ArrayT:
     """Pack the press schema for either NumPy values or batched torch tensors."""
-    position_bounds = flight_parameters.hover.position_error_enu_m
-    position_scale = tuple(
-        max(abs(lower), abs(upper))
-        for lower, upper in zip(position_bounds.lower, position_bounds.upper, strict=True)
+    pose = pack_pose_observation(
+        goal_offset_enu_m=-position_error_enu_m,
+        quat_flu_enu_wxyz=attitude_quat_xyzw[..., [3, 0, 1, 2]],
+        goal_quat_world_wxyz=goal_quat_world_wxyz,
+        linear_velocity_body_flu=body_lin_vel_mps,
+        angular_velocity_body_flu=body_ang_vel_radps,
     )
     if isinstance(position_error_enu_m, torch.Tensor):
         reference = position_error_enu_m
-        normalized_position_error = position_error_enu_m / torch.as_tensor(
-            position_scale,
-            dtype=reference.dtype,
-            device=reference.device,
-        )
 
         def column(value: torch.Tensor | bool | int | float) -> torch.Tensor:
             return torch.as_tensor(value, dtype=reference.dtype, device=reference.device).reshape(
-                -1, 1
+                *reference.shape[:-1], 1
             )
 
         return torch.cat(
             (
-                normalized_position_error,
-                relative_switch_quat_xyzw,
+                pose,
                 column(pose_confidence),
                 column(pose_age_s),
                 column(detection_valid),
-                body_lin_vel_mps,
-                body_ang_vel_radps,
-                attitude_quat_xyzw,
                 column(pusher_compression_m),
                 column(pusher_compression_rate_mps),
                 column(contact_valid),
@@ -265,11 +251,7 @@ def pack_press_observation(
             dim=-1,
         )
 
-    normalized_position_error = np.asarray(position_error_enu_m, dtype=np.float64) / np.asarray(
-        position_scale,
-        dtype=np.float64,
-    )
-    batched = normalized_position_error.ndim == 2
+    batched = pose.ndim == 2
 
     def array(value, width: int):
         result = np.asarray(value, dtype=np.float64)
@@ -278,14 +260,10 @@ def pack_press_observation(
     axis = -1 if batched else 0
     vector = np.concatenate(
         (
-            array(normalized_position_error, 3),
-            array(relative_switch_quat_xyzw, 4),
+            array(pose, 18),
             array(pose_confidence, 1),
             array(pose_age_s, 1),
             array(detection_valid, 1),
-            array(body_lin_vel_mps, 3),
-            array(body_ang_vel_radps, 3),
-            array(attitude_quat_xyzw, 4),
             array(pusher_compression_m, 1),
             array(pusher_compression_rate_mps, 1),
             array(contact_valid, 1),
@@ -300,7 +278,7 @@ def pack_press_observation(
         ),
         axis=axis,
     )
-    expected_dim = 30 + np.asarray(previous_action).shape[-1]
+    expected_dim = 31 + np.asarray(previous_action).shape[-1]
     if vector.shape[-1] != expected_dim:
         raise ValueError(
             f"press observation has {vector.shape[-1]} values, expected {expected_dim}"

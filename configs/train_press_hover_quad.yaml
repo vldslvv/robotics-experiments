@@ -16,6 +16,9 @@ rl:
   press:
     reward:
       hover_stabilization: boundary_weighted
+      stabilization_weight: 0.03
+      outside_envelope_weight: 0.09
+      action_effort_weight: 1.0
       terminal_failure_weight: 30.0
     curriculum:
       active_stage: hover
@@ -31,8 +34,8 @@ rl:
     telemetry_sample_interval_s: 1.0
     gpu_utilization_target_rate: 0.95
     num_steps_per_env: 256
-    gamma: 0.995
-    lam: 0.99
+    gamma: 0.999
+    lam: 0.995
     clip_param: 0.2
     value_loss_coef: 1.0
     num_learning_epochs: 4

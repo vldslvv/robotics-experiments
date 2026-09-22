@@ -163,7 +163,8 @@ the entire fleet cycle.
   `VehicleRoutine` repeats a routine-wide policy rate.
   `hover` uses the authored `target_enu`, or the entry position when it is
   omitted, and requires `hold_s`; its adapter completes after that duration.
-  `press-approach` consumes the injected exact 34-value `PressObservation`;
+  `press` packs the injected `PressObservation` into the schema-3 35-value actor
+  input;
   `curriculum_stage` selects the stage-specific adapter. The implemented
   press adapter uses the fitting-flight reset bounds for `hover` and the
   configured navigation reset bounds for `approach`. It applies bounded

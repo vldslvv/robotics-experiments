@@ -498,8 +498,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
         observations = pack_press_observation(
             position_error_enu_m=position_error_enu_m,
-            flight_parameters=self._flight_parameters,
-            relative_switch_quat_xyzw=relative_quat_xyzw,
+            goal_quat_world_wxyz=self._contact_frame_quat(),
             pose_confidence=ones,
             pose_age_s=zeros,
             detection_valid=ones,

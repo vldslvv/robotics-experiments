@@ -161,7 +161,7 @@ def test_corrects_position_while_waiting_for_handoff() -> None:
     result = _advance(observation=_observation(range_m=0.48, linear_velocity=(0.10, 0.0, 0.0)))
     assert result.action[0] > 0.0
     assert not result.state.handoff_latched
-    assert len(result.state.entry_observation) == 34
+    assert len(result.state.entry_observation) == 35
     assert result.state.actor_evaluations == 0
     assert result.handoff_reason == "wall_normal_speed"
 
@@ -191,9 +191,9 @@ def test_runs_inference_after_handoff_and_tracks_ranges() -> None:
     assert result.state.actor_evaluations == 1
     assert result.state.initial_switch_range_m == 0.48
     assert result.state.closest_switch_range_m == 0.48
-    assert len(result.actor_observation) == 34
-    assert result.actor_observation[27:31] == (0.0, 0.0, 0.0, 0.0)
-    assert result.actor_observation[31] == 1.0
+    assert len(result.actor_observation) == 35
+    assert result.actor_observation[28:32] == (0.0, 0.0, 0.0, 0.0)
+    assert result.actor_observation[32] == 1.0
     assert result.raw_action == (0.2, -0.1, 0.0, 0.0)
 
     closer = _advance(
@@ -213,7 +213,7 @@ def test_first_actor_observation_keeps_zero_previous_action_after_handoff_wait()
 
     assert result.state.entry_observation == waiting.state.entry_observation
     assert result.state.actor_evaluations == 1
-    assert result.actor_observation[27:31] == (0.0, 0.0, 0.0, 0.0)
+    assert result.actor_observation[28:32] == (0.0, 0.0, 0.0, 0.0)
 
 
 def test_one_hundred_stable_steps_complete_with_zero_terminal_action() -> None:
