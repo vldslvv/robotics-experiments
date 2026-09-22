@@ -230,20 +230,28 @@ the current contents and the intended home for that kind of code.
   settings, certified control modes, digest, and fingerprints before PPO, and selection/evaluation must reuse
   that embedded record. Policy artifacts without alignment provenance are
   unsupported. Controller and policy artifacts are strict v1 contracts; older
-  schemas and compatibility migrations are unsupported. A training invocation
-  is one campaign of configured independent attempt seeds; every attempt starts
-  in a distinct Isaac process with a new environment, runner, actor, critic,
-  and optimizer. The first ordered press curriculum stage starts from scratch;
-  a later stage restores the complete accepted checkpoint from the immediately
-  preceding stage, derived only from list order. Curriculum config has no
-  parent/child links. The coordinator retains reports and checkpoint references but
-  never owns a training environment. Later Hydra phases restore that attempt's
-  complete validation-selected learner checkpoint, apply the new schedule/reset
-  mixture, and reset the environments before collecting rollouts. Other external
-  checkpoint initialization, process resume, and post-run fine-tuning are
-  unsupported. Every checkpoint uses one fixed
-  validation workload. The evaluator returns raw named metrics, each press
-  curriculum stage owns its Hydra plateau rule, the rule reads exactly one named
+  schemas and compatibility migrations are unsupported. A training invocation runs
+  one independent stage or the ordered `rl.training.pipeline` list of complete
+  experiments. Each stage owns a campaign of attempt seeds; every attempt starts
+  in a distinct Isaac process with fresh environments, rollout buffers, and runner.
+  `rl.inputs.initial_checkpoint` optionally names a producer training report whose
+  selected complete learner supplies actor, critic, optimizer, observation
+  statistics, and learned exploration parameters. Independent stages check
+  integrity and compatibility without requiring prior acceptance. The pipeline
+  requires an accepted matching starting learner, then advances only when the
+  preceding stage result is accepted, forwarding its exact pinned checkpoint.
+  Pipeline names are labels; `rl.press.task` owns hover/approach behavior,
+  `rl.press.reset.mix` owns reset distributions, `rl.episode_length_s` owns
+  duration, `rl.press.goal.stable_steps` owns the hold, and `rl.training` owns
+  phases and plateau rules. Referenced experiments have empty pipeline and initial
+  checkpoint settings. Stage results preserve selected diagnostic candidates on
+  failure, with `accepted: false`. No label lookup, retries, branches, checkpoint
+  merging, or process resume occurs between stages. The coordinator retains
+  reports and checkpoint references but never owns a training environment.
+  Later Hydra phases restore that attempt's complete validation-selected learner,
+  apply the new schedule, and reset environments before collecting rollouts.
+  Every checkpoint uses one fixed validation workload. The evaluator returns raw
+  named metrics; each experiment owns its Hydra plateau rule, which reads one named
   scalar, and validation gates establish
   selection eligibility only. A completed validation-passing attempt freezes
   its exact exported actor and runs one fresh, uncached, disjoint test workload.

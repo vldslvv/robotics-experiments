@@ -97,11 +97,10 @@ def make_switch_press_env_cfg(
     vehicle = _training_vehicle(experiment_config)
     rl = experiment_config.rl
     reset = rl.press.reset
-    stage = rl.press.selected_stage()
-    if policy_contract is not None and policy_contract.curriculum_stage != stage.name:
+    if policy_contract is not None and policy_contract.curriculum_stage != rl.press.task:
         raise ValueError(
             f"press artifact stage {policy_contract.curriculum_stage!r} does not match "
-            f"configured stage {stage.name!r}"
+            f"configured stage {rl.press.task!r}"
         )
     policy_rate_hz = (
         rl.policy_rate_hz if policy_contract is None else policy_contract.policy_rate_hz
@@ -121,7 +120,7 @@ def make_switch_press_env_cfg(
     return SwitchPressEnvCfg(
         decimation=decimation,
         policy_rate_hz=policy_rate_hz,
-        episode_length_s=stage.episode_length_s,
+        episode_length_s=rl.episode_length_s,
         action_space=action_dim,
         observation_schema_version=OBSERVATION_SCHEMA_VERSION,
         observation_space=PRESS_OBSERVATION_DIM,
@@ -241,7 +240,6 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             dtype=torch.float32,
             device=self.device,
         )
-        self._stage = self._experiment_config.rl.press.selected_stage()
         stiffness = (
             self.switch.data.default_joint_stiffness[:, switch_joint_ids]
             * self._experiment_config.rl.press.reset.button_stiffness_scale
@@ -426,7 +424,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         # DirectRLEnv increments the clock before checking completion.
         horizon = self.max_episode_length
-        if self._training and self._stage.name == "hover":
+        if self._training and self._experiment_config.rl.press.task == "hover":
             time_out = self.episode_length_buf >= horizon
         else:
             time_out = self.episode_length_buf >= horizon - 1
@@ -440,8 +438,8 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             termination_cfg=press.termination,
             minimum_range_m=press.acceptance.minimum_range_m,
             flight_parameters=self._flight_parameters,
-            hold_steps=round(self._stage.hold_s * self.cfg.policy_rate_hz),
-            approach_enabled=self._stage.name == "approach",
+            hold_steps=self._experiment_config.rl.press.goal.stable_steps,
+            approach_enabled=self._experiment_config.rl.press.task == "approach",
             training=self._training,
         )
         result = self._task_result
@@ -548,7 +546,9 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         position_error_contact = math_utils.quat_apply_inverse(contact_quat, position_error_enu_m)
         hover_wall_normal = target_range - position_error_contact[:, 0]
         hover_lateral_vertical = -position_error_contact[:, 1:3]
-        reset_weights = {source.source: source.weight for source in self._stage.reset_mix}
+        reset_weights = {
+            source.source: source.weight for source in self._experiment_config.rl.press.reset.mix
+        }
         unknown_sources = reset_weights.keys() - {
             "measured_navigation_handoff",
             "pinned_flight_parameters",

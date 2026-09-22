@@ -30,5 +30,5 @@ def press_policy_contract(
         max_yaw_rate_radps=action.max_yaw_rate_radps,
         max_body_rate_radps=action.max_body_rate_radps,
         hover_thrust_normalized=controller.selected_settings.hover_thrust_normalized,
-        curriculum_stage=config.rl.press.selected_stage().name,
+        curriculum_stage=config.rl.press.task,
     )

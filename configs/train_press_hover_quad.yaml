@@ -3,10 +3,11 @@ defaults:
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - _self_
 
-# First press-policy curriculum stage: target-local measured-envelope hold.
+# Press-hover task: target-local measured-envelope hold.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
+  episode_length_s: 40.0
   num_envs: 4096
   inputs:
     controller_artifact: .build/alignment/x500-px4-v1/20260912T211745Z/controller.json
@@ -20,13 +21,30 @@ rl:
       outside_envelope_weight: 0.09
       action_effort_weight: 1.0
       terminal_failure_weight: 30.0
-    curriculum:
-      active_stage: hover
+    task: hover
     policy:
       normalize_observations: true
       actor:
         initial_noise_std: 0.10
   training:
+    phases:
+      - max_iterations: 50
+        evaluation_interval: 5
+        learning_rate: 0.0003
+        schedule: fixed
+        entropy_coef: 0.0
+        update_observation_normalization: true
+      - max_iterations: 100
+        evaluation_interval: 5
+        learning_rate: 1.0e-05
+        schedule: fixed
+        entropy_coef: 0.0
+        update_observation_normalization: false
+    plateau:
+      metric_name: hover_envelope_utilization_mean
+      direction: minimize
+      minimum_delta: 0.003
+      patience_evaluations: 5
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
     policy_name: press-hover

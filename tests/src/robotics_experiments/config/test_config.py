@@ -4,6 +4,7 @@ from dataclasses import FrozenInstanceError, replace
 from typing import get_type_hints
 
 import pytest
+from omegaconf import OmegaConf
 
 from robotics_experiments.config import load_config
 from tests.support.paths import REPO_ROOT
@@ -13,8 +14,6 @@ _EXPERIMENTS = sorted(path for path in _ROOT.glob("*.yaml") if path.name != "bas
 
 
 def _write_experiment(tmp_path, name, vehicles):
-    from omegaconf import OmegaConf
-
     root = tmp_path / "configs"
     shutil.copytree(_ROOT / "experiment", root / "experiment", dirs_exist_ok=True)
     shutil.copytree(_ROOT / "airframes", root / "airframes", dirs_exist_ok=True)
@@ -227,22 +226,21 @@ def test_bridge_rejects_negative_magnetometer_noise_scale(tmp_path):
 
 
 @pytest.mark.parametrize("stage_name", ["hover", "approach"])
-def test_press_episode_duration_comes_from_selected_hydra_stage(*, tmp_path, stage_name: str):
+def test_press_episode_duration_comes_from_shared_field(*, tmp_path, stage_name: str):
     root = tmp_path / "configs"
     shutil.copytree(_ROOT, root)
     path = root / f"train_press_{stage_name}_quad.yaml"
     original = load_config(_ROOT / path.name)
-    duration = original.rl.press.selected_stage().episode_length_s
-    curriculum_path = root / "experiment" / "rl" / "press" / "approach.yaml"
-    curriculum_path.write_text(
-        curriculum_path.read_text().replace(
+    duration = original.rl.episode_length_s
+    experiment_path = path
+    experiment_path.write_text(
+        experiment_path.read_text().replace(
             f"episode_length_s: {duration}", "episode_length_s: 50.0"
         )
     )
 
     config = load_config(path)
-    assert config.rl.press.selected_stage().episode_length_s == 50.0
-    assert config.rl.episode_length_s == original.rl.episode_length_s
+    assert config.rl.episode_length_s == 50.0
     assert config.rl.training.attempt_seeds == (42,)
     assert config.rl.press.evaluation.validation_seeds == (101, 202, 303)
     assert config.rl.press.evaluation.test_seeds == (404, 505, 606)
@@ -264,43 +262,38 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
-    assert tuple(stage.name for stage in config.rl.press.curriculum.stages) == (
-        "hover",
-        "approach",
-    )
-    stage = config.rl.press.selected_stage()
-    assert stage.name == "approach"
-    assert stage.episode_length_s == 45.0
-    assert tuple(source.source for source in stage.reset_mix) == (
+    assert config.rl.press.task == "approach"
+    assert config.rl.episode_length_s == 45.0
+    assert tuple(source.source for source in config.rl.press.reset.mix) == (
         "measured_navigation_handoff",
         "pinned_flight_parameters",
     )
-    assert tuple(source.weight for source in stage.reset_mix) == (0.8, 0.2)
-    assert stage.hold_s == 30.0
-    assert tuple(phase.max_iterations for phase in stage.phases) == (50, 30, 100)
-    assert tuple(phase.learning_rate for phase in stage.phases) == (
+    assert tuple(source.weight for source in config.rl.press.reset.mix) == (0.8, 0.2)
+    assert config.rl.press.goal.stable_steps / config.rl.policy_rate_hz == 30.0
+    assert tuple(phase.max_iterations for phase in training.phases) == (50, 30, 100)
+    assert tuple(phase.learning_rate for phase in training.phases) == (
         1.0e-4,
         3.0e-5,
         1.0e-5,
     )
-    assert tuple(phase.entropy_coef for phase in stage.phases) == (0.0, 0.0, 0.0)
-    assert tuple(phase.evaluation_interval for phase in stage.phases) == (10, 5, 5)
-    assert stage.plateau.metric_name == "hover_envelope_utilization_mean"
-    assert stage.plateau.direction == "minimize"
-    assert stage.plateau.minimum_delta == 0.003
-    assert stage.plateau.patience_evaluations == 10
-    hover_stage = config.rl.press.curriculum.stages[0]
-    assert tuple(phase.max_iterations for phase in hover_stage.phases) == (50, 100)
-    assert tuple(phase.learning_rate for phase in hover_stage.phases) == (3.0e-4, 1.0e-5)
-    assert tuple(phase.update_observation_normalization for phase in hover_stage.phases) == (
+    assert tuple(phase.entropy_coef for phase in training.phases) == (0.0, 0.0, 0.0)
+    assert tuple(phase.evaluation_interval for phase in training.phases) == (10, 5, 5)
+    assert training.plateau.metric_name == "hover_envelope_utilization_mean"
+    assert training.plateau.direction == "minimize"
+    assert training.plateau.minimum_delta == 0.003
+    assert training.plateau.patience_evaluations == 10
+    hover_training = load_config(_ROOT / "train_press_hover_quad.yaml").rl.training
+    assert tuple(phase.max_iterations for phase in hover_training.phases) == (50, 100)
+    assert tuple(phase.learning_rate for phase in hover_training.phases) == (3.0e-4, 1.0e-5)
+    assert tuple(phase.update_observation_normalization for phase in hover_training.phases) == (
         True,
         False,
     )
-    assert tuple(phase.evaluation_interval for phase in hover_stage.phases) == (5, 5)
-    assert hover_stage.plateau.metric_name == "hover_envelope_utilization_mean"
-    assert hover_stage.plateau.direction == "minimize"
-    assert hover_stage.plateau.minimum_delta == 0.003
-    assert hover_stage.plateau.patience_evaluations == 5
+    assert tuple(phase.evaluation_interval for phase in hover_training.phases) == (5, 5)
+    assert hover_training.plateau.metric_name == "hover_envelope_utilization_mean"
+    assert hover_training.plateau.direction == "minimize"
+    assert hover_training.plateau.minimum_delta == 0.003
+    assert hover_training.plateau.patience_evaluations == 5
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
     assert training.attempt_seeds == (42,)
@@ -328,7 +321,7 @@ def test_press_hover_training_configuration():
     assert config.rl.training.num_steps_per_env == 256
     assert config.rl.training.num_mini_batches == 8
     assert config.rl.training.attempt_seeds == (42,)
-    assert config.rl.press.selected_stage().episode_length_s == 40.0
+    assert config.rl.episode_length_s == 40.0
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
     assert reward.hover_stabilization == "boundary_weighted"
@@ -396,7 +389,7 @@ def test_press_hover_outside_only_changes_only_reward_choice():
     assert replace(comparison.rl.press.reward, hover_stabilization="boundary_weighted") == (
         baseline.rl.press.reward
     )
-    assert comparison.rl.press.curriculum == baseline.rl.press.curriculum
+    assert comparison.rl.press.task == baseline.rl.press.task
     assert comparison.rl.training == baseline.rl.training
 
 
@@ -571,8 +564,7 @@ def test_policy_transfer_config_uses_distinct_entry_targets():
 
     hover = load_config(_ROOT / "policy_transfer_press_hover_quad.yaml")
     hover_steps = hover.vehicles["x500_01"].routine.steps
-    assert hover.rl.press.selected_stage().name == "hover"
-    assert len(hover.rl.press.selected_stage().phases) == 2
+    assert hover.rl.press.task == "hover"
     assert all(
         hover_steps[index]["artifact"] == ".build/training/press-hover/latest"
         for index in (7, 12, 17)
@@ -590,7 +582,6 @@ def test_policy_transfer_config_uses_distinct_entry_targets():
 )
 def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
     from hydra.errors import ConfigCompositionException
-    from omegaconf import OmegaConf
 
     from robotics_experiments.config import load_config
 
@@ -654,8 +645,6 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
     ],
 )
 def test_task_policy_validation(tmp_path, override, match):
-    from omegaconf import OmegaConf
-
     from robotics_experiments.config import load_config
 
     path = _write_experiment(tmp_path, "invalid_policy", {})
@@ -669,8 +658,8 @@ def test_task_policy_validation(tmp_path, override, match):
     ("override", "match"),
     [
         (
-            {"rl": {"press": {"curriculum": {"active_stage": "future"}}}},
-            "must select exactly one ordered stage",
+            {"rl": {"press": {"task": "future"}}},
+            "rl.press.task must be hover or approach",
         ),
         (
             {"rl": {"press": {"goal": {"range_min_m": 0.50}}}},
@@ -771,8 +760,6 @@ def test_task_policy_validation(tmp_path, override, match):
     ],
 )
 def test_press_approach_validation(tmp_path, override, match):
-    from omegaconf import OmegaConf
-
     from robotics_experiments.config import load_config
 
     path = _write_experiment(tmp_path, "invalid_press_approach", {})
@@ -804,8 +791,6 @@ def test_press_approach_validation(tmp_path, override, match):
     ],
 )
 def test_rate_validation(tmp_path, overrides, match):
-    from omegaconf import OmegaConf
-
     from robotics_experiments.config import load_config
 
     path = _write_experiment(tmp_path, "invalid_rates", {})
@@ -830,8 +815,6 @@ def test_rate_validation(tmp_path, overrides, match):
     ],
 )
 def test_switch_semantic_validation(tmp_path, overrides, match):
-    from omegaconf import OmegaConf
-
     from robotics_experiments.config import load_config
 
     path = _write_experiment(tmp_path, "invalid_switches", {})
@@ -1031,3 +1014,53 @@ def test_disabled_and_unknown_assets_affect_px4_launch(tmp_path):
     vehicles["disabled"]["bridge"] = {"enabled": True}
     with pytest.raises(ValueError, match="unknown.usda"):
         load_config(_write_experiment(tmp_path, "unknown", vehicles))
+
+
+@pytest.mark.parametrize(
+    "pipeline",
+    [
+        [{"name": "", "config_path": "configs/train_press_hover_quad.yaml"}],
+        [{"name": "one", "config_path": ""}],
+        [
+            {"name": "same", "config_path": "configs/train_press_hover_quad.yaml"},
+            {"name": "same", "config_path": "configs/train_press_approach_quad.yaml"},
+        ],
+    ],
+)
+def test_training_pipeline_rejects_invalid_labels_and_paths(tmp_path, pipeline):
+    path = _write_experiment(tmp_path, "invalid_pipeline", {})
+    OmegaConf.save(
+        OmegaConf.merge(OmegaConf.load(path), {"rl": {"training": {"pipeline": pipeline}}}), path
+    )
+    with pytest.raises(ValueError, match="rl.training.pipeline"):
+        load_config(path)
+
+
+def test_pipeline_names_and_policy_namespace_do_not_change_task_behavior(tmp_path):
+    path = _write_experiment(tmp_path, "named_pipeline", {})
+    OmegaConf.save(
+        OmegaConf.merge(
+            OmegaConf.load(path),
+            {
+                "rl": {
+                    "training": {
+                        "policy_name": "independent-name",
+                        "pipeline": [
+                            {
+                                "name": "arbitrary",
+                                "config_path": "configs/train_press_hover_quad.yaml",
+                            }
+                        ],
+                    }
+                }
+            },
+        ),
+        path,
+    )
+    config = load_config(path)
+    baseline = load_config(_ROOT / "takeoff_quad.yaml")
+    assert config.rl.press.task == baseline.rl.press.task
+    assert config.rl.press.reward == baseline.rl.press.reward
+    assert config.rl.press.reset == baseline.rl.press.reset
+    assert config.rl.training.pipeline[0].name == "arbitrary"
+    assert config.rl.training.policy_name == "independent-name"

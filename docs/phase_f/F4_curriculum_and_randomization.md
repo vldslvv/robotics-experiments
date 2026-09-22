@@ -1,114 +1,61 @@
-# F4 -- Contact curriculum + domain randomization (tighten to real size/forces)
+# F4 -- Contact curriculum and domain randomization
 
-Status: PLANNED; BLOCKED BY F3. No press curriculum, stage-transition logic,
-contact `EventCfg`, or press-task domain-randomization config exists.
+Status: PLANNED; depends on an accepted contact policy from F3. Contact-task
+training and domain randomization remain separate work from the existing hover
+and approach tasks.
 
-Goal served: goal 2 (tighten the task to real light-switch size and forces).
-Depends on: F3 (a policy that solves the easy task). Blocks: F5.
-No deferred decisions.
+The shared stage runner and ordered `rl.training.pipeline` provide execution and
+checkpoint forwarding. See [RL workflow](../RL_WORKFLOW.md) for the current
+contract. F4 must define complete task experiments rather than add a second
+curriculum manager, promotion loop, or workflow framework.
 
-Why this exists: the F3 policy solves an oversized/soft switch at close range with
-no randomization. This plan tightens the task through config-driven curriculum
-stages down to the real `holybro_x500_v2` pusher against real switch geometry and
-force, and adds domain randomization so the policy generalizes. All stage/DR values
-are config (single source of truth), never hardcoded.
+## Task experiments
 
----
+Define complete Hydra experiments that progressively tighten switch geometry,
+button stiffness, press threshold, wall tilt, contact point, stand-off distance,
+and friction toward the real X500 pusher and switch. Each experiment owns its
+reward, reset distribution, training phases, plateau rule, validation workload,
+and acceptance criteria. Pipeline entries contain only labels and config paths.
+Task code implements the configured behavior; labels never select behavior.
 
-## Step 1 -- Curriculum config + pure advance logic
+Each accepted stage supplies its complete selected learner to the next stage.
+The pipeline reads only the acceptance boolean. It must not inspect contact
+measurements or promote a task from rolling training metrics. Fresh environments
+apply the next experiment's task parameters; simulator state is not inherited.
+Contact task identity and its policy contract require their own implementation
+and tests before adding those experiments.
 
-- Action: create `src/robotics_experiments/rl/press/_curriculum.py` (pure). Model a
-  stage as parameters + a promotion predicate:
-  - `@dataclass(frozen=True) class CurriculumStage` with the tightening knobs
-    from the historical research tables: `switch_size_scale`,
-    `press_force_scale`, `travel_scale`,
-    `button_stiffness`, `press_threshold`, `handoff_distance_m`, `wall_tilt_deg`,
-    `wall_friction`, `pose_noise` (0 until F5), plus a `promote_when` threshold set
-    (min success rate over a window, min first-contact stability).
-  - `advance(stage_index, recent_metrics, stages) -> new_stage_index` (pure):
-    promote when the window metrics clear the stage's `promote_when`.
-- Action: add `PressCurriculumConfig` (ordered `stages` list + window size) to
-  the owning private RL config module and a `curriculum:` block to
-  `configs/experiment/rl/press/default.yaml`. Author the ordered stages:
-  1. stabilization: free hover -> wall approach (no switch) -> stable contact ->
-     randomized wall tilt/contact point (the recorded stabilization curriculum);
-  2. contact: easy (F3) -> real geometry/easy actuation -> nominal geometry/rising
-     load -> randomized contact (the recorded contact curriculum), ending at the
-     real X500 pusher + real switch size/force.
-- Test: `tests/src/robotics_experiments/rl/press/test_press_curriculum.py`
-  (pure): promotion fires only when metrics
-  clear thresholds; stages advance in order; the final stage is the real geometry.
-- Done when: the pure curriculum advances a synthetic metric stream through the
-  authored stages.
+## Domain randomization
 
-## Step 2 -- Apply stage parameters at reset (env side)
+Use seedable Isaac Lab reset events and ordinary task code for configured
+randomization. Candidate areas include:
 
-- Action: in `SwitchPressEnv._reset_idx`, apply the active stage's parameters:
-  scale the switch USD size / button stiffness / press threshold, set the wall tilt
-  and contact point, set the drone start distance (handoff distance), set wall
-  friction. Use Isaac Lab reset-mode events where possible; scale geometry via the
-  spawn cfg / prim attributes.
-- Action: add a thin Isaac Lab curriculum hook that folds recent per-env
-  metrics into frozen curriculum progress and calls the pure `advance()`
-  transition between iterations. The env applies the returned stage; it does
-  not own a mutable project curriculum manager.
-- Done when: training visibly moves the switch from oversized/soft toward real
-  size/force as success accrues, and the metrics keep clearing each stage.
+- Vehicle mass/inertia, motor response, thrust scale, and hover-thrust bias.
+- Pusher stiffness/damping, contact restitution, and wall friction.
+- Switch pose, plate dimensions, switch depth, wall tilt, and stand-off distance.
+- The configured safety harness described in `docs/SAFETY_HARNESS_PLAN.md`:
+  anchor, slack length, and spring-damper pull while taut.
 
-## Step 3 -- Domain randomization via EventCfg
+Each experiment authors its own ranges, units, nominal values, sampling law, and
+fixed evaluation distribution. There is no `stage_introduced` field or implicit
+lookup by pipeline label. Training and evaluation must reproduce their respective
+sample sequences from recorded seeds. Controller randomization must respect the
+controller-artifact and flight-evidence ownership rules in `AGENTS.md`.
 
-- Action: add an `EventCfg` to `SwitchPressEnvCfg`. No event config exists yet;
-  use the articulation built by
-  `workflows/isaac_lab/tasks/_drone_cfg.py` as the baseline and add
-  `randomize_rigid_body_mass` on the body plus `randomize_actuator_gains` on
-  `pusher_joint`, then extend with:
-  - vehicle dynamics: body mass/inertia, motor lag, thrust scale, hover-thrust bias
-    (contact stage onward);
-  - contact mechanics: pusher stiffness/damping, contact restitution, wall friction
-    (stabilization stage onward);
-  - task geometry: switch pose, plate size, switch depth, wall tilt, stand-off
-    (early curriculum onward);
-  - safety harness tether: configured anchor + slack length, zero force while
-    slack, spring-damper pull when taut (contact stage onward; model and
-    rationale in `docs/SAFETY_HARNESS_PLAN.md` Step 4).
-- Action: add `PressRandomizationConfig` to the owning private RL config module
-  and a `randomization:` block to
-  `configs/experiment/rl/press/default.yaml`. Each randomized
-  parameter carries a record: `name`, `units`, `nominal`, `train_range`,
-  `acceptance_range`, `sampling_law`, `stage_introduced` (so DR is
-  curriculum-coupled: narrow near nominal first, widen as stages advance, and an
-  acceptance range fixed for eval-only).
-- Rule: randomization ranges are config, seedable, and reproducible. No range
-  literal in Python.
-- Test: `tests/src/robotics_experiments/rl/press/test_press_randomization.py`
-  (pure): range resolution per stage;
-  acceptance ranges are held fixed; a seed reproduces a sample sequence.
-- Done when: DR is active from its configured stage and the ranges widen with the
-  curriculum.
+## Verification and training
 
-## Step 4 -- Retrain / continue training to the real geometry
+Test the task's reset parameter application, reproducible sampling, reward
+calculations, and independent acceptance measurements before training. Reuse the
+shared pipeline sequencing tests; contact behavior does not need another
+advancement implementation.
 
-- Action: run the shared F2b training entrypoint (`make train-rl`, pointed at
-  the press task per F3 Step 7) with the curriculum + DR config; continue from
-  the F3 checkpoint. Log per-stage metrics + per-term rewards.
-- Metrics targets recorded for the mature/randomized gate: press success >= 85%
-  randomized, first-contact stability >= 95%, retreat >= 99%, bounded compression
-  overshoot.
-- Done when: the policy holds through the final (real X500 pusher + real switch
-  size/force) stage under DR at the target metrics.
+A future F4 campaign may start from a compatible accepted F3 learner through
+`rl.inputs.initial_checkpoint`. Run it with `make train-rl`, retain per-stage
+reports and monitoring, and stop on failed acceptance. Recorded targets for the
+mature randomized contact task are press success at least 85%, first-contact
+stability at least 95%, retreat at least 99%, and bounded compression overshoot.
+These are future contact requirements, not changes to current hover or approach
+acceptance.
 
-## Files touched by F4
-
-- add `src/robotics_experiments/rl/press/_curriculum.py`
-- edit `.../tasks/switch_press_env.py` (EventCfg, stage apply, curriculum hook)
-- edit the owning private RL config module (`PressCurriculumConfig`,
-  `PressRandomizationConfig`) and `configs/experiment/rl/press/default.yaml`
-- add curriculum/randomization tests under
-  `tests/src/robotics_experiments/rl/press/`
-
-## Exit gate
-
-The policy trained through the curriculum + DR presses the real-geometry, real-force
-switch (nominal `holybro_x500_v2` pusher, real switch size/stiffness) under domain
-randomization at the mature/randomized metric targets. This is the "tightened to
-real size and forces" milestone and the precondition for F5.
+Completion requires an accepted policy for the real switch geometry and forces
+under the authored randomization workload. It is the precondition for F5.

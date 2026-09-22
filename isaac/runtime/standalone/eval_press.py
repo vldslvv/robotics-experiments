@@ -67,8 +67,7 @@ def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
         press_policy_evaluation,
     )
 
-    stage = config.rl.press.selected_stage()
-    if stage.name != "hover" or config.rl.action.kind != "velocity":
+    if config.rl.press.task != "hover" or config.rl.action.kind != "velocity":
         raise ValueError("hover feasibility requires the press-hover velocity task")
     inputs = prepare_policy_inputs(config=config, repo_root=_repo_root())
     contract = press_policy_contract(config=config, controller=inputs.controller)
@@ -80,7 +79,7 @@ def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
         "set_name": "validation",
         "seeds": seeds,
         "episodes_per_seed": config.rl.press.evaluation.episodes_per_seed,
-        "episode_length_s": stage.episode_length_s,
+        "episode_length_s": config.rl.episode_length_s,
         "controller_path": str(inputs.controller_path),
         "controller_digest": inputs.controller_digest,
         "controller_run_id": inputs.controller.run_id,
@@ -116,7 +115,7 @@ def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
                 policy=_HoverFeedback(config=config),
                 seeds=seeds,
                 episodes_per_seed=config.rl.press.evaluation.episodes_per_seed,
-                hold_steps=round(stage.hold_s * config.rl.policy_rate_hz),
+                hold_steps=config.rl.press.goal.stable_steps,
                 flight_parameters=inputs.flight_parameters,
                 report=_report,
                 trace_worst_episode=True,
@@ -158,15 +157,14 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         press_policy_evaluation,
     )
 
-    stage = config.rl.press.selected_stage()
     evaluation = config.rl.press.evaluation
     seeds = tuple(int(seed) for seed in evaluation.test_seeds)
     metadata = validate_policy_artifact(artifact_dir=artifact_dir)
     contract = metadata.contract
-    if contract.curriculum_stage != stage.name:
+    if contract.curriculum_stage != config.rl.press.task:
         raise ValueError(
             f"press artifact stage {contract.curriculum_stage!r} does not match "
-            f"configured stage {stage.name!r}"
+            f"configured stage {config.rl.press.task!r}"
         )
     comparison_fingerprint = _press_comparison_fingerprint(
         config=config,
@@ -207,7 +205,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
             policy=policy,
             seeds=seeds,
             episodes_per_seed=evaluation.episodes_per_seed,
-            hold_steps=round(stage.hold_s * config.rl.policy_rate_hz),
+            hold_steps=config.rl.press.goal.stable_steps,
             flight_parameters=metadata.flight_parameters,
             report=_report,
             trace_worst_episode=True,
@@ -273,8 +271,7 @@ def _resolve_artifact_dir(
 ) -> Path:
     if explicit_artifact_dir is not None:
         return explicit_artifact_dir
-    stage_name = config.rl.press.selected_stage().name
-    policy_root = _repo_root() / ".build" / "training" / f"press-{stage_name}"
+    policy_root = _repo_root() / ".build" / "training" / config.rl.training.policy_name
     run_id = os.environ.get(_RUN_ID_ENV)
     return policy_root / run_id if run_id else policy_root / "latest"
 

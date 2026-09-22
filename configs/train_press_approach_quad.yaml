@@ -3,20 +3,50 @@ defaults:
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - _self_
 
-# Terminal-approach curriculum stage. It restores the accepted hover learner.
+# Independent terminal-approach training; learner initialization is explicit.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
+  episode_length_s: 45.0
   num_envs: 32768
   action:
     max_body_velocity_mps: 0.5
   press:
-    curriculum:
-      active_stage: approach
+    task: approach
+    reset:
+      mix:
+        - source: measured_navigation_handoff
+          weight: 0.8
+        - source: pinned_flight_parameters
+          weight: 0.2
     policy:
       actor:
         initial_noise_std: 0.03
   training:
+    phases:
+      - max_iterations: 50
+        evaluation_interval: 10
+        learning_rate: 0.0001
+        schedule: fixed
+        entropy_coef: 0.0
+        update_observation_normalization: true
+      - max_iterations: 30
+        evaluation_interval: 5
+        learning_rate: 3.0e-05
+        schedule: fixed
+        entropy_coef: 0.0
+        update_observation_normalization: true
+      - max_iterations: 100
+        evaluation_interval: 5
+        learning_rate: 1.0e-05
+        schedule: fixed
+        entropy_coef: 0.0
+        update_observation_normalization: true
+    plateau:
+      metric_name: hover_envelope_utilization_mean
+      direction: minimize
+      minimum_delta: 0.003
+      patience_evaluations: 10
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
     policy_name: press-approach

@@ -76,7 +76,7 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   forward-pad contact and pusher/button displacement, advances the production
   N-step latch, verifies exactly one lamp transition, and retreats within the
   stability envelope for the complete deployment hold. Its time budget combines
-  the selected curriculum stage's interaction duration with that configured
+  the shared `rl.episode_length_s` duration with that configured
   hold; a test-local no-dones environment keeps these physical measurements
   independent of Stage 1's contact-failure termination. The gate
   selects the production press experiment config so its scripted post-contact

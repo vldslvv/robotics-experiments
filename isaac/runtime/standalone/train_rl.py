@@ -1,4 +1,4 @@
-"""Run a deterministic multi-attempt policy-training campaign.
+"""Run independent policy-training stages or an ordered experiment pipeline.
 
 Each attempt owns a fresh Isaac process, environment, runner, and optimizer.
 Validation ranks exact exported actors on one fixed workload. Later phases
@@ -83,7 +83,8 @@ _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 26
+_REPORT_SCHEMA_VERSION = 27
+_INITIAL_LEARNER_ENV = "RL_INITIAL_LEARNER"
 
 
 class _TrackioWriter:
@@ -183,18 +184,6 @@ def _validate_policy_name(policy_name: str) -> str:
     return policy_name
 
 
-def _campaign_phases(*, config: ExperimentConfig) -> tuple[RlTrainingPhaseConfig, ...]:
-    if config.rl.training.task_id == "Isaac-Switch-Press-Direct-v1":
-        return tuple(config.rl.press.selected_stage().phases)
-    return tuple(config.rl.training.phases)
-
-
-def _campaign_plateau(*, config: ExperimentConfig) -> RlPlateauCriteriaConfig:
-    if config.rl.training.task_id == "Isaac-Switch-Press-Direct-v1":
-        return config.rl.press.selected_stage().plateau
-    return config.rl.training.plateau
-
-
 def _config_values(value: Any, /) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return {field.name: _config_values(getattr(value, field.name)) for field in fields(value)}
@@ -291,7 +280,7 @@ def _artifact_metadata(
         policy_rate_hz=config.rl.policy_rate_hz,
         policy_interface=str(env_cfg.policy_interface),
         curriculum_stage=(
-            config.rl.press.selected_stage().name
+            config.rl.press.task
             if str(env_cfg.policy_interface) == rl.PolicyInterface.PRESS.value
             else None
         ),
@@ -371,58 +360,129 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _previous_stage_checkpoint(
+@dataclass(frozen=True)
+class _LearnerCheckpoint:
+    checkpoint: str
+    artifact_dir: str
+    report_path: str
+    run_id: str
+    checkpoint_digest: str
+    policy_digest: str
+    metadata_digest: str
+    report_digest: str
+
+
+@dataclass(frozen=True)
+class _StageResult:
+    selected_checkpoint: _LearnerCheckpoint | None
+    accepted: bool
+    report_path: Path
+
+
+def _pin_learner(*, report_path: Path) -> _LearnerCheckpoint:
+    report_path = report_path.resolve(strict=True)
+    report = json.loads(report_path.read_text())
+    run_dir = report_path.parent
+    if report["artifact_run_id"] != run_dir.name:
+        raise ValueError("initial learner report does not identify its canonical producer run")
+    checkpoint = (run_dir / report["selected_checkpoint"]).resolve(strict=True)
+    artifact_dir = (run_dir / report["selected_policy"]).resolve(strict=True).parent
+    if not checkpoint.is_relative_to(run_dir) or not artifact_dir.is_relative_to(run_dir):
+        raise ValueError("selected learner escapes its producer run")
+    checkpoint_digest = _file_sha256(checkpoint)
+    if report.get("selected_checkpoint_digest", checkpoint_digest) != checkpoint_digest:
+        raise ValueError("selected checkpoint digest does not match its report")
+    policy_digest = _file_sha256(artifact_dir / POLICY_FILENAME)
+    if policy_digest != report["selected_policy_digest"]:
+        raise ValueError("selected actor digest does not match its report")
+    return _LearnerCheckpoint(
+        checkpoint=str(checkpoint),
+        artifact_dir=str(artifact_dir),
+        report_path=str(report_path),
+        run_id=report["artifact_run_id"],
+        checkpoint_digest=checkpoint_digest,
+        policy_digest=policy_digest,
+        metadata_digest=_file_sha256(artifact_dir / METADATA_FILENAME),
+        report_digest=_file_sha256(report_path),
+    )
+
+
+def _validate_learner(
     *,
+    learner: _LearnerCheckpoint,
     config: ExperimentConfig,
-    repo_root: Path,
-    contract: rl.PolicyContract,
-    controller_digest: str,
-    flight_parameters_digest: str,
-) -> tuple[Path, dict[str, Any]] | None:
-    stages = tuple(config.rl.press.curriculum.stages)
-    active_index = next(
-        index
-        for index, stage in enumerate(stages)
-        if stage.name == config.rl.press.curriculum.active_stage
-    )
-    if active_index == 0:
-        return None
-
-    previous = stages[active_index - 1]
-    run_dir = (repo_root / ".build" / "training" / f"press-{previous.name}" / "best").resolve(
-        strict=True
-    )
-    metadata = rl.validate_policy_artifact(artifact_dir=run_dir)
+    inputs: rl.PolicyInputs,
+) -> None:
+    """Check complete learner identity and compatibility, regardless of qualification."""
+    artifact_dir = Path(learner.artifact_dir)
+    for path, digest in (
+        (Path(learner.checkpoint), learner.checkpoint_digest),
+        (artifact_dir / POLICY_FILENAME, learner.policy_digest),
+        (artifact_dir / METADATA_FILENAME, learner.metadata_digest),
+        (Path(learner.report_path), learner.report_digest),
+    ):
+        if _file_sha256(path) != digest:
+            raise ValueError(f"pinned learner input changed: {path}")
+    metadata = rl.validate_policy_artifact(artifact_dir=artifact_dir)
+    contract = press_policy_contract(config=config, controller=inputs.controller)
     if replace(metadata.contract, curriculum_stage=contract.curriculum_stage) != contract:
-        raise ValueError("previous press stage has an incompatible policy contract")
-    if metadata.contract.curriculum_stage != previous.name:
-        raise ValueError("previous press stage artifact does not match curriculum order")
-    if metadata.controller_digest != controller_digest:
-        raise ValueError("previous press stage uses a different controller artifact")
-    if metadata.flight_parameters_digest != flight_parameters_digest:
-        raise ValueError("previous press stage uses a different flight parameters")
+        raise ValueError("initial learner has an incompatible policy contract")
+    if (
+        metadata.controller_digest != inputs.controller_digest
+        or metadata.flight_parameters_digest != inputs.flight_parameters_digest
+    ):
+        raise ValueError("initial learner uses different pinned controller or flight evidence")
+    # Architecture comes from the pinned producer report, independent of pipeline labels.
+    source_policy = json.loads(Path(learner.report_path).read_text())["provenance"][
+        "resolved_config"
+    ]["rl"]["press"]["policy"]
+    target_policy = _config_values(config.rl.press.policy)
+    for key in ("activation", "normalize_observations", "critic"):
+        if source_policy[key] != target_policy[key]:
+            raise ValueError(f"initial learner has incompatible policy {key}")
+    if source_policy["actor"]["hidden_dims"] != target_policy["actor"]["hidden_dims"]:
+        raise ValueError("initial learner has incompatible actor dimensions")
+    payload = torch.load(learner.checkpoint, map_location="cpu", weights_only=True)
+    if not {"model_state_dict", "optimizer_state_dict", "iter"} <= payload.keys():
+        raise ValueError("initial learner is not a complete training checkpoint")
+    state = payload["model_state_dict"]
+    actor_state = {
+        (
+            "0." + key.removeprefix("actor_obs_normalizer.")
+            if key.startswith("actor_obs_normalizer.")
+            else "1." + key.removeprefix("actor.")
+        ): value
+        for key, value in state.items()
+        if key.startswith(("actor_obs_normalizer.", "actor."))
+    }
+    exported = torch.jit.load(str(artifact_dir / POLICY_FILENAME), map_location="cpu").state_dict()
+    if actor_state.keys() != exported.keys() or any(
+        not torch.equal(actor_state[key], exported[key]) for key in exported
+    ):
+        raise ValueError("initial learner checkpoint does not match its selected actor")
 
-    report = json.loads((run_dir / _REPORT_FILENAME).read_text(encoding="utf-8"))
-    acceptance = report.get("acceptance")
+
+def _require_accepted_initial_learner(*, learner: _LearnerCheckpoint) -> None:
+    report = json.loads(Path(learner.report_path).read_text())
     if (
         report.get("status") != "accepted"
-        or not isinstance(acceptance, dict)
-        or not acceptance.get("passed")
+        or (report.get("acceptance") or {}).get("passed") is not True
+        or (report.get("test_evaluation") or {}).get("policy_digest") != learner.policy_digest
+        or _pin_learner(report_path=Path(learner.report_path)) != learner
     ):
-        raise ValueError("previous press stage has no accepted campaign")
-    selected_checkpoint = report.get("selected_checkpoint")
-    if not isinstance(selected_checkpoint, str):
-        raise ValueError("previous press stage report has no selected checkpoint")
-    checkpoint = (run_dir / selected_checkpoint).resolve(strict=True)
-    if not checkpoint.is_relative_to(run_dir):
-        raise ValueError("previous press stage checkpoint escapes its campaign")
-    return checkpoint, {
-        "method": "previous-accepted-stage",
-        "stage": previous.name,
-        "run_id": run_dir.name,
-        "checkpoint_sha256": _file_sha256(checkpoint),
-        "policy_digest": metadata.values["selected_policy_digest"],
-    }
+        raise ValueError("pipeline initial learner must match an accepted tested result")
+
+
+def _stage_result(*, run_dir: Path) -> _StageResult:
+    report_path = run_dir / _REPORT_FILENAME
+    report = json.loads(report_path.read_text())
+    return _StageResult(
+        selected_checkpoint=(
+            _pin_learner(report_path=report_path) if report["selected_checkpoint"] else None
+        ),
+        accepted=report["status"] == "accepted",
+        report_path=report_path,
+    )
 
 
 def _procedural_smoke_phases(
@@ -531,9 +591,7 @@ def _evaluation_worker_main(
                         policy=policy,
                         seeds=seeds,
                         episodes_per_seed=evaluation_config.episodes_per_seed,
-                        hold_steps=round(
-                            config.rl.press.selected_stage().hold_s * config.rl.policy_rate_hz
-                        ),
+                        hold_steps=round(config.rl.press.goal.stable_steps),
                         flight_parameters=candidate_metadata.flight_parameters,
                         report=_report,
                         trace_worst_episode=False,
@@ -818,7 +876,7 @@ def _training_report(
     telemetry_probe: dict[str, float] | None = None,
     hover_reset_distribution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    criteria = _campaign_plateau(config=config)
+    criteria = config.rl.training.plateau
     reset_distribution = hover_reset_distribution
     if reset_distribution is None and attempts:
         reset_distribution = attempts[0].get("hover_reset_distribution")
@@ -874,6 +932,10 @@ def _training_report(
         "selected_checkpoint": (
             str(selected.checkpoint_path.relative_to(run_dir)) if selected is not None else None
         ),
+        "selected_checkpoint_digest": (
+            _file_sha256(selected.checkpoint_path) if selected is not None else None
+        ),
+        "accepted": status == "accepted",
         "selected_policy": (
             str(selected_policy_path.relative_to(run_dir))
             if selected_policy_path is not None
@@ -958,7 +1020,7 @@ def _publish_selected(
     comparison_fingerprint: str,
     config: ExperimentConfig,
 ) -> bool:
-    criteria = _campaign_plateau(config=config)
+    criteria = config.rl.training.plateau
     if not acceptance.passed:
         raise ValueError("a failed test evaluation cannot be published")
     if selected.policy_digest != test_evaluation.policy_digest:
@@ -1221,30 +1283,35 @@ def _train_and_validate_attempt(
     if not args.attempt_worker or len(attempt_seeds) != 1:
         raise ValueError("a training worker must own exactly one isolated attempt")
     training_config = config.rl.training
-    plateau_criteria = _campaign_plateau(config=config)
+    plateau_criteria = config.rl.training.plateau
     controller_artifact = inputs.controller
     controller_digest = inputs.controller_digest
     flight_parameters = inputs.flight_parameters
     flight_parameters_digest = inputs.flight_parameters_digest
     phases = (
-        _procedural_smoke_phases(phases=_campaign_phases(config=config))
+        _procedural_smoke_phases(phases=tuple(config.rl.training.phases))
         if args.procedural_smoke
-        else _campaign_phases(config=config)
+        else tuple(config.rl.training.phases)
     )
     total_maximum = sum(phase.max_iterations for phase in phases)
+    encoded_learner = os.environ.get(_INITIAL_LEARNER_ENV)
+    initial_learner = _LearnerCheckpoint(**json.loads(encoded_learner)) if encoded_learner else None
+    if initial_learner is not None:
+        _validate_learner(learner=initial_learner, config=config, inputs=inputs)
     provenance = _experiment_provenance(
         config=config,
         config_path=config_path,
         inputs=inputs,
         procedural_smoke=args.procedural_smoke,
     )
+    provenance["initial_learner"] = asdict(initial_learner) if initial_learner is not None else None
     if not run_dir.is_dir():
         raise ValueError(f"campaign run directory does not exist: {run_dir}")
     _report(
         f"training {training_config.task_id} for at most {len(attempt_seeds)} attempts "
         f"and {total_maximum} updates per attempt "
         f"(policy={training_config.policy_name}, seeds={attempt_seeds}, device={device}, "
-        f"start=scratch-neutral-output) -> {run_dir}"
+        f"start={'checkpoint' if os.environ.get(_INITIAL_LEARNER_ENV) else 'scratch'}) -> {run_dir}"
     )
     writer = None
     validation_worker: _EvaluationWorker | None = None
@@ -1333,17 +1400,10 @@ def _train_and_validate_attempt(
                 metadata["comparison_fingerprint"] = comparison_fingerprint
                 _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
                 attempt_metadata = metadata
-                previous_stage = _previous_stage_checkpoint(
-                    config=config,
-                    repo_root=repo_root,
-                    contract=contract,
-                    controller_digest=controller_digest,
-                    flight_parameters_digest=flight_parameters_digest,
-                )
                 metadata["initialization"] = (
                     {"method": env_cfg.policy_config.actor.output_initialization}
-                    if previous_stage is None
-                    else previous_stage[1]
+                    if initial_learner is None
+                    else {"method": "checkpoint", **asdict(initial_learner)}
                 )
                 _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
                 runner = training.build_runner(
@@ -1360,7 +1420,7 @@ def _train_and_validate_attempt(
                     phase=phases[0],
                     phase_number=1,
                 )
-                if previous_stage is None:
+                if initial_learner is None:
                     training.initialize_actor_output(
                         runner=runner,
                         method=env_cfg.policy_config.actor.output_initialization,
@@ -1368,7 +1428,7 @@ def _train_and_validate_attempt(
                 else:
                     training.restore_checkpoint(
                         runner=runner,
-                        checkpoint_path=previous_stage[0],
+                        checkpoint_path=Path(initial_learner.checkpoint),
                         device=device,
                     )
                 checkpoints_dir = attempt_dir / "checkpoints"
@@ -1591,7 +1651,7 @@ def _train_and_validate_attempt(
                 )
                 write_training_progress()
                 branch_iteration = 0
-                randomize_episode_lengths = config.rl.press.selected_stage().name != "hover"
+                randomize_episode_lengths = config.rl.press.task != "hover"
                 for phase_index, phase in enumerate(phases):
                     parent = _select_attempt_candidate(
                         criteria=plateau_criteria,
@@ -1888,14 +1948,16 @@ def _run_policy_workflow(
     attempt_seeds: tuple[int, ...],
     policy_root: Path,
     repo_root: Path,
-) -> None:
+    initial_learner: _LearnerCheckpoint | None = None,
+    run_id: str | None = None,
+) -> _StageResult:
     """Train and validate attempts, select one actor, test it, then publish it."""
 
-    plateau_criteria = _campaign_plateau(config=config)
+    plateau_criteria = config.rl.training.plateau
     phases = (
-        _procedural_smoke_phases(phases=_campaign_phases(config=config))
+        _procedural_smoke_phases(phases=tuple(config.rl.training.phases))
         if args.procedural_smoke
-        else _campaign_phases(config=config)
+        else tuple(config.rl.training.phases)
     )
     telemetry_probe = probe_telemetry()
     provenance = _experiment_provenance(
@@ -1904,7 +1966,8 @@ def _run_policy_workflow(
         inputs=inputs,
         procedural_smoke=args.procedural_smoke,
     )
-    run_dir = _make_run_dir(out_root=policy_root, run_id=os.environ.get(_RUN_ID_ENV))
+    provenance["initial_learner"] = asdict(initial_learner) if initial_learner is not None else None
+    run_dir = _make_run_dir(out_root=policy_root, run_id=run_id or os.environ.get(_RUN_ID_ENV))
     hover_reset_distribution = {
         "source": "flight_parameters_policy_window",
         **inputs.hover_reset_samples.summary(flight_parameters=inputs.flight_parameters),
@@ -1941,6 +2004,10 @@ def _run_policy_workflow(
         worker_environment = os.environ.copy()
         worker_environment[_CAMPAIGN_RUN_DIR_ENV] = str(run_dir)
         worker_environment[_RUN_ID_ENV] = run_dir.name
+        worker_environment[_CONFIG_PATH_ENV] = str(config_path.resolve(strict=True))
+        worker_environment.pop(_INITIAL_LEARNER_ENV, None)
+        if initial_learner is not None:
+            worker_environment[_INITIAL_LEARNER_ENV] = json.dumps(asdict(initial_learner))
         started = time.monotonic()
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         attempt_report_path = attempt_dir / _ATTEMPT_REPORT_FILENAME
@@ -2006,14 +2073,44 @@ def _run_policy_workflow(
                 env=worker_environment,
                 check=True,
             )
-        except KeyboardInterrupt:
-            interrupted = json.loads((run_dir / _REPORT_FILENAME).read_text())
-            interrupted["status"] = "interrupted"
-            _write_json(path=run_dir / _REPORT_FILENAME, payload=interrupted)
-            raise
-        except subprocess.CalledProcessError:
+        except (Exception, KeyboardInterrupt) as exc:
             failed = json.loads((run_dir / _REPORT_FILENAME).read_text())
-            failed["status"] = "attempt_failed"
+            if attempt_report_path.is_file():
+                partial = json.loads(attempt_report_path.read_text())
+                if partial.get("selected_checkpoint") is not None:
+                    partial_index, partial_selection = _selection_from_report(
+                        run_dir=run_dir, report=partial
+                    )
+                    attempts.extend(partial["attempts"])
+                    selections.append((partial_index, partial_selection))
+                    failed_selection = _select_attempt_candidate(
+                        criteria=plateau_criteria,
+                        candidates=tuple(candidate for _, candidate in selections),
+                    )
+                    selected_index = next(
+                        index for index, candidate in selections if candidate is failed_selection
+                    )
+                    failed = _training_report(
+                        run_dir=run_dir,
+                        config=config,
+                        provenance=provenance,
+                        phases=phases,
+                        comparison_fingerprint=comparison_fingerprint,
+                        attempts=attempts,
+                        selected=failed_selection.evaluation,
+                        selected_attempt_index=selected_index,
+                        selected_policy_path=failed_selection.artifact_dir / POLICY_FILENAME,
+                        test_evaluation=None,
+                        acceptance=None,
+                        status="attempt_failed",
+                        acceptance_criteria=acceptance_criteria,
+                        active_attempt=active_attempt,
+                        telemetry_probe=telemetry_probe,
+                    )
+            failed["status"] = (
+                "interrupted" if isinstance(exc, KeyboardInterrupt) else "attempt_failed"
+            )
+            failed["error"] = str(exc)
             _write_json(path=run_dir / _REPORT_FILENAME, payload=failed)
             raise
         if not attempt_report_path.is_file():
@@ -2157,9 +2254,13 @@ def _run_policy_workflow(
             "procedural smoke COMPLETE: every configured attempt ran in a distinct "
             "process; final test was not run"
         )
-        return
+        return _stage_result(run_dir=run_dir)
 
     if campaign_selection is None or selected_attempt_index is None:
+        diagnostic = _select_attempt_candidate(
+            criteria=plateau_criteria, candidates=tuple(candidate for _, candidate in selections)
+        )
+        diagnostic_index = next(index for index, candidate in selections if candidate is diagnostic)
         failed_report = _training_report(
             run_dir=run_dir,
             config=config,
@@ -2167,9 +2268,9 @@ def _run_policy_workflow(
             phases=phases,
             comparison_fingerprint=comparison_fingerprint,
             attempts=attempts,
-            selected=None,
-            selected_attempt_index=None,
-            selected_policy_path=None,
+            selected=diagnostic.evaluation,
+            selected_attempt_index=diagnostic_index,
+            selected_policy_path=diagnostic.artifact_dir / POLICY_FILENAME,
             test_evaluation=None,
             acceptance=None,
             status="validation_failed",
@@ -2177,7 +2278,7 @@ def _run_policy_workflow(
             telemetry_probe=telemetry_probe,
         )
         _write_json(path=run_dir / _REPORT_FILENAME, payload=failed_report)
-        raise RuntimeError("all training attempts failed validation")
+        return _stage_result(run_dir=run_dir)
 
     metadata_payload = json.loads((campaign_selection.artifact_dir / METADATA_FILENAME).read_text())
     if not isinstance(metadata_payload, dict):
@@ -2219,7 +2320,7 @@ def _run_policy_workflow(
             acceptance=acceptance,
         )
         if not acceptance.passed:
-            raise RuntimeError("final policy test failed: " + ", ".join(acceptance.reasons))
+            return _stage_result(run_dir=run_dir)
         selected = campaign_selection.evaluation
         selected_policy = campaign_selection.artifact_dir / POLICY_FILENAME
         best_updated = _publish_selected(
@@ -2241,11 +2342,27 @@ def _run_policy_workflow(
             f"acceptance=true latest={policy_root / 'latest'} "
             f"best_updated={str(best_updated).lower()}"
         )
+    except (Exception, KeyboardInterrupt) as exc:
+        report = json.loads((run_dir / _REPORT_FILENAME).read_text())
+        report["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
+        report["accepted"] = False
+        report["error"] = str(exc)
+        _write_json(path=run_dir / _REPORT_FILENAME, payload=report)
+        raise
     finally:
         writer.close()
+    return _stage_result(run_dir=run_dir)
 
 
-def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Path) -> None:
+def _run(
+    *,
+    args: argparse.Namespace,
+    config: ExperimentConfig,
+    config_path: Path,
+    initial_learner: _LearnerCheckpoint | None = None,
+    prepared_inputs: rl.PolicyInputs | None = None,
+    run_id: str | None = None,
+) -> _StageResult | None:
     training_config = config.rl.training
     attempt_seeds: tuple[int, ...]
     repo_root = _repo_root()
@@ -2262,7 +2379,13 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             )
             attempt_seeds = (int(args.attempt_seed),)
         else:
-            inputs = rl.prepare_policy_inputs(config=config, repo_root=repo_root)
+            inputs = prepared_inputs or rl.prepare_policy_inputs(config=config, repo_root=repo_root)
+            if initial_learner is None and config.rl.inputs.initial_checkpoint is not None:
+                initial_learner = _pin_learner(
+                    report_path=repo_root / config.rl.inputs.initial_checkpoint
+                )
+            if initial_learner is not None:
+                _validate_learner(learner=initial_learner, config=config, inputs=inputs)
             attempt_seeds = tuple(int(seed) for seed in training_config.attempt_seeds)
         acceptance_criteria = create_press_acceptance_criteria(
             config=config.rl.press.acceptance,
@@ -2300,23 +2423,114 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
             run_dir=run_dir,
             attempt_index_offset=args.attempt_index,
         )
-        return
+        return None
     _report(
         "input artifact validation PASSED: "
         f"controller={inputs.controller_path} "
         f"flight_parameters={inputs.flight_parameters_path}"
     )
-    _run_policy_workflow(
-        args=args,
-        config=config,
-        config_path=config_path,
-        inputs=inputs,
-        acceptance_criteria=acceptance_criteria,
-        comparison_fingerprint=comparison_fingerprint,
-        attempt_seeds=attempt_seeds,
-        policy_root=policy_root,
-        repo_root=repo_root,
+    stage_run_id = (
+        run_id
+        or os.environ.get(_RUN_ID_ENV)
+        or (f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.{os.getpid()}")
     )
+    try:
+        return _run_policy_workflow(
+            args=args,
+            config=config,
+            config_path=config_path,
+            inputs=inputs,
+            acceptance_criteria=acceptance_criteria,
+            comparison_fingerprint=comparison_fingerprint,
+            attempt_seeds=attempt_seeds,
+            policy_root=policy_root,
+            repo_root=repo_root,
+            initial_learner=initial_learner,
+            run_id=stage_run_id,
+        )
+    except (Exception, KeyboardInterrupt) as exc:
+        report_path = policy_root / stage_run_id / _REPORT_FILENAME
+        if report_path.is_file():
+            report = json.loads(report_path.read_text())
+            report["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
+            report["accepted"] = False
+            report["error"] = str(exc)
+            _write_json(path=report_path, payload=report)
+        raise
+
+
+def _run_pipeline(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+    repo_root = _repo_root()
+    stages = []
+    for stage in config.rl.training.pipeline:
+        path = (repo_root / stage.config_path).resolve(strict=True)
+        experiment = load_config(path)
+        if experiment.rl.training.pipeline or experiment.rl.inputs.initial_checkpoint is not None:
+            raise ValueError("pipeline stage configs must have no pipeline or initial checkpoint")
+        inputs = rl.prepare_policy_inputs(config=experiment, repo_root=repo_root)
+        stages.append((stage.name, path, experiment, inputs))
+    initial = config.rl.inputs.initial_checkpoint
+    learner = _pin_learner(report_path=repo_root / initial) if initial is not None else None
+    if learner is not None:
+        _require_accepted_initial_learner(learner=learner)
+        _validate_learner(learner=learner, config=stages[0][2], inputs=stages[0][3])
+    pipeline_dir = _make_run_dir(
+        out_root=repo_root
+        / ".build"
+        / "training"
+        / _validate_policy_name(config.rl.training.policy_name),
+        run_id=os.environ.get(_RUN_ID_ENV),
+    )
+    summary: dict[str, Any] = {"status": "running", "stages": []}
+    summary_path = pipeline_dir / "pipeline_report.json"
+    _write_json(path=summary_path, payload=summary)
+    try:
+        for index, (name, path, experiment, inputs) in enumerate(stages):
+            run_id = f"{pipeline_dir.name}.stage_{index + 1:02d}"
+            report_path = (
+                repo_root
+                / ".build"
+                / "training"
+                / _validate_policy_name(experiment.rl.training.policy_name)
+                / run_id
+                / _REPORT_FILENAME
+            )
+            entry = {
+                "name": name,
+                "run_id": run_id,
+                "report_path": str(report_path),
+                "accepted": False,
+            }
+            summary["stages"].append(entry)
+            _write_json(path=summary_path, payload=summary)
+            result = _run(
+                args=args,
+                config=experiment,
+                config_path=path,
+                initial_learner=learner,
+                prepared_inputs=inputs,
+                run_id=run_id,
+            )
+            if result is None:
+                raise RuntimeError("pipeline stage returned no result")
+            entry["report_path"] = str(result.report_path)
+            entry["accepted"] = result.accepted
+            if not result.accepted:
+                summary["status"] = "stopped"
+                break
+            if result.selected_checkpoint is None:
+                raise RuntimeError("accepted stage returned no selected learner")
+            learner = result.selected_checkpoint
+        else:
+            summary["status"] = "complete"
+    except (Exception, KeyboardInterrupt, SystemExit) as exc:
+        summary["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
+        summary["error"] = str(exc)
+        raise
+    finally:
+        _write_json(path=summary_path, payload=summary)
+    if summary["status"] != "complete" and not args.procedural_smoke:
+        raise RuntimeError(f"pipeline stopped; see {summary_path}")
 
 
 def main() -> None:
@@ -2361,7 +2575,12 @@ def main() -> None:
             app_launcher = AppLauncher(headless=True)
             simulation_app = app_launcher.app
         _install_interrupt_handlers()
-        _run(args=args, config=config, config_path=config_path)
+        if config.rl.training.pipeline and not args.attempt_worker:
+            _run_pipeline(args=args, config=config)
+        else:
+            result = _run(args=args, config=config, config_path=config_path)
+            if result is not None and not result.accepted and not args.procedural_smoke:
+                raise RuntimeError(f"stage failed acceptance; see {result.report_path}")
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
         raise

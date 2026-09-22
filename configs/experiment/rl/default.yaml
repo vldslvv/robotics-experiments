@@ -7,7 +7,7 @@ defaults:
 # steps), so the physics cadence stays single-sourced on sim.physics_hz.
 num_envs: 16
 env_spacing: 4.0
-# Standalone drone-hover timeout; press stages own their episode durations.
+# Episode timeout for the selected task.
 episode_length_s: 5.0
 policy_rate_hz: 20.0
 
@@ -26,14 +26,16 @@ lab_vehicle:
 # PPO training (make train-rl, rl.training adapter). task_id selects the
 # Gymnasium task the entrypoint trains.
 inputs:
+  initial_checkpoint: null
   controller_artifact: .build/alignment/x500-px4-v1/best
   flight_parameters_artifact: .build/flight-parameters/holybro-x500-v2-hover-v1/latest
 
 training:
+  pipeline: []
   task_id: Isaac-Drone-Hover-Direct-v1
   vehicle_id: 0
   policy_name: hover
-  # Standalone drone-hover schedule; press uses the selected curriculum stage.
+  # Complete experiments override the training schedule for their task.
   phases:
     - max_iterations: 1500
       evaluation_interval: 200

@@ -3,7 +3,7 @@ defaults:
 
 takeoff_timeout_s: 30.0
 
-# Exercise the active press curriculum stage from three distinct policy-entry
+# Exercise the configured press task from three distinct policy-entry
 # ranges. The 45 second budget includes handoff, settling, and any restarted
 # 30 second continuous hold; completion is not guaranteed by the timeout.
 steps:
@@ -31,7 +31,7 @@ steps:
     hold_s: 1.0
   - kind: policy
     label: policy-transfer-0.460
-    artifact: .build/training/press-${rl.press.curriculum.active_stage}/latest
+    artifact: .build/training/${rl.training.policy_name}/latest
     switch_index: 0
     timeout_s: 45.0
   - kind: goto
@@ -52,7 +52,7 @@ steps:
     hold_s: 1.0
   - kind: policy
     label: policy-transfer-0.475
-    artifact: .build/training/press-${rl.press.curriculum.active_stage}/latest
+    artifact: .build/training/${rl.training.policy_name}/latest
     switch_index: 0
     timeout_s: 45.0
   - kind: goto
@@ -73,6 +73,6 @@ steps:
     hold_s: 1.0
   - kind: policy
     label: policy-transfer-0.490
-    artifact: .build/training/press-${rl.press.curriculum.active_stage}/latest
+    artifact: .build/training/${rl.training.policy_name}/latest
     switch_index: 0
     timeout_s: 45.0

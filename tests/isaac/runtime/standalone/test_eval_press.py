@@ -228,7 +228,7 @@ def _config():
             training=SimpleNamespace(task_id="press-task"),
             policy_rate_hz=20.0,
             press=SimpleNamespace(
-                selected_stage=lambda: SimpleNamespace(name="approach", hold_s=5.0),
+                task="approach",
                 goal=_goal(),
                 acceptance=SimpleNamespace(
                     success_rate_min=0.95,

@@ -458,9 +458,8 @@ def _run_contact_chain(
     if args.num_envs not in (None, 1):
         raise AssertionError("--contact-chain requires exactly one environment")
     _seed_everything(args.seed)
-    stage_config = config.rl.press.selected_stage()
     contact_chain_duration_s = (
-        stage_config.episode_length_s + config.rl.press.goal.stable_steps / config.rl.policy_rate_hz
+        config.rl.episode_length_s + config.rl.press.goal.stable_steps / config.rl.policy_rate_hz
     )
     cfg = make_switch_press_env_cfg(experiment_config=config)
     cfg.scene.num_envs = 1

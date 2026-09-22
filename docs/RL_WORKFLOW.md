@@ -1,6 +1,6 @@
 # Reinforcement-learning workflow
 
-This document defines the Isaac Lab tasks, scratch PPO workflow, policy
+This document defines the Isaac Lab tasks, PPO stage and pipeline workflow, policy
 artifacts, in-loop checkpoint evaluation/selection, and deployment contract. Routine execution is
 defined in `docs/COMMAND_ROUTINE_CONTRACT.md`; controller fitting is defined in
 `docs/SIM_TO_SIM_ALIGNMENT.md`. Chronological press-policy training decisions
@@ -95,7 +95,7 @@ independent 50 Hz OFFBOARD stream, using the attitude at each transmission. The
 world command is held across the faster controller and physics substeps,
 matching deployment through PX4's body-NED MAVLink receiver.
 
-## Press policy curriculum
+## Press tasks
 
 Both policy interfaces use shared NumPy/Torch body-relative calculations.
 Hover observation schema 2 has 12 values: desired-minus-actual position in body
@@ -131,19 +131,15 @@ The press policy emits four normalized velocity actions. Its scratch experiment
 maps a unit translation action to 0.5 m/s. Normalized scratch exploration starts
 at 0.10 standard deviation, or 0.05 m/s for a translation component.
 
-`rl.press.curriculum.stages` is an ordered list. A training config selects one
-entry by name; there are no parent or child links. The first entry starts from
-scratch. A later entry restores the complete accepted checkpoint published as
-`best` by the entry immediately before it. Each entry owns its reset
-mixture, hold duration, episode duration, PPO phases, and plateau rule. The
-current order is `hover`, then `approach`.
-
-Author press episode duration only in the selected
-`rl.press.curriculum.stages[].episode_length_s` entry. Both the environment and
-comparison record read that value. `rl.episode_length_s`, `rl.training.phases`,
-and `rl.training.plateau` belong to the separate standalone drone-hover task;
-press experiments use their stage's duration, phases, and plateau rule.
-Shared PPO parameters, rollout length, and attempt seeds remain in `rl.training`.
+`rl.press.task` explicitly selects `hover` or `approach`. Task code owns rewards
+and resets; task identity never comes from a pipeline label or position.
+`rl.press.reset.mix` owns the measured reset mixture. `rl.episode_length_s`
+owns episode duration, and `rl.press.goal.stable_steps` is the common training,
+evaluation, and deployment hold requirement. `rl.training.phases` and
+`rl.training.plateau` own every experiment's training schedule and stopping rule.
+The shipped numerical settings and reward formulas are unchanged.
+The schema-1 policy metadata field `curriculum_stage` continues to record this
+task identity; it never stores pipeline labels. Existing artifacts are immutable.
 
 The hover stage starts around the common 0.48 m press target using paired poses
 drawn directly from every final policy window in the pinned flight-parameter
@@ -224,39 +220,83 @@ not end collection.
 
 ## Training campaign
 
-Every `make train-rl` invocation owns one campaign ID and tries the configured
-`rl.training.attempt_seeds` in order. Each attempt constructs a fresh training
-Isaac process, environment, actor, critic, runner, and optimizer. The campaign
-coordinator never owns a training environment: a completed worker exits before
-the next seed starts, making simulator and GPU cleanup an operating-system
-process boundary. Shipped training configs use one attempt seed, `[42]`, authored
-in Hydra. Checkpoints are selected on the fixed validation workload with seeds
-101, 202, and 303. The selected actor is frozen and tested once on separate
-acceptance seeds 404, 505, and 606, with 100 episodes per seed. Qualification
-applies to that actor, not to training repeatability across initializations.
-Failure requires diagnosis before another campaign; final-test results never
-select a replacement checkpoint. A campaign stops after the first completed
-attempt with a validation-passing checkpoint. Apart from
-the preceding ordered press stage, external checkpoint initialization, process
-resume, actor-only copy, and post-run fine-tuning remain unsupported.
+`make train-rl` and `isaac/runtime/standalone/train_rl.py` run an independent
+stage when `rl.training.pipeline` is empty. A stage owns one campaign ID and
+tries `rl.training.attempt_seeds` in order. Each attempt constructs a new Isaac
+process, environment, actor, critic, runner, optimizer, and rollout storage.
+The coordinator never owns an environment. Shipped training configs retain
+one attempt seed, `[42]`. Validation uses seeds 101/202/303; one fresh final test
+uses 404/505/606, with 100 episodes per seed. Test failure does not select another
+candidate. Passing-first selection and earlier-candidate exact ties are unchanged.
 
-The selected `rl.press.curriculum.stages[].phases` entry defines the ordered
-schedule within each press attempt; task-neutral training continues to use
-`rl.training.phases`. Each
-phase declares maximum iterations, validation cadence, learning rate, schedule,
-and entropy coefficient. The first phase
-starts from the stage-initial learner. Before every later phase, the campaign
-restores the attempt-wide best checkpoint's actor, critic, optimizer, and
-learner iteration, then applies the new phase settings and resets every training
-environment. This is a validation-selected fine-tuning branch with reset
-environment state, not an exact process resume. An earlier checkpoint remains
-selectable if refinement regresses.
+`rl.inputs.initial_checkpoint` is null for fresh initialization or a repository-
+relative path to a producer's `training_report.json`. Its selected learner and
+associated candidate artifact are resolved to canonical paths and pinned by
+content digest before any attempt starts. Controller, flight evidence, actor
+contract, network dimensions, activation, and normalization must be compatible.
+The checkpoint's actor and normalization tensors must exactly match its exported
+actor. The full learner restores actor, critic, optimizer moments, observation
+statistics, and learned exploration parameters. Environments, rollout buffers,
+and episode rewards start fresh. Stage-local iteration numbering starts at zero;
+producer iteration and checkpoint identity remain in the pinned report.
+An independent stage does not inspect the input's acceptance status: a compatible
+selected candidate from a failed or interrupted campaign is a valid input.
+Producer bytes are never copied into the new run as input artifacts or modified.
+
+The immutable stage result contains `selected_checkpoint`, `accepted`, and
+`report_path`. The checkpoint reference includes its policy artifact, canonical
+producer run ID, report, and digests. A failed qualification preserves the
+validation-selected diagnostic candidate with `accepted: false`; absence means
+no candidate was evaluated. Runtime errors and interruptions retain completed
+and partial reports and prevent subsequent stages. The CLI exits nonzero on
+failed qualification, except for the deliberate procedural smoke.
+
+A pipeline configuration supplies an ordered `rl.training.pipeline` list:
+
+```yaml
+rl:
+  inputs:
+    initial_checkpoint: null
+  training:
+    policy_name: my-pipeline
+    pipeline:
+      - name: initial-practice
+        config_path: configs/train_press_hover_quad.yaml
+      - name: further-practice
+        config_path: configs/train_press_hover_outside_only_quad.yaml
+```
+
+Each entry has only a unique nonempty name and a complete experiment path,
+resolved relative to the repository. Referenced experiments must leave their own
+pipeline empty and initial checkpoint null. Names have no effect on task behavior,
+compatibility, rewards, resets, or artifact namespace. Every execution receives a
+distinct run ID under that experiment's `policy_name`.
+The coordinator prepares and pins each stage's evidence before execution.
+An optional pipeline starting learner must match its recorded accepted test
+result; stage compatibility checks still apply. The coordinator then runs stages
+sequentially, reads only `result.accepted` to advance, and forwards the exact
+selected checkpoint without resolving `latest` or `best`. It stops on rejection,
+runtime error, or interruption. There are no branches, automatic retries,
+checkpoint merges, or process resume. Each accepted stage retains its usual
+publication behavior. A compact `pipeline_report.json` in the pipeline namespace
+records ordered stage run/report references, acceptance booleans, and completion
+status. Detailed measurements remain in stage reports.
+
+The shipped hover and approach experiments retain their different observation-
+normalization settings. A pipeline must use experiments with compatible learner
+settings; it never silently converts normalization or changes PPO defaults.
+
+`rl.training.phases` defines the schedule within each attempt. Every phase declares
+maximum iterations, validation cadence, learning rate, schedule, entropy, and
+normalization updates. The first phase uses the supplied initial learner. Later
+phases restore the attempt-wide validation-selected complete checkpoint, apply
+their schedule, and reset the environments. Earlier checkpoints remain selectable
+when refinement regresses. Process resume and actor-only initialization are unsupported.
 
 The evaluator and phase driver have separate contracts. Validation receives an
 exact exported actor and returns raw named metrics.
 The plateau detector reads only the configured metric, direction, minimum delta,
-and patience. It never reads the PPO reward or any acceptance check. The active
-curriculum stage owns the rule. Hover minimizes `hover_envelope_utilization_mean`,
+and patience. It never reads the PPO reward or any acceptance check. The experiment owns the rule. Hover minimizes `hover_envelope_utilization_mean`,
 requires a `0.003` improvement, and declares a plateau after five stale
 evaluations. Approach uses the same metric, direction, and improvement with
 10 stale evaluations. Checkpoint selection prioritizes validation-passing actors,
@@ -368,6 +408,14 @@ make train-rl HYDRA_CONFIG=configs/train_press_hover_quad.yaml \
 The procedural smoke executes one update in every phase of every configured
 attempt, including full attempt teardown/recreation, and stops without using
 the reserved test seeds.
+
+To check restoration, reference that smoke run's `training_report.json` through
+`rl.inputs.initial_checkpoint` in an otherwise compatible complete experiment and
+run the same command with `--procedural-smoke`. The independent stage accepts
+this nonaccepted learner; using it as a pipeline starting learner fails. Each
+check retains a selected checkpoint, detailed report, and monitoring database;
+neither runs the final test nor updates deployment labels. With existing assets,
+`make -o generate-drone-usd train-rl ...` skips asset regeneration.
 
 Use the campaign-scoped Trackio database under
 `.build/training/press-hover/<run-id>/monitoring`. Each attempt is one Trackio
@@ -497,14 +545,18 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-`training_report.json` schema 26 records the prepared acceptance criteria, the
+`training_report.json` schema 27 records the prepared acceptance criteria, the
 exact reward configuration, resolved rollout settings and derived maximum
 simulated durations per phase, trace-backed reset distribution, and every attempt,
 phase parent, raw validation metrics, exact monitoring step, telemetry summaries,
 plateau state, phase termination, selection, final test, and individual
 acceptance. The metric registry and comparison fingerprint carry
-metric-registry revision 19 and comparison revision 36; older report shapes are
-unsupported.
+metric-registry revision 19 and comparison revision 38. Reports include an
+explicit `accepted` boolean and selected-checkpoint digest. Initial learner
+reports must retain complete provenance and matching actor evidence.
+Comparison revision 38 includes the task reset mixture; pipeline
+labels and ordering are excluded. Policy artifact schema 1 and accepted bytes
+remain unchanged.
 
 The report's `provenance` contains the complete resolved experiment config,
 config path, procedural-smoke flag, canonical controller and flight-parameter
@@ -512,8 +564,8 @@ paths, producer run IDs, digests and fingerprints. It also records Python,
 Torch, NumPy, RSL-RL and CUDA versions. The coordinator captures this before
 creating the campaign; each attempt captures its own provenance before
 environment construction and retains it in its report and campaign attempt record.
-Attempts also record their learner initialization, including the preceding
-stage's checkpoint lineage when applicable. Existing evaluation records retain
+Attempts also record their learner initialization, including the explicit
+initial learner lineage when applicable. Existing evaluation records retain
 checkpoint paths, iterations, actor digests, seeds and results.
 
 The experiment record supports comparing a small number of consecutive policy

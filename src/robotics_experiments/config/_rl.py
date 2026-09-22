@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from robotics_experiments.config._immutability import _FreezableConfig
 
@@ -16,9 +16,7 @@ __all__ = [
     "PressApproachVelocityReferenceConfig",
     "PressHandoffConfig",
     "PressNavigationNoiseConfig",
-    "PressCurriculumConfig",
-    "PressCurriculumResetSourceConfig",
-    "PressCurriculumStageConfig",
+    "PressResetSourceConfig",
     "PressResetConfig",
     "PressTaskConfig",
     "RlConfig",
@@ -28,6 +26,7 @@ __all__ = [
     "RlPlateauCriteriaConfig",
     "RlTrainingPhaseConfig",
     "RlTrainingConfig",
+    "RlPipelineStageConfig",
 ]
 
 
@@ -83,6 +82,7 @@ class RlActionConfig(_FreezableConfig):
 class RlInputsConfig(_FreezableConfig):
     """Producer artifacts selected for controller-backed policy training."""
 
+    initial_checkpoint: Optional[str]
     controller_artifact: str
     flight_parameters_artifact: str
 
@@ -257,9 +257,18 @@ class PressApproachGoalConfig(_FreezableConfig):
 
 
 @dataclass
+class PressResetSourceConfig(_FreezableConfig):
+    """One measured source in a task's reset mixture."""
+
+    source: str
+    weight: float
+
+
+@dataclass
 class PressResetConfig(_FreezableConfig):
     """Easy-task physical-scene parameters for switch pressing."""
 
+    mix: List[PressResetSourceConfig]
     physical_contact_enabled: bool
     button_geometry_scale: float
     button_stiffness_scale: float
@@ -326,31 +335,11 @@ class RlTrainingPhaseConfig(_FreezableConfig):
 
 
 @dataclass
-class PressCurriculumResetSourceConfig(_FreezableConfig):
-    """One typed reset source in a press curriculum-stage mixture."""
-
-    source: str
-    weight: float
-
-
-@dataclass
-class PressCurriculumStageConfig(_FreezableConfig):
-    """The task distribution and training schedule for one ordered press stage."""
+class RlPipelineStageConfig(_FreezableConfig):
+    """A display label and a complete experiment path in an ordered pipeline."""
 
     name: str
-    reset_mix: List[PressCurriculumResetSourceConfig]
-    hold_s: float
-    episode_length_s: float
-    phases: List[RlTrainingPhaseConfig]
-    plateau: RlPlateauCriteriaConfig
-
-
-@dataclass
-class PressCurriculumConfig(_FreezableConfig):
-    """A linear, validation-gated press-policy curriculum."""
-
-    active_stage: str
-    stages: List[PressCurriculumStageConfig]
+    config_path: str
 
 
 @dataclass
@@ -365,8 +354,8 @@ class RlTrainingConfig(_FreezableConfig):
         policy_name: Required artifact namespace under ``.build/training``;
             completed runs publish their selected artifacts to that namespace's
             ``latest`` symlink.
-        phases: Standalone drone-hover phases; press uses its selected stage.
-        plateau: Standalone drone-hover stopping rule; press uses its selected stage.
+        phases: Ordered PPO phases.
+        plateau: Validation progress and stopping rule.
         telemetry_sample_interval_s: Diagnostic hardware sampling cadence.
         gpu_utilization_target_rate: Diagnostic GPU-utilization target in [0, 1].
         num_steps_per_env: On-policy rollout length per env per iteration.
@@ -381,6 +370,7 @@ class RlTrainingConfig(_FreezableConfig):
         attempt_seeds: Independent training seeds (env reset + torch).
     """
 
+    pipeline: List[RlPipelineStageConfig]
     task_id: str
     vehicle_id: int
     policy_name: str
@@ -403,10 +393,10 @@ class RlTrainingConfig(_FreezableConfig):
 
 @dataclass
 class PressTaskConfig(_FreezableConfig):
-    """Named press curriculum-stage config.
+    """Press task behavior, independent of training pipeline order.
 
     Attributes:
-        curriculum: Ordered typed stages and the stage selected by this config.
+        task: Explicit hover or approach behavior.
         policy: Task-owned actor/critic topology.
         handoff: Thresholds for the nav -> policy handoff gate.
         navigation_noise: Measured final-waypoint position variation that the
@@ -419,7 +409,7 @@ class PressTaskConfig(_FreezableConfig):
         acceptance: Requirements applied to validation and the final test.
     """
 
-    curriculum: PressCurriculumConfig
+    task: str
     policy: RlPolicyConfig
     handoff: PressHandoffConfig
     navigation_noise: PressNavigationNoiseConfig
@@ -429,18 +419,6 @@ class PressTaskConfig(_FreezableConfig):
     termination: PressApproachTerminationConfig
     evaluation: PressApproachEvaluationConfig
     acceptance: PressApproachAcceptanceConfig
-
-    def selected_stage(self) -> PressCurriculumStageConfig:
-        """Return the configured stage after loader validation."""
-
-        matches = [
-            stage for stage in self.curriculum.stages if stage.name == self.curriculum.active_stage
-        ]
-        if len(matches) != 1:
-            raise ValueError(
-                "rl.press.curriculum.active_stage must select exactly one ordered stage"
-            )
-        return matches[0]
 
 
 @dataclass
@@ -459,7 +437,7 @@ class RlConfig(_FreezableConfig):
         press: Press-task-specific config and policy topology.
         num_envs: Number of parallel cloned envs.
         env_spacing: Distance between cloned env origins, meters.
-        episode_length_s: Standalone drone-hover timeout, seconds; press uses its stage.
+        episode_length_s: Episode timeout in seconds for the selected task.
         policy_rate_hz: Exact-average RL policy decision rate.
     """
 

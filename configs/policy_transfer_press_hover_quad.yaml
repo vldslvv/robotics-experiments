@@ -23,6 +23,8 @@ vehicles:
       yaw_rad: 0.0
 
 rl:
+  training:
+    policy_name: press-hover
+  episode_length_s: 40.0
   press:
-    curriculum:
-      active_stage: hover
+    task: hover

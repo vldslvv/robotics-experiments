@@ -108,7 +108,7 @@ is constructed. PX4 `bridge.enabled` does not affect Lab because Lab bypasses PX
 `rl.lab_vehicle` owns Lab-only spawn height, rigid-body velocity caps, and
 pusher effort/velocity limits. Pusher stiffness and damping are inherited from
 the generated vehicle USD. `rl.hover` owns the hover task definition and its
-`policy`; `rl.press` composes the named `approach` curriculum option and owns
+`policy`; `rl.press` composes the `approach` task settings group and owns
 its separate `policy`.
 Each policy contains a shared activation, actor hidden dimensions, initial
 noise, output initialization, and critic hidden dimensions. Hidden dimensions
@@ -116,12 +116,11 @@ must be positive, the activation must be non-empty, initial noise must be
 finite and non-negative, and the output initialization is
 `scratch-neutral-output`.
 
-`rl.press.curriculum.active_stage` selects `hover` or `approach` from the ordered
-`rl.press.curriculum.stages` list. Each stage owns its hold duration, episode
-duration, reset mixture, training phases, and plateau rule. Press experiments
-author episode duration only in that stage's `episode_length_s`; the environment
-and comparison record use the selected value. `rl.episode_length_s` applies only
-to the separate standalone drone-hover task.
+`rl.press.task` selects explicit `hover` or `approach` behavior, independently of
+pipeline names and order. `rl.press.reset.mix` contains measured sources and
+positive weights summing to one. `rl.episode_length_s` is the shared episode
+timeout; `rl.press.goal.stable_steps` is the common hold requirement.
+`rl.training.phases` and `rl.training.plateau` apply to each complete experiment.
 
 `handoff` owns the single actor-entry envelope used by both Lab reset and live
 deployment. `navigation_noise` records the accepted, repo-relative production
@@ -133,10 +132,10 @@ cover those observations plus their margins;
 `make measure-press-navigation-handoff` refreshes the raw evidence after sensor,
 estimator, controller, route, or scene changes. `goal` owns the target pose and
 three-axis velocity reference; hover success uses the measured position and
-attitude envelope for the stage's hold duration. `reward` owns position progress,
+attitude envelope for `goal.stable_steps`. `reward` owns position progress,
 stabilization, the predictive range-undershoot barrier, hold progress, and terminal
 outcomes;
-`reset` owns only the physical scene;
+`reset` owns the physical scene and reset mixture;
 `termination` owns contact
 sensing and production flight envelopes, including a range-undershoot limit
 equal to the acceptance minimum range; `evaluation` owns disjoint validation/test
@@ -147,19 +146,29 @@ exactly three seeds. Independent reset
 velocity/range tunables are intentionally absent so training and deployment
 cannot resolve different entry bounds. Invalid or uncovered navigation
 measurements, handoff/goal/velocity-reference bounds, negative or non-finite
-reward weights, invalid rates, and unknown stages fail during `load_config`.
+reward weights, invalid rates, and unknown tasks fail during `load_config`.
 
 `rl.training` owns shared PPO parameters, rollout settings, task selection,
 artifact namespace, and `attempt_seeds`. Shipped configs author `[42]`: one
 training attempt whose checkpoints are evaluated across multiple validation
-seeds. Its `phases` and `plateau` fields apply to the standalone drone-hover task;
-press uses the selected curriculum stage. Each phase owns its maximum iteration
+seeds. Its `phases` and `plateau` fields apply to every task. Each phase owns its maximum iteration
 count, validation cadence, learning rate, schedule, and entropy coefficient.
 The campaign coordinator starts each attempt in a distinct Isaac process.
 Each later phase restores the
 attempt-wide validation-selected actor, critic, optimizer, and iteration before
-applying its configuration and resetting the environments. External checkpoint
-initialization and process resume are unsupported. The
+applying its configuration and resetting the environments.
+`rl.inputs.initial_checkpoint` optionally selects a producer training report's
+complete learner and associated policy artifact. Independent stages require
+integrity and compatibility, regardless of producer acceptance. Paths, producer
+run ID, and digests are pinned and recorded; producer files remain unchanged.
+`rl.training.pipeline` is an optional ordered list of `{name, config_path}` entries.
+Names must be unique and nonempty. Paths reference complete experiments relative
+to the repository, with empty pipeline and null initial checkpoint settings.
+The pipeline accepts only a qualified matching starting learner, then advances
+only on each stage's acceptance boolean and forwards the exact selected checkpoint.
+`policy_name` owns artifact namespaces; each stage execution gets a distinct run
+ID. Empty pipeline means an independent stage. Process resume is unsupported.
+See `RL_WORKFLOW.md` for stage results and pipeline reporting. The
 controller artifact at `rl.inputs.controller_artifact` defaults to
 `.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
 constructed. `CONTROLLER_ARTIFACT` or the training CLI override selects an exact
@@ -180,7 +189,7 @@ campaign without retrying another checkpoint. Accepted campaigns automatically a
 may instead assign `latest` to a strict diagnostic candidate without changing
 `best` or its recorded qualification status. Only an accepted actor is exported
 as a campaign publication.
-`configs/train_press_hover_quad.yaml` selects the `hover` stage and `press-hover`
-artifact namespace; its stage authors 40-second episodes.
-`configs/train_press_approach_quad.yaml` selects the `approach` stage and
-`press-approach` namespace; its stage authors 45-second episodes.
+`configs/train_press_hover_quad.yaml` selects the `hover` task and `press-hover`
+artifact namespace; it authors 40-second episodes.
+`configs/train_press_approach_quad.yaml` selects the `approach` task and
+`press-approach` namespace; it authors 45-second episodes.

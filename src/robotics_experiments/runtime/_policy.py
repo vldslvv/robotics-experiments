@@ -85,11 +85,11 @@ def _preflight_policy_artifacts(
                     f"exceeds driver.control_rate_hz={config.driver.control_rate_hz}"
                 )
             if contract.policy_interface is PolicyInterface.PRESS:
-                if contract.curriculum_stage != config.rl.press.curriculum.active_stage:
+                if contract.curriculum_stage != config.rl.press.task:
                     raise ValueError(
                         f"press artifact {artifact} stage "
                         f"{contract.curriculum_stage!r} does not match configured "
-                        f"stage {config.rl.press.curriculum.active_stage!r}"
+                        f"stage {config.rl.press.task!r}"
                     )
                 press_rates.add(contract.policy_rate_hz)
                 if contract.curriculum_stage == "hover":

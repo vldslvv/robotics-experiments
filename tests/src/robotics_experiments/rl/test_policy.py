@@ -389,7 +389,7 @@ def _preflight_config(*, artifacts: list[Path], action_cfg=None, policy_rate_hz=
         rl=SimpleNamespace(
             action=_action_cfg(max_body_velocity_mps=99.0) if action_cfg is None else action_cfg,
             policy_rate_hz=policy_rate_hz,
-            press=SimpleNamespace(curriculum=SimpleNamespace(active_stage="approach")),
+            press=SimpleNamespace(task="approach"),
         ),
         driver=SimpleNamespace(control_rate_hz=50.0),
     )

@@ -280,27 +280,18 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     attempt_seeds = tuple(training.attempt_seeds)
     if not attempt_seeds or len(set(attempt_seeds)) != len(attempt_seeds):
         raise ValueError("rl.training.attempt_seeds must be nonempty and unique")
-    if training.task_id == "Isaac-Switch-Press-Direct-v1":
-        stage = experiment.rl.press.selected_stage()
-        phases = stage.phases
-        if training.policy_name != f"press-{stage.name}":
-            raise ValueError("press policy_name must match the active ordered stage")
-    else:
-        phases = training.phases
-    _validate_training_phases(
-        phases=phases,
-        path="rl.press.curriculum active stage phases"
-        if training.task_id == "Isaac-Switch-Press-Direct-v1"
-        else "rl.training.phases",
-    )
-    if training.task_id == "Isaac-Switch-Press-Direct-v1":
-        for index, curriculum_stage in enumerate(experiment.rl.press.curriculum.stages):
-            _validate_plateau(
-                plateau=curriculum_stage.plateau,
-                path=f"rl.press.curriculum.stages[{index}].plateau",
-            )
-    else:
-        _validate_plateau(plateau=training.plateau, path="rl.training.plateau")
+    _validate_training_phases(phases=training.phases, path="rl.training.phases")
+    _validate_plateau(plateau=training.plateau, path="rl.training.plateau")
+    names = [stage.name for stage in training.pipeline]
+    if any(not name.strip() for name in names) or len(set(names)) != len(names):
+        raise ValueError("rl.training.pipeline names must be nonempty and unique")
+    if any(not stage.config_path.strip() for stage in training.pipeline):
+        raise ValueError("rl.training.pipeline config paths must be nonempty")
+    if (
+        experiment.rl.inputs.initial_checkpoint is not None
+        and not experiment.rl.inputs.initial_checkpoint.strip()
+    ):
+        raise ValueError("rl.inputs.initial_checkpoint must be null or a report path")
     if (
         not math.isfinite(training.evaluation_worker_timeout_s)
         or training.evaluation_worker_timeout_s <= 0.0
@@ -343,13 +334,25 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
             )
 
 
-def _validate_press_curriculum(experiment: ExperimentConfig) -> None:
+def _validate_press_task(experiment: ExperimentConfig) -> None:
     press = experiment.rl.press
-    stage = press.selected_stage()
-    if not math.isclose(
-        sum(source.weight for source in stage.reset_mix), 1.0, rel_tol=0.0, abs_tol=1.0e-9
+    if press.task not in {"hover", "approach"}:
+        raise ValueError("rl.press.task must be hover or approach")
+    if any(
+        source.source not in {"pinned_flight_parameters", "measured_navigation_handoff"}
+        or not math.isfinite(source.weight)
+        or source.weight <= 0
+        for source in press.reset.mix
     ):
-        raise ValueError("active press stage reset weights must sum to one")
+        raise ValueError("rl.press.reset.mix requires known sources and positive finite weights")
+    if len({source.source for source in press.reset.mix}) != len(press.reset.mix):
+        raise ValueError("rl.press.reset.mix sources must be unique")
+    if not math.isfinite(experiment.rl.episode_length_s) or experiment.rl.episode_length_s <= 0:
+        raise ValueError("rl.episode_length_s must be finite and positive")
+    if not math.isclose(
+        sum(source.weight for source in press.reset.mix), 1.0, rel_tol=0.0, abs_tol=1.0e-9
+    ):
+        raise ValueError("press reset weights must sum to one")
     reward = press.reward
     if reward.hover_stabilization not in {"uniform", "outside_only", "boundary_weighted"}:
         raise ValueError(
@@ -688,6 +691,6 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     _validate_rates(experiment)
     _validate_alignment(experiment)
     _validate_rl_policies(experiment)
-    _validate_press_curriculum(experiment)
+    _validate_press_task(experiment)
     _validate_switches(experiment)
     return _freeze_config_graph(experiment)

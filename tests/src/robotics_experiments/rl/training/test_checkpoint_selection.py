@@ -197,22 +197,8 @@ def test_comparison_fingerprint_tracks_effective_press_settings(*, stage_name: s
         contract=contract,
         flight_parameters_fingerprint="envelope-b",
     )
-    assert fingerprint == _press_comparison_fingerprint(
-        config=replace(config, rl=replace(config.rl, episode_length_s=50.0)),
-        contract=contract,
-        flight_parameters_fingerprint="envelope-a",
-    )
-    curriculum = replace(
-        config.rl.press.curriculum,
-        stages=[
-            replace(stage, episode_length_s=50.0) if stage.name == stage_name else stage
-            for stage in config.rl.press.curriculum.stages
-        ],
-    )
     assert fingerprint != _press_comparison_fingerprint(
-        config=replace(
-            config, rl=replace(config.rl, press=replace(config.rl.press, curriculum=curriculum))
-        ),
+        config=replace(config, rl=replace(config.rl, episode_length_s=50.0)),
         contract=contract,
         flight_parameters_fingerprint="envelope-a",
     )
@@ -415,7 +401,7 @@ def test_successful_hover_selection_minimizes_error_and_preserves_passing_ties()
     assert eligible == frozenset({"actor-0", "actor-1", "actor-2"})
     assert (
         select_best_evaluation(
-            criteria=config.rl.press.selected_stage().plateau,
+            criteria=config.rl.training.plateau,
             evaluations=candidates,
             eligible_policy_digests=eligible,
         )

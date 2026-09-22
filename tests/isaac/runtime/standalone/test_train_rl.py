@@ -1,13 +1,16 @@
-"""Unit tests for merged scratch training and its RSL-RL adapter."""
+"""Host tests for training stages, pipeline sequencing, and learner restoration."""
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import sys
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import torch
@@ -146,67 +149,6 @@ def test_procedural_smoke_keeps_every_phase_boundary_at_one_update() -> None:
     assert tuple(phase.evaluation_interval for phase in phases) == (1, 1)
 
 
-def test_later_press_stage_uses_the_previous_ordered_accepted_checkpoint(
-    monkeypatch, tmp_path: Path
-) -> None:
-    train_rl = _load_train_rl_module()
-    from robotics_experiments.config import load_config
-    from robotics_experiments.rl import PolicyContract, PolicyInterface
-
-    config = load_config(REPO_ROOT / "configs/train_press_approach_quad.yaml")
-    contract = PolicyContract(
-        policy_interface=PolicyInterface.PRESS,
-        obs_schema_version=3,
-        obs_dim=35,
-        policy_rate_hz=20.0,
-        action_kind="velocity",
-        action_dim=4,
-        max_body_velocity_mps=0.5,
-        max_yaw_rate_radps=1.5,
-        max_body_rate_radps=6.0,
-        hover_thrust_normalized=0.57,
-        curriculum_stage="approach",
-    )
-    policy_root = tmp_path / ".build/training/press-hover"
-    run_dir = policy_root / "accepted-hover"
-    checkpoint = run_dir / "attempt/checkpoint.pt"
-    checkpoint.parent.mkdir(parents=True)
-    checkpoint.write_bytes(b"checkpoint")
-    (run_dir / "training_report.json").write_text(
-        json.dumps(
-            {
-                "status": "accepted",
-                "acceptance": {"passed": True},
-                "selected_checkpoint": "attempt/checkpoint.pt",
-            }
-        )
-    )
-    policy_root.mkdir(exist_ok=True)
-    (policy_root / "best").symlink_to(run_dir.name)
-    monkeypatch.setattr(
-        train_rl.rl,
-        "validate_policy_artifact",
-        lambda **_kwargs: SimpleNamespace(
-            contract=train_rl.replace(contract, curriculum_stage="hover"),
-            controller_digest="controller-digest",
-            flight_parameters_digest="flight-parameters-digest",
-            values={"selected_policy_digest": "policy-digest"},
-        ),
-    )
-
-    selected = train_rl._previous_stage_checkpoint(  # noqa: SLF001
-        config=config,
-        repo_root=tmp_path,
-        contract=contract,
-        controller_digest="controller-digest",
-        flight_parameters_digest="flight-parameters-digest",
-    )
-
-    assert selected is not None
-    assert selected[0] == checkpoint
-    assert selected[1]["stage"] == "hover"
-
-
 @pytest.mark.parametrize("report_kind", ["campaign", "attempt"])
 def test_report_schema_records_rollouts_and_disjoint_workloads(
     *, tmp_path: Path, report_kind
@@ -219,7 +161,7 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
     report = train_rl._training_report(  # noqa: SLF001
         run_dir=tmp_path,
         config=config,
-        phases=tuple(config.rl.press.selected_stage().phases),
+        phases=tuple(config.rl.training.phases),
         comparison_fingerprint="fingerprint",
         provenance={"procedural_smoke": False},
         attempts=[],
@@ -236,7 +178,7 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
         report = train_rl._attempt_report(  # noqa: SLF001 - script report contract
             run_dir=tmp_path,
             config=config,
-            phases=tuple(config.rl.press.selected_stage().phases),
+            phases=tuple(config.rl.training.phases),
             comparison_fingerprint="fingerprint",
             attempt={
                 "provenance": {"procedural_smoke": False},
@@ -256,7 +198,7 @@ def test_report_schema_records_rollouts_and_disjoint_workloads(
         "num_mini_batches": 8,
         "phase_maximum_simulated_seconds_per_env": [640.0, 1280.0],
     }
-    assert report["schema_version"] == 26
+    assert report["schema_version"] == 27
     assert report["reward_configuration"] == {
         "hover_stabilization": "boundary_weighted",
         "position_progress_weight": 0.1,
@@ -413,9 +355,11 @@ def test_invalid_campaign_input_fails_before_run_creation(
     assert not (tmp_path / ".build").exists()
 
 
-def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
+@pytest.mark.parametrize("outcome", ["accepted", "validation_failed", "test_failed", "interrupted"])
+def test_campaign_retries_in_distinct_processes_and_preserves_selected_candidate(
     monkeypatch,
     tmp_path: Path,
+    outcome: str,
 ) -> None:
     train_rl = _load_train_rl_module()
     from robotics_experiments.config import load_config
@@ -434,7 +378,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
         commands.append(command)
         attempt_index = int(command[command.index("--attempt-index") + 1])
         seed = int(command[command.index("--attempt-seed") + 1])
-        passed = attempt_index == 1
+        passed = attempt_index == 1 and outcome != "validation_failed"
         attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
         candidate_dir = attempt_dir / "evaluated" / "candidate_000"
         checkpoint = attempt_dir / "checkpoints" / "model.pt"
@@ -443,7 +387,7 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
         checkpoint.write_bytes(b"checkpoint")
         (candidate_dir / "policy.pt").write_bytes(f"policy-{seed}".encode())
         (candidate_dir / "policy_meta.json").write_text("{}\n")
-        digest = f"digest-{seed}"
+        digest = train_rl._file_sha256(candidate_dir / "policy.pt")  # noqa: SLF001
         evaluation = PolicyEvaluation(
             iteration=1,
             checkpoint_path=checkpoint,
@@ -490,6 +434,8 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
             payload=report,
         )
         assert kwargs["env"]["RL_CAMPAIGN_RUN_DIR"] == str(run_dir)
+        if outcome == "interrupted" and attempt_index == 1:
+            raise KeyboardInterrupt
         return SimpleNamespace(returncode=0)
 
     finalized = {}
@@ -504,13 +450,21 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
     monkeypatch.setattr(
         train_rl,
         "evaluate_press_acceptance",
-        lambda **_kwargs: train_rl.AcceptanceResult(passed=True, checks=(), reasons=()),
+        lambda **_kwargs: train_rl.AcceptanceResult(
+            passed=outcome != "test_failed", checks=(), reasons=()
+        ),
     )
-    monkeypatch.setattr(
-        train_rl,
-        "_record_final_test",
-        lambda **kwargs: finalized.update(kwargs) or {},
-    )
+
+    def record_final_test(**kwargs):
+        finalized.update(kwargs)
+        report_path = run_dir / "training_report.json"
+        report = json.loads(report_path.read_text())
+        report["status"] = outcome
+        report["accepted"] = outcome == "accepted"
+        report_path.write_text(json.dumps(report))
+        return report
+
+    monkeypatch.setattr(train_rl, "_record_final_test", record_final_test)
     monkeypatch.setattr(
         train_rl,
         "_publish_selected",
@@ -522,30 +476,45 @@ def test_campaign_retries_in_distinct_processes_and_stops_after_validation_pass(
         lambda **_kwargs: SimpleNamespace(close=lambda: None),
     )
     monkeypatch.delenv("RL_RUN_ID", raising=False)
-    train_rl._run_policy_workflow(  # noqa: SLF001
-        args=SimpleNamespace(
-            procedural_smoke=False,
-            scene=None,
-            strict=False,
-        ),
-        config=config,
-        config_path=config_path,
-        inputs=_inputs(tmp_path),
-        acceptance_criteria=_acceptance_criteria(config),
-        comparison_fingerprint="fingerprint",
-        attempt_seeds=(42, 43, 44),
-        policy_root=policy_root,
-        repo_root=tmp_path,
-    )
-    assert [command[command.index("--attempt-seed") + 1] for command in commands] == [
-        "42",
-        "43",
-    ]
-    assert finalized["selected_attempt_index"] == 1
-    assert [attempt["training_seed"] for attempt in finalized["attempts"]] == [42, 43]
-    assert len({attempt["worker_pid"] for attempt in finalized["attempts"]}) == 2
-    assert finalized["provenance"]["procedural_smoke"] is False
-    assert finalized["provenance"]["inputs"]["controller"]["run_id"] == "controller-run"
+    context: AbstractContextManager[Any]
+    if outcome == "interrupted":
+        context = pytest.raises(KeyboardInterrupt)
+    else:
+        context = nullcontext()
+    result = None
+    with context:
+        result = train_rl._run_policy_workflow(  # noqa: SLF001
+            args=SimpleNamespace(
+                procedural_smoke=False,
+                scene=None,
+                strict=False,
+            ),
+            config=config,
+            config_path=config_path,
+            inputs=_inputs(tmp_path),
+            acceptance_criteria=_acceptance_criteria(config),
+            comparison_fingerprint="fingerprint",
+            attempt_seeds=(42, 43, 44),
+            policy_root=policy_root,
+            repo_root=tmp_path,
+        )
+    expected_seeds = ["42", "43", "44"] if outcome == "validation_failed" else ["42", "43"]
+    assert [command[command.index("--attempt-seed") + 1] for command in commands] == expected_seeds
+    report = json.loads((run_dir / "training_report.json").read_text())
+    assert report["status"] == outcome
+    assert report["selected_checkpoint"] is not None
+    assert report["accepted"] is (outcome == "accepted")
+    assert len({attempt["worker_pid"] for attempt in report["attempts"]}) == len(expected_seeds)
+    if result is not None:
+        assert result.selected_checkpoint is not None
+        assert result.accepted is (outcome == "accepted")
+        assert result.selected_checkpoint.checkpoint == str(
+            (run_dir / report["selected_checkpoint"]).resolve()
+        )
+    if finalized:
+        assert finalized["selected_attempt_index"] == 1
+    else:
+        assert outcome in {"validation_failed", "interrupted"}
 
 
 def test_campaign_stops_retrying_when_final_phase_did_not_improve(tmp_path: Path) -> None:
@@ -683,7 +652,7 @@ def test_campaign_parent_reports_missing_worker_report_cleanly(
     assert report["active_attempt"]["report"] == "attempt_01_seed_42/attempt_report.json"
     attempt_report = json.loads((run_dir / report["active_attempt"]["report"]).read_text())
     assert attempt_report == {
-        "schema_version": 26,
+        "schema_version": 27,
         "report_kind": "attempt",
         "status": "failed",
         "artifact_run_id": "campaign",
@@ -812,7 +781,7 @@ def test_experiment_provenance_records_resolved_configuration_and_inputs(
     recorded = json.loads(json.dumps(provenance, allow_nan=False))
     assert recorded["config_path"] == str(config_path.resolve())
     assert recorded["resolved_config"]["rl"]["training"]["gamma"] == config.rl.training.gamma
-    assert recorded["resolved_config"]["rl"]["press"]["curriculum"]["stages"][0]["hold_s"] == 30.0
+    assert recorded["resolved_config"]["rl"]["press"]["goal"]["stable_steps"] == 600
     assert list(recorded["resolved_config"]["vehicles"]) == list(config.vehicles)
     assert recorded["runtime"]["python"] == sys.version
     assert recorded["inputs"] == {
@@ -835,9 +804,10 @@ def test_experiment_provenance_records_resolved_configuration_and_inputs(
 def test_checkpoint_restore_loads_optimizer_and_iteration(
     *, tmp_path: Path, normalize: bool
 ) -> None:
-    policy = torch.nn.Module()
+    policy: Any = torch.nn.Module()
     policy.actor = torch.nn.Linear(2, 1)
     policy.critic = torch.nn.Linear(2, 1)
+    policy.std = torch.nn.Parameter(torch.tensor([0.2]))
     policy.actor_obs_normalizer = EmpiricalNormalization(2) if normalize else torch.nn.Identity()
     policy.critic_obs_normalizer = EmpiricalNormalization(2) if normalize else torch.nn.Identity()
     optimizer = torch.optim.Adam(policy.parameters(), lr=1.0e-4)
@@ -845,7 +815,9 @@ def test_checkpoint_restore_loads_optimizer_and_iteration(
 
     def update_learner() -> None:
         optimizer.zero_grad()
-        (policy.actor(observations).sum() + policy.critic(observations).sum()).backward()
+        (
+            policy.actor(observations).sum() + policy.critic(observations).sum() + policy.std.sum()
+        ).backward()
         optimizer.step()
         if normalize:
             with torch.inference_mode():
@@ -854,6 +826,7 @@ def test_checkpoint_restore_loads_optimizer_and_iteration(
 
     update_learner()
     expected = {key: value.clone() for key, value in policy.state_dict().items()}
+    expected_optimizer = copy.deepcopy(optimizer.state_dict())
     checkpoint = tmp_path / "model_299.pt"
     runner = SimpleNamespace(
         alg=SimpleNamespace(policy=policy, optimizer=optimizer),
@@ -876,6 +849,11 @@ def test_checkpoint_restore_loads_optimizer_and_iteration(
     for key, value in policy.state_dict().items():
         torch.testing.assert_close(value, expected[key])
         assert not value.is_inference()
+    restored_optimizer = optimizer.state_dict()
+    assert restored_optimizer["param_groups"] == expected_optimizer["param_groups"]
+    for parameter_id, state in restored_optimizer["state"].items():
+        for name, value in state.items():
+            torch.testing.assert_close(value, expected_optimizer["state"][parameter_id][name])
     assert all(state["step"].item() == 1 for state in optimizer.state.values())
     update_learner()
     assert all(state["step"].item() == 2 for state in optimizer.state.values())
@@ -1227,3 +1205,212 @@ def test_export_freezes_actor_input_normalization(*, tmp_path: Path, normalize) 
         assert not torch.allclose(actor(normalizer(observations)), expected)
     assert {path.name for path in tmp_path.iterdir()} == {"policy.pt", "policy_meta.json"}
     assert json.loads((tmp_path / "policy_meta.json").read_text()) == metadata
+
+
+@pytest.fixture
+def saved_learner(monkeypatch, tmp_path):
+    """A complete diagnostic learner with an exact exported actor."""
+    train_rl = _load_train_rl_module()
+    config = train_rl.load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    inputs = _inputs(tmp_path)
+    contract = train_rl.rl.PolicyContract(
+        policy_interface=train_rl.rl.PolicyInterface.PRESS,
+        obs_schema_version=3,
+        obs_dim=2,
+        policy_rate_hz=20.0,
+        action_kind="velocity",
+        action_dim=4,
+        max_body_velocity_mps=0.5,
+        max_yaw_rate_radps=1.5,
+        max_body_rate_radps=6.0,
+        hover_thrust_normalized=0.5,
+        curriculum_stage="hover",
+    )
+    monkeypatch.setattr(train_rl, "press_policy_contract", lambda **_kwargs: contract)
+    # Contract compatibility is covered by strict artifact tests; retain real tensor files here.
+    monkeypatch.setattr(
+        train_rl.rl,
+        "validate_policy_artifact",
+        lambda **_kwargs: SimpleNamespace(
+            contract=contract,
+            controller_digest=inputs.controller_digest,
+            flight_parameters_digest=inputs.flight_parameters_digest,
+        ),
+    )
+    policy = torch.nn.Module()
+    policy.actor = torch.nn.Linear(2, 1)
+    policy.critic = torch.nn.Linear(2, 1)
+    policy.std = torch.nn.Parameter(torch.tensor([0.1]))
+    policy.actor_obs_normalizer = EmpiricalNormalization(2)
+    policy.critic_obs_normalizer = EmpiricalNormalization(2)
+    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
+    observations = torch.tensor([[0.1, -0.2], [0.3, 0.4]])
+    policy.actor_obs_normalizer.update(observations)
+    policy.critic_obs_normalizer.update(observations)
+    (
+        policy.actor(observations).sum() + policy.critic(observations).sum() + policy.std.sum()
+    ).backward()
+    optimizer.step()
+    runner = SimpleNamespace(alg=SimpleNamespace(policy=policy, optimizer=optimizer))
+    run_dir = tmp_path / "producer"
+    run_dir.mkdir()
+    checkpoint = run_dir / "checkpoint.pt"
+    rsl_rl.save_checkpoint(runner=runner, checkpoint_path=checkpoint, iteration=17)
+    artifact_dir = run_dir / "candidate"
+    rsl_rl.export_policy(runner, artifact_dir, metadata={"obs_dim": 2})
+    report_path = run_dir / "training_report.json"
+    report = {
+        "artifact_run_id": run_dir.name,
+        "status": "validation_failed",
+        "accepted": False,
+        "acceptance": None,
+        "selected_checkpoint": "checkpoint.pt",
+        "selected_checkpoint_digest": train_rl._file_sha256(checkpoint),  # noqa: SLF001
+        "selected_policy": "candidate/policy.pt",
+        "selected_policy_digest": train_rl._file_sha256(artifact_dir / "policy.pt"),  # noqa: SLF001
+        "provenance": {"resolved_config": train_rl._config_values(config)},  # noqa: SLF001
+    }
+    report_path.write_text(json.dumps(report))
+    return train_rl, config, inputs, report_path, runner
+
+
+@pytest.mark.parametrize("status", ["validation_failed", "test_failed", "interrupted", "training"])
+def test_independent_stage_accepts_unqualified_learner_but_pipeline_rejects_it(
+    saved_learner, status
+):
+    train_rl, config, inputs, report_path, _runner = saved_learner
+    report = json.loads(report_path.read_text())
+    report["status"] = status
+    report_path.write_text(json.dumps(report))
+    learner = train_rl._pin_learner(report_path=report_path)  # noqa: SLF001
+    train_rl._validate_learner(learner=learner, config=config, inputs=inputs)  # noqa: SLF001
+    with pytest.raises(ValueError, match="accepted tested result"):
+        train_rl._require_accepted_initial_learner(learner=learner)  # noqa: SLF001
+    result = train_rl._stage_result(run_dir=report_path.parent)  # noqa: SLF001
+    assert result.selected_checkpoint == learner
+    assert result.accepted is False
+
+
+def test_pipeline_initial_learner_requires_exact_tested_actor(saved_learner):
+    train_rl, config, inputs, report_path, _runner = saved_learner
+    report = json.loads(report_path.read_text())
+    report.update(status="accepted", acceptance={"passed": True})
+    report["test_evaluation"] = {"policy_digest": report["selected_policy_digest"]}
+    report_path.write_text(json.dumps(report))
+    learner = train_rl._pin_learner(report_path=report_path)  # noqa: SLF001
+    train_rl._require_accepted_initial_learner(learner=learner)  # noqa: SLF001
+    train_rl._validate_learner(learner=learner, config=config, inputs=inputs)  # noqa: SLF001
+    report["test_evaluation"]["policy_digest"] = "different-actor"
+    report_path.write_text(json.dumps(report))
+    with pytest.raises(ValueError, match="accepted tested result"):
+        train_rl._require_accepted_initial_learner(  # noqa: SLF001
+            learner=train_rl._pin_learner(report_path=report_path)  # noqa: SLF001
+        )
+
+
+@pytest.mark.parametrize("change", ["bytes", "actor", "normalization", "optimizer", "architecture"])
+def test_initial_learner_rejects_corruption_or_incompatibility(saved_learner, change):
+    train_rl, config, inputs, report_path, _runner = saved_learner
+    learner = train_rl._pin_learner(report_path=report_path)  # noqa: SLF001
+    checkpoint = Path(learner.checkpoint)
+    if change == "bytes":
+        checkpoint.write_bytes(b"changed")
+    elif change == "architecture":
+        config = replace(
+            config,
+            rl=replace(
+                config.rl,
+                press=replace(
+                    config.rl.press, policy=replace(config.rl.press.policy, activation="relu")
+                ),
+            ),
+        )
+    else:
+        payload = torch.load(checkpoint, weights_only=True)
+        if change == "optimizer":
+            del payload["optimizer_state_dict"]
+        else:
+            key = "actor.weight" if change == "actor" else "actor_obs_normalizer._mean"
+            payload["model_state_dict"][key] += 1
+        torch.save(payload, checkpoint)
+        learner = replace(learner, checkpoint_digest=train_rl._file_sha256(checkpoint))  # noqa: SLF001
+    with pytest.raises(ValueError, match="changed|incompatible|complete|does not match"):
+        train_rl._validate_learner(learner=learner, config=config, inputs=inputs)  # noqa: SLF001
+
+
+@pytest.mark.parametrize("outcome", ["complete", "rejected", "error", "interrupt"])
+def test_pipeline_forwards_exact_checkpoint_and_stops_on_failure(
+    saved_learner, monkeypatch, tmp_path, outcome
+):
+    import shutil
+
+    train_rl, _config, inputs, report_path, _runner = saved_learner
+    config_root = tmp_path / "configs"
+    shutil.copytree(REPO_ROOT / "configs", config_root)
+    pipeline_path = config_root / "pipeline.yaml"
+    pipeline_path.write_text(
+        "defaults:\n  - train_press_hover_quad\n  - _self_\n"
+        "rl:\n  training:\n    policy_name: arbitrary-namespace\n    pipeline:\n"
+        "      - {name: banana, config_path: configs/train_press_hover_quad.yaml}\n"
+        "      - {name: landing, config_path: configs/train_press_hover_quad.yaml}\n"
+        "      - {name: third, config_path: configs/train_press_hover_quad.yaml}\n"
+    )
+    pipeline_config = train_rl.load_config(pipeline_path)
+    learner = train_rl._pin_learner(report_path=report_path)  # noqa: SLF001
+    monkeypatch.setattr(train_rl, "_repo_root", lambda: tmp_path)
+    monkeypatch.setenv("RL_RUN_ID", "pipeline-test")
+    prepared = []
+
+    def prepare(**kwargs):
+        prepared.append(kwargs["config"])
+        return inputs
+
+    monkeypatch.setattr(train_rl.rl, "prepare_policy_inputs", prepare)
+    calls = []
+
+    def run_stage(**kwargs):
+        assert len(prepared) == 3
+        assert kwargs["prepared_inputs"] is inputs
+        assert kwargs["config"].rl.press.task == "hover"
+        assert kwargs["config"].rl.training.policy_name == "press-hover"
+        assert kwargs["initial_learner"] is (None if not calls else learner)
+        calls.append(kwargs)
+        if len(calls) == 2:
+            if outcome == "error":
+                raise RuntimeError("worker failed")
+            if outcome == "interrupt":
+                raise KeyboardInterrupt
+        return train_rl._StageResult(  # noqa: SLF001
+            selected_checkpoint=learner,
+            accepted=not (len(calls) == 2 and outcome == "rejected"),
+            report_path=report_path,
+        )
+
+    monkeypatch.setattr(train_rl, "_run", run_stage)
+    if outcome == "complete":
+        train_rl._run_pipeline(  # noqa: SLF001
+            args=SimpleNamespace(procedural_smoke=False), config=pipeline_config
+        )
+    else:
+        with pytest.raises(KeyboardInterrupt if outcome == "interrupt" else RuntimeError):
+            train_rl._run_pipeline(  # noqa: SLF001
+                args=SimpleNamespace(procedural_smoke=False), config=pipeline_config
+            )
+    summary = json.loads(
+        (
+            tmp_path / ".build/training/arbitrary-namespace/pipeline-test/pipeline_report.json"
+        ).read_text()
+    )
+    assert (
+        summary["status"]
+        == {
+            "complete": "complete",
+            "rejected": "stopped",
+            "error": "failed",
+            "interrupt": "interrupted",
+        }[outcome]
+    )
+    assert len(calls) == (3 if outcome == "complete" else 2)
+    assert len({call["run_id"] for call in calls}) == len(calls)
+    assert [entry["name"] for entry in summary["stages"]][:2] == ["banana", "landing"]
+    assert summary["stages"][0]["accepted"] is True
