@@ -93,6 +93,12 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   it once with `uv run pre-commit install` and run a whole-repository sweep with
   `uv run pre-commit run --all-files`. Mirror hooks may modify staged Python
   files, while `make check` never modifies the working tree.
+- The shared mypy configuration enables `warn_unreachable` in pre-commit and
+  `make check`. Vulture also checks unused code. Verify reachability warnings
+  before deleting code: type narrowing and assignments inside closures can
+  produce false positives. Keep necessary suppressions local and explained.
+  An analyzer's nonzero exit status means its check did not pass; inspect its
+  diagnostics separately from dependency or command-launch errors reported by `uv`.
 - The hook list and the per-tool tunables (`.hadolint.yaml`, `.codespellrc`,
   `.yamllint.yaml`, `.taplo.toml`, `.binary-asset-allowlist`) live in
   `.pre-commit-config.yaml` and those dotfiles at the repo root. The binary

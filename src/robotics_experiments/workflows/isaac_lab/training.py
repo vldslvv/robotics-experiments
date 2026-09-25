@@ -170,7 +170,7 @@ def _repo_root() -> Path:
 
 
 def _config_values(value: Any, /) -> Any:
-    if is_dataclass(value) and not isinstance(value, type):
+    if not isinstance(value, type) and is_dataclass(value):
         return {field.name: _config_values(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
         return {key: _config_values(item) for key, item in value.items()}
@@ -1476,7 +1476,8 @@ def run_attempt(
         if writer is not None:
             _close_resource(writer)
         if validation_worker is not None:
-            _close_resource(validation_worker)
+            # evaluate_candidate assigns this nonlocal before failures reach cleanup.
+            _close_resource(validation_worker)  # type: ignore[unreachable]
 
 
 def run_training(

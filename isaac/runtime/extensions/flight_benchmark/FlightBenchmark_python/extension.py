@@ -388,5 +388,4 @@ class Extension(omni.ext.IExt):
             sys.stdout.flush()
             sys.stderr.flush()
             os._exit(return_code)  # noqa: SLF001 - profiler capture ends on disconnect
-            return
         omni.kit.app.get_app().post_quit(return_code)

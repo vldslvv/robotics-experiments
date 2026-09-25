@@ -346,29 +346,32 @@ def test_target_velocity_remains_an_evaluation_reference() -> None:
     assert target[0, 2] < 0.0
 
 
-def test_reset_replaces_only_selected_environment() -> None:
+@pytest.mark.parametrize("backend", [np.asarray, torch.from_numpy])
+def test_reset_replaces_only_selected_environment(backend) -> None:
     state = PressApproachState(
-        normalized_position_error=np.array([1.0, 2.0]),
-        normalized_pose_error=np.array([1.0, 2.0]),
-        stable_goal_steps=np.array([4, 5]),
-        longest_stable_goal_steps=np.array([6, 7]),
-        closest_range_m=np.array([0.41, 0.42]),
+        normalized_position_error=backend(np.array([1.0, 2.0])),
+        normalized_pose_error=backend(np.array([1.0, 2.0])),
+        stable_goal_steps=backend(np.array([4, 5])),
+        longest_stable_goal_steps=backend(np.array([6, 7])),
+        closest_range_m=backend(np.array([0.41, 0.42])),
     )
     reset = reset_press_approach_state(
         state=state,
         env_ids=[1],
-        relative_switch_pos_m=np.array([[0.48, 0.0, 0.0]]),
-        relative_switch_quat_xyzw=_quat(angle_rad=0.0),
+        relative_switch_pos_m=backend(np.array([[0.48, 0.0, 0.0]])),
+        relative_switch_quat_xyzw=backend(_quat(angle_rad=0.0)),
         goal_cfg=_GOAL,
         flight_parameters=_ENVELOPE,
-        position_error_enu_m=np.array([[-0.07, 0.0, 0.0]]),
-        attitude_error_flu_enu_wxyz=np.array([[1.0, 0.0, 0.0, 0.0]]),
+        position_error_enu_m=backend(np.array([[-0.07, 0.0, 0.0]])),
+        attitude_error_flu_enu_wxyz=backend(np.array([[1.0, 0.0, 0.0, 0.0]])),
     )
     assert reset.normalized_position_error[0] == 1.0
     assert reset.normalized_pose_error[0] == 1.0
     assert reset.stable_goal_steps.tolist() == [4, 0]
     assert reset.longest_stable_goal_steps.tolist() == [6, 0]
     assert reset.closest_range_m.tolist() == [0.41, 0.48]
+    assert state.stable_goal_steps.tolist() == [4, 5]
+    assert state.closest_range_m.tolist() == [0.41, 0.42]
 
 
 @pytest.mark.parametrize("choice", ["uniform", "boundary_weighted", "outside_only"])

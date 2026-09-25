@@ -24,9 +24,11 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
+        name: mypy types and unreachable code
         # Cover every project-owned Python file. Missing container-only
         # Isaac/Kit imports are tolerated by the shared mypy configuration;
-        # vendored Pegasus is excluded there.
+        # vendored Pegasus is excluded there. pyproject.toml also enables
+        # warn_unreachable for both this hook and make check.
         files: ^(src|tests|isaac/runtime|make/scripts|flight_analysis|px4/scripts|ros/scripts)/
         exclude: ^isaac/runtime/extensions/px4_sitl_brigde/pegasus/
         additional_dependencies:

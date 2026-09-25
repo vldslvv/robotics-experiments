@@ -258,20 +258,13 @@ def reset_press_approach_state(
         attitude_error_flu_enu_wxyz=attitude_error_flu_enu_wxyz,
     )
 
-    def replaced(current: ArrayT, replacement: ArrayT) -> ArrayT:
-        if isinstance(current, torch.Tensor):
-            successor = current.clone()
-        else:
-            successor = current.copy()
-        successor[env_ids] = replacement
-        return successor
-
-    return PressApproachState(
-        **{
-            field: replaced(getattr(state, field), getattr(fresh, field))
-            for field in PressApproachState.__dataclass_fields__
-        }
-    )
+    reset_fields = {}
+    for field in PressApproachState.__dataclass_fields__:
+        current = getattr(state, field)
+        successor = current.clone() if isinstance(current, torch.Tensor) else current.copy()
+        successor[env_ids] = getattr(fresh, field)
+        reset_fields[field] = successor
+    return PressApproachState(**reset_fields)
 
 
 def press_approach_target_velocity(

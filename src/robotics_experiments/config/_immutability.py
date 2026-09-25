@@ -29,7 +29,7 @@ def _freeze_config_graph(value: _T) -> _T:
             return MappingProxyType({key: freeze(item) for key, item in node.items()})
         if isinstance(node, tuple):
             return tuple(freeze(item) for item in node)
-        if is_dataclass(node) and not isinstance(node, type):
+        if not isinstance(node, type) and is_dataclass(node):
             for field in fields(node):
                 object.__setattr__(node, field.name, freeze(getattr(node, field.name)))
             if isinstance(node, _FreezableConfig):

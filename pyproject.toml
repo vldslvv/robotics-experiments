@@ -93,6 +93,7 @@ explicit_package_bases = true
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
+warn_unreachable = true
 no_implicit_optional = true
 exclude = [
   "isaac/runtime/extensions/px4_sitl_brigde/pegasus/",

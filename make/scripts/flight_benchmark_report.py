@@ -45,7 +45,7 @@ def _write_json(path: Path, payload: Any, /) -> None:
 
 
 def _canonical_config(value: Any, /) -> Any:
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+    if not isinstance(value, type) and dataclasses.is_dataclass(value):
         return {
             field.name: _canonical_config(getattr(value, field.name))
             for field in dataclasses.fields(value)

@@ -4,7 +4,7 @@ import importlib
 import sys
 import types
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 
@@ -280,11 +280,14 @@ def test_profile_quit_uses_process_exit(monkeypatch) -> None:
     quit_plugin(extension, return_code=0)
     assert app.quit_codes == [0]
 
-    exit_codes: list[int] = []
+    def exit_process(return_code: int, /) -> NoReturn:
+        raise SystemExit(return_code)
+
     monkeypatch.setenv("FLIGHT_BENCHMARK_RUN_KIND", "profile")
-    monkeypatch.setattr(module.os, "_exit", exit_codes.append)
-    quit_plugin(extension, return_code=3)
-    assert exit_codes == [3]
+    monkeypatch.setattr(module.os, "_exit", exit_process)
+    with pytest.raises(SystemExit) as raised:
+        quit_plugin(extension, return_code=3)
+    assert raised.value.code == 3
     assert app.quit_codes == [0]
 
 

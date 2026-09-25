@@ -54,7 +54,7 @@ def _module_fingerprint(module_file: str | None, /) -> str:
 
 
 def _plain(value: Any, /) -> Any:
-    if is_dataclass(value) and not isinstance(value, type):
+    if not isinstance(value, type) and is_dataclass(value):
         return {item.name: _plain(getattr(value, item.name)) for item in fields(value)}
     if isinstance(value, Mapping):
         return {str(key): _plain(item) for key, item in value.items()}
