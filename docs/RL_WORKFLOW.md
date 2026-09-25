@@ -94,6 +94,9 @@ transport delay and is converted from body-FLU to a world-frame setpoint on the
 independent 50 Hz OFFBOARD stream, using the attitude at each transmission. The
 world command is held across the faster controller and physics substeps,
 matching deployment through PX4's body-NED MAVLink receiver.
+Explicit full environment resets restart policy and command timing phases, so a
+validation seed or training phase cannot inherit timing from the preceding
+rollout. Automatic resets of individual episodes retain the shared scene clock.
 
 ## Press tasks
 
@@ -131,7 +134,7 @@ The press policy emits four normalized velocity actions. Its scratch experiment
 maps a unit translation action to 0.5 m/s. Normalized scratch exploration starts
 at 0.10 standard deviation, or 0.05 m/s for a translation component.
 
-`rl.press.task` explicitly selects `hover` or `approach`. Task code owns rewards
+`rl.press.task` explicitly selects `hover`, `approach`, `contact`, or `press`. Task code owns rewards
 and resets; task identity never comes from a curriculum label or position.
 `rl.press.reset.mix` owns the measured reset mixture. `rl.episode_length_s`
 owns episode duration, and `rl.press.goal.stable_steps` is the common training,
@@ -271,9 +274,9 @@ attempt campaign and refinement stopping rules remain unchanged.
 compatible failed or interrupted run. Acceptance of this input is not required.
 Before training, checkpoint tensors must match the exact exported actor and its
 normalizer. Controller and flight evidence, observation/action contract, network
-dimensions, activation and normalization must be compatible. Hover and approach
-retain their different normalization settings, so they are not silently made
-compatible by curriculum ordering. Producer files remain immutable.
+dimensions, activation and normalization must be compatible. The full press
+curriculum enables normalization in every stage; stage ordering never overrides
+this compatibility check. Producer files remain immutable.
 
 ### Complete learner checkpoints
 
@@ -330,7 +333,7 @@ initial lineage, ordered stage report references, `accepted`, `published`, compl
 updates and status. These two booleans distinguish acceptance from a publication
 error. Detailed measurements remain in stage and attempt reports.
 
-Training and attempt reports use strict schema 28. Old reports are not migrated.
+Training and attempt reports use strict schema 29. Old reports are not migrated.
 The stage records resolved configuration and pinned evidence once, prepared
 acceptance criteria, effective phases (including smoke reductions), attempt report
 references, progress, selected candidate identity/paths/digests/comparison metric,
@@ -347,13 +350,13 @@ available. Supplemental policy metadata records the accepted curriculum prefix a
 stage labels and exact report/policy digests. This is historical evidence for those
 actors, not a claim that the latest actor was retested on previous stages.
 Initializer lineage is separate. The existing `curriculum_stage` artifact field
-continues to mean task identity (`hover` or `approach`).
+continues to mean task identity (`hover`, `approach`, `contact`, or `press`).
 
 The evaluator and phase driver have separate contracts. Validation receives an
 exact exported actor and returns raw named metrics.
 The plateau detector reads only the configured metric, direction, minimum delta,
-and patience. It never reads the PPO reward or any acceptance check. The experiment owns the rule. Hover minimizes `hover_envelope_utilization_mean`,
-requires a `0.003` improvement, and declares a plateau after five stale
+and patience. It never reads the PPO reward or any acceptance check. The experiment owns the rule. Hover maximizes `episode_longest_hover_duration_mean_s`,
+requires a `0.01` second improvement, and declares a plateau after five stale
 evaluations. Approach uses the same metric, direction, and improvement with
 10 stale evaluations. Checkpoint selection prioritizes validation-passing actors,
 then the lowest configured error, preserving the earlier actor on exact ties.
@@ -375,7 +378,7 @@ Hover uses 4,096 environments with 256 policy steps per environment per update:
 12.8 simulated seconds per rollout and 1,048,576 transitions per PPO update.
 The broad phase allows 640 simulated seconds per environment and refinement
 allows 1,280, including resets. PPO uses four epochs and eight minibatches,
-discount gamma 0.999, and GAE lambda 0.995 for the longer-horizon trial.
+discount gamma 0.995, and GAE lambda 0.99 from the reproduced accepted recipe.
 GPU utilization and rollout/optimizer timing must be measured
 for each campaign and retained alongside its training results.
 
@@ -493,7 +496,7 @@ configuration and pinned evidence, and rejects a changed stage configuration.
 
 Trackio uses the `training/`, `validation/`, `test/`, and `system/`
 namespaces. Chart names spell out the quantity and units, with no numeric group
-codes or internal variable names. Presentation registry revision 19 changes
+codes or internal variable names. Presentation registry revision 20 changes
 labels only; historical dashboards retain their recorded labels. Validation and
 test share one ordered registry: acceptance status, success, collision, other
 flight failure, minimum range, trace finiteness, measured-envelope occupancy and
@@ -523,8 +526,8 @@ Its `hover_stabilization` config selects `uniform` (the configured stabilization
 weight everywhere), `boundary_weighted` (the configured inside/outside weights),
 or `outside_only` (zero inside, the configured outside weight elsewhere). The current hover setup selects
 `boundary_weighted`: `configs/train/stage/press_hover_quad.yaml` overrides the cost
-weights to 0.03 inside the complete envelope and 0.09 outside for the first
-correction campaign. The cost is the negative weighted sum of position and
+weights to 0.01 inside the complete envelope and 0.03 outside. The cost is the
+negative weighted sum of position and
 attitude utilization. Shared approach reward weights remain unchanged. This cost
 remains active for nonzero error inside the envelope and reaches zero at the
 desired pose. It never chooses the larger of position and attitude.
@@ -545,19 +548,20 @@ timeout. Position progress and the predictive barrier have weight 0.1.
 Contact remains a binding failure predicate.
 
 Training uses `training/reset/` for the fixed reset population and
-`training/reward/` for the six PPO reward contributions. Other progress,
+`training/reward/` for the task's signed PPO reward contributions. Other progress,
 optimizer, schedule, and performance charts use descriptive names under
 `training/`. Reset charts include position error, linear and angular speed,
 and position and attitude error relative to their hover limits. A value of 1
 is the measured limit; all fraction charts use `[0, 1]`. Hardware telemetry
 uses `system/training/`, `system/validation/`, and `system/test/`.
 
-Use `hover_envelope_utilization_mean` in `training_report.json` to audit
-checkpoint selection. The validation chart
+Use the stage's configured plateau metric in `training_report.json` to audit
+checkpoint selection. Approach uses `hover_envelope_utilization_mean`; hover
+uses `episode_longest_hover_duration_mean_s`. The validation chart
 `Mean worst pose error relative to hover limit (1 = limit)` shows this error;
 lower is better.
 **`validation/Mean longest continuous hover (seconds)`** averages each evaluated
-episode's longest uninterrupted hold and remains a qualification diagnostic.
+episode's longest uninterrupted hold and supplies hover selection progress.
 `validation/Longest continuous hover in any episode (seconds)` shows the
 maximum. `training/Mean longest hover so far in active episodes (seconds)`
 reports ongoing training episodes and has a different averaging population.
@@ -598,8 +602,8 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-The report schema and ownership are described above. Metric-registry revision 19
-and comparison revision 38 remain unchanged. Task reset mixtures affect comparison;
+The report schema and ownership are described above. Metric-registry revision 20
+and comparison revision 39 include contact-task requirements. Task reset mixtures affect comparison;
 curriculum labels and ordering do not. Complete resolved configuration, runtime
 versions and pinned input lineage appear once in the stage's `provenance`.
 Workers verify this configuration and the pinned producer digests before training.
@@ -673,8 +677,8 @@ On acceptance, publication copies the already-tested actor bytes and verifies
 their digest. Metadata and the report record both workloads, selected and tested
 digests, raw metrics, required values, individual results, overall status, and
 failure reasons. An accepted campaign automatically advances `latest`; `best`
-advances only for a strictly lower validation cost within the same comparison
-fingerprint.
+advances only for a strictly better validation selection metric within the same
+comparison fingerprint, using the stage's configured direction.
 Independent audit remains available with:
 
 ```bash
@@ -734,8 +738,9 @@ failure. The 45-second policy budget includes handoff, settling, and any restart
 ends that candidate's transfer qualification. On failure to qualify, restore the
 baseline deployment through `latest`; retain candidates and Lab-ranked `best`.
 
-The correction experiment retains the 0.03/0.09 reward override, gamma 0.999,
-and lambda 0.995 for reproducibility. Both completed stronger-reward trials
+The retained correction reports record the 0.03/0.09 reward override, gamma
+0.999 and lambda 0.995. The current curriculum uses the reproduced accepted
+recipe instead. Both completed stronger-reward trials
 failed validation, including the longer-horizon restart, which ended normally
 after 50 broad and 85 refinement updates. A fresh control using the previous
 complete experiment settings reproduced its Lab acceptance exactly. Recorded-input
@@ -744,3 +749,69 @@ increasing reward strength further is not justified by insufficient correction.
 No tighter-hover candidate qualified for PX4 testing. All task-owned workers and
 monitors are stopped, and `latest` remains baseline `20260913T222441Z`.
 See `FLIGHT_TO_POLICY_IMPROVEMENTS.md` for exact inputs and results.
+
+## Complete nominal contact curriculum
+
+The nominal stage is currently blocked: its 10 mm latch threshold puts the button
+behind the solid base collider, while deployment experiments use 5 mm. The
+2026-09-25 checks therefore stopped before PPO. See
+`phase_f/F4_curriculum_and_randomization.md` and
+`.build/press-curriculum-20260925/nominal-blocker.json` before using this curriculum.
+
+`configs/train/press_curriculum_quad.yaml` starts from scratch in the `press`
+namespace and sequences hover, approach, gentle contact, easy press-and-retreat,
+and nominal press-and-retreat. Its complete experiments live in
+`configs/train/stage/`. All stages use the same architecture, enabled actor and
+critic normalization, action scales and pinned controller/flight inputs.
+Hover uses the effective settings reproduced by run `20260914T014233Z`, including
+0.01/0.03 stabilization weights and longest-hold selection. Approach uses 4,096
+parallel environments, 256-step rollouts and lambda 0.99. Contact tasks retain
+that rollout shape; their horizons are 20 seconds for gentle contact and 90
+seconds for pressing. Contact episode clocks start at zero.
+
+The contact task observes filtered pad/button forces separately from other pad
+and vehicle collisions. First-contact quality uses the preceding physics sample;
+its speed, alignment and attitude thresholds come from `rl.press.goal`. The real
+button joint drives the same confirmation/release latch as production, sampled
+at policy cadence. `button_threshold_scale` multiplies `switches.press_threshold`.
+The lamp observation contains the resulting state. Every physics sample contributes
+to the compression maximum, bounded by the authored physical stroke. No actor
+observation fields or asset bytes change.
+
+Gentle contact and easy pressing start around the preceding approach goal using
+measured hover states. Nominal pressing restores the navigation/hover reset
+mixture so its actor completes the full task from handoff states. Gentle contact
+requires five consecutive stable contact samples and no toggle.
+Pressing requires exactly one off-to-on transition, release, return to the hover
+target and the existing 30-second continuous hold. The final stage uses geometry,
+stiffness and threshold scales of 1.0. Reward and raw physical progress are
+separate; task labels do not choose either. The acceptance requirements are
+recorded explicitly in schema-29 reports. The complete checkpoint remains schema
+1. Old producer reports are not migrated.
+
+**Provisional Lab acceptance:** complete press-and-retreat success at least 80%,
+stable first contacts among contacted episodes at least 85%, successful retreat
+among toggled episodes at least 95%, zero unsafe collisions and other physical
+failures, no repeated toggles, and bounded compression. Missing contact or toggle
+populations fail the corresponding conditional requirement. Gentle-contact
+success must reach 85%. These relaxed thresholds establish trainability; they must
+be tightened in later qualification after the complete curriculum can be trained.
+They do not establish domain-randomized or PX4 qualification. The PX4 adapter
+continues to reject contact/press task artifacts.
+
+`make -o generate-drone-usd eval-press HYDRA_CONFIG=<stage.yaml>
+EVAL_ARGS=--task-feasibility` drives diagnostic feedback through the actual task,
+termination rules and evaluator on validation seeds. The existing
+`--hover-feasibility` option remains available for hover diagnostics. Physical
+contact-chain checks alone bypass task termination and cannot establish learning
+feasibility. Procedural smoke and feasibility checks never advance policy labels.
+Contact feedback resets its pressure memory for each seed, applies pressure along
+the wall normal, and compensates the actual tool offset while the loaded drone
+tilts. Feasibility reports record that measured tool offset.
+
+For supervised campaign operation, record a hypothesis and evidence for every
+revision. A failed curriculum remains terminal; a later invocation may explicitly
+initialize from the last accepted predecessor and run the remaining stages.
+Preserve that cross-invocation lineage in the operator record. Do not enable the
+training wrapper's `--shutdown` during bounded diagnosis; request host shutdown
+only after the overall execution has completed or exhausted its issue allowance.

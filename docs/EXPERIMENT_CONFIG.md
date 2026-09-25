@@ -116,7 +116,7 @@ must be positive, the activation must be non-empty, initial noise must be
 finite and non-negative, and the output initialization is
 `scratch-neutral-output`.
 
-`rl.press.task` selects explicit `hover` or `approach` behavior, independently of
+`rl.press.task` selects explicit `hover`, `approach`, `contact`, or `press` behavior, independently of
 pipeline names and order. `rl.press.reset.mix` contains measured sources and
 positive weights summing to one. `rl.episode_length_s` is the shared episode
 timeout; `rl.press.goal.stable_steps` is the common hold requirement.
@@ -136,6 +136,9 @@ attitude envelope for `goal.stable_steps`. `reward` owns position progress,
 stabilization, the predictive range-undershoot barrier, hold progress, and terminal
 outcomes;
 `reset` owns the physical scene and reset mixture;
+`contact` owns contact/press progress rewards, stable-touch samples, compression
+and conditional first-contact/retreat requirements, plus diagnostic feedback
+settings. The shared `goal.stable_steps` remains the press retreat hold;
 `termination` owns contact
 sensing and production flight envelopes, including a range-undershoot limit
 equal to the acceptance minimum range; `evaluation` owns disjoint validation/test

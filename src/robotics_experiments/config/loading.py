@@ -328,8 +328,21 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
 
 def _validate_press_task(experiment: ExperimentConfig) -> None:
     press = experiment.rl.press
-    if press.task not in {"hover", "approach"}:
-        raise ValueError("rl.press.task must be hover or approach")
+    if press.task not in {"hover", "approach", "contact", "press"}:
+        raise ValueError("rl.press.task must be hover, approach, contact or press")
+    for field in fields(press.contact):
+        value = getattr(press.contact, field.name)
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"rl.press.contact.{field.name} must be finite and positive")
+    for name in ("first_contact_rate_min", "retreat_rate_min"):
+        if getattr(press.contact, name) > 1:
+            raise ValueError(f"rl.press.contact.{name} must be at most 1")
+    for name in ("button_geometry_scale", "button_stiffness_scale", "button_threshold_scale"):
+        value = getattr(press.reset, name)
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"rl.press.reset.{name} must be finite and positive")
+    if press.task in {"contact", "press"} and not press.reset.physical_contact_enabled:
+        raise ValueError("contact tasks require physical contact")
     if any(
         source.source not in {"pinned_flight_parameters", "measured_navigation_handoff"}
         or not math.isfinite(source.weight)

@@ -1,0 +1,28 @@
+# @package _global_
+defaults:
+  - /train/stage/press_approach_quad
+  - _self_
+
+rl:
+  episode_length_s: 20.0
+  press:
+    task: contact
+    reset:
+      # Contact starts at the preceding approach goal, with measured motion.
+      mix:
+        - source: pinned_flight_parameters
+          weight: 1.0
+    reward:
+      stabilization_weight: 0.01
+      action_effort_weight: 0.01
+      terminal_success_weight: 30.0
+      terminal_failure_weight: 30.0
+    acceptance:
+      success_rate_min: 0.85
+      minimum_range_m: 0.30
+  training:
+    plateau:
+      metric_name: contact_progress_mean
+      direction: maximize
+      minimum_delta: 0.01
+      patience_evaluations: 10

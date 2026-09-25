@@ -251,15 +251,20 @@ the current contents and the intended home for that kind of code.
   Results retain selected diagnostic candidates with `accepted: false`. Accepted
   stages publish before their exact pinned learner advances. Stop on rejection,
   publication error, runtime error or interruption; no curriculum retries, branches,
-  checkpoint merging or process resume. Training/attempt reports are strict schema 28;
+  checkpoint merging or process resume. Training/attempt reports are strict schema 29;
   curriculum summaries are schema 1. Each level owns its terminal report. Publication
   never rewrites completed training reports. All stages share one policy namespace and
   curriculum Trackio database, with distinct stage/attempt identities. Supplemental
   policy metadata records the accepted prefix and exact historical actor/report
   digests, not retesting of a later actor on earlier tasks. `rl.press.task` owns
-  hover/approach behavior, `rl.press.reset.mix` owns resets, `rl.episode_length_s`
+  hover/approach/contact/press behavior, `rl.press.reset.mix` owns resets, `rl.episode_length_s`
   owns duration, `rl.press.goal.stable_steps` owns the hold, and `rl.training` owns
-  phases and plateau rules. Later phases restore the attempt's complete selected
+  phases and plateau rules. Contact tasks read the real button joint at policy
+  cadence, classify filtered pad/button contact, and require one toggle followed
+  by release and the complete stable retreat hold. Contact limits 80% full
+  success, 85% stable first contacts and 95% retreat among toggled episodes are
+  provisional Lab milestones; tighten them after the full curriculum is
+  trainable. PX4 contact deployment remains unsupported. Later phases restore the attempt's complete selected
   learner, apply their schedule, and reset environments before new rollouts.
   Every checkpoint uses one fixed validation workload. The evaluator returns raw
   named metrics; each experiment owns its Hydra plateau rule, which reads one named

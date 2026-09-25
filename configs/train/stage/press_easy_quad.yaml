@@ -1,0 +1,13 @@
+# @package _global_
+defaults:
+  - /train/stage/press_contact_quad
+  - _self_
+
+rl:
+  # Allow contact, release, settling, and the unchanged 30-second retreat hold.
+  episode_length_s: 90.0
+  press:
+    task: press
+    acceptance:
+      # Provisional milestone; tighten after the full curriculum is trainable.
+      success_rate_min: 0.80

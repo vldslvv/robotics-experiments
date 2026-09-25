@@ -497,6 +497,7 @@ print(json.dumps(config.__all__))
         "PressApproachRewardConfig",
         "PressApproachTerminationConfig",
         "PressApproachVelocityReferenceConfig",
+        "PressTaskConfig",
         "PressResetSourceConfig",
         "PressHandoffConfig",
         "PressResetConfig",

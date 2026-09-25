@@ -1,10 +1,14 @@
 import importlib
 import importlib.abc
 import importlib.machinery
+import importlib.util
 import sys
 import types
 
 import pytest
+
+from robotics_experiments._cadence import _CadenceState
+from tests.support.paths import REPO_ROOT
 
 
 class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):
@@ -158,6 +162,57 @@ def test_contract_and_mode_are_forwarded_to_task_config_and_environment(*, monke
     assert calls["gym"][1]["hover_reset_samples"] is hover_reset_samples
     assert env_cfg.scene.num_envs == 8
     assert calls["gym"][1]["training"] is training
+
+
+def test_full_reset_restarts_policy_and_command_timing(monkeypatch):
+    class DirectRLEnv:
+        def reset(self, *, seed, options):
+            return seed, {
+                "options": options,
+                "command_phase": self._command_refresh_cadence,
+                "command_remaining": self._command_refresh_steps_remaining,
+            }
+
+        def step(self, action, /):
+            del action
+            return self.cfg.decimation
+
+    for name, exports in {
+        "isaaclab": {},
+        "isaaclab.envs": {"DirectRLEnv": DirectRLEnv},
+        "isaaclab_contrib": {},
+        "isaaclab_contrib.actuators": {"Thruster": object, "ThrusterCfg": object},
+        "isaaclab_contrib.utils": {},
+        "isaaclab_contrib.utils.types": {"MultiRotorActions": object},
+    }.items():
+        module = types.ModuleType(name)
+        module.__dict__.update(exports)
+        monkeypatch.setitem(sys.modules, name, module)
+    spec = importlib.util.spec_from_file_location(
+        "flight_reset_contract",
+        REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/_flight_env.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class FlightEnv(module._FlightDirectRLEnv):  # noqa: SLF001 - exercise the actual reset method
+        def __init__(self):
+            self.cfg = types.SimpleNamespace(policy_rate_hz=20.0)
+            self._policy_cadence = _CadenceState(previous_time_ns=0)
+            self._physics_period_ns = 4_000_000
+            self._command_refresh_cadence = _CadenceState(12_000_000, 12_000_000)
+            self._command_refresh_steps_remaining = 2
+
+    env = FlightEnv()
+    assert [env.step(None) for _ in range(3)] == [13, 12, 13]
+    assert env.reset(seed=42, options={"check": True}) == (
+        42,
+        {"options": {"check": True}, "command_phase": _CadenceState(0), "command_remaining": 0},
+    )
+    assert [env.step(None) for _ in range(2)] == [13, 12]
+    env.reset(seed=42)
+    assert env.step(None) == 13
 
 
 def test_drone_hover_task_import_and_config_when_isaac_lab_available():

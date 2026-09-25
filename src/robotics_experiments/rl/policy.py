@@ -56,7 +56,7 @@ _SCALE_FIELDS = (
     "max_body_rate_radps",
 )
 _ACTION_DIMENSIONS = {"velocity": 4, "ctbr": 4}
-_PRESS_CURRICULUM_STAGES = {"hover", "approach"}
+_PRESS_CURRICULUM_STAGES = {"hover", "approach", "contact", "press"}
 
 
 @dataclass(frozen=True)

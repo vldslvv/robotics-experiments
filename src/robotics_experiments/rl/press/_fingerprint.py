@@ -26,8 +26,15 @@ def _press_comparison_fingerprint(
         if item.id == config.rl.training.vehicle_id
     )
     payload = {
-        "comparison_revision": 38,
+        "comparison_revision": 39,
         "acceptance": asdict(config.rl.press.acceptance),
+        "contact": {
+            name: value
+            for name, value in asdict(config.rl.press.contact).items()
+            if not name.startswith("feasibility_")
+        }
+        if config.rl.press.task in {"contact", "press"}
+        else None,
         "evaluation": {
             name: value
             for name, value in asdict(config.rl.press.evaluation).items()

@@ -627,6 +627,65 @@ def test_hover_feedback_signs_frames_and_limits():
     assert torch.equal(action, policy(observation))
 
 
+def test_contact_feedback_retains_pressure_through_sensor_gaps_and_resets():
+    import torch
+
+    from robotics_experiments.config import load_config
+
+    module = _load_eval_press_module()
+    config = load_config(REPO_ROOT / "configs/train/stage/press_contact_quad.yaml")
+    policy = module._ContactFeedback(  # noqa: SLF001 - diagnostic control contract
+        config=config, tool_offset_m=torch.tensor([0.36, 0.0, 0.01])
+    )
+    observation = torch.zeros((1, 35))
+    observation[:, 12] = 1.0
+    initial = policy(observation)
+    observation[:, 21] = 0.0003
+    first = policy(observation)
+    second = policy(observation)
+    assert second[0, 0] > first[0, 0] > initial[0, 0]
+    policy.reset()
+    torch.testing.assert_close(policy(observation), first)
+    observation[:, 21] = 0
+    assert torch.equal(policy(observation), initial)
+    observation[:, 25] = 1
+    observation[:, 0] = -0.1
+    assert policy(observation)[0, 0] < 0
+
+
+def test_press_feedback_preserves_wall_alignment_when_tilted_and_corrects_retreat_overshoot():
+    import torch
+
+    from robotics_experiments.config import load_config
+
+    module = _load_eval_press_module()
+    config = load_config(REPO_ROOT / "configs/train/stage/press_easy_quad.yaml")
+    policy = module._ContactFeedback(  # noqa: SLF001 - diagnostic control contract
+        config=config, tool_offset_m=torch.tensor([0.36, 0.0, 0.01])
+    )
+    observation = torch.zeros((1, 35))
+    normal = torch.tensor([0.98, 0.0, 0.199]).div(torch.tensor([0.98, 0.0, 0.199]).norm())
+    observation[0, 12:15] = normal
+    observation[0, 16] = 1.0
+    observation[0, :3] = -0.1 * normal
+    action = policy(observation)
+    torch.testing.assert_close(
+        action[0, :3],
+        normal
+        * config.rl.press.contact.feasibility_approach_mps
+        / config.rl.action.max_body_velocity_mps,
+    )
+    observation[0, 21] = 0.001
+    loaded_action = policy(observation)
+    wall_vertical = torch.linalg.cross(normal, torch.tensor([0.0, 1.0, 0.0]))
+    assert float(loaded_action[0, :3] @ wall_vertical) > 0
+    observation[0, 25] = 1.0
+    observation[0, :3] = 0.02 * normal
+    action = policy(observation)
+    assert float(action[0, :3] @ normal) > 0
+    torch.testing.assert_close(action[0, :3], normal * (action[0, :3] @ normal))
+
+
 def test_hover_feasibility_reuses_production_evaluation_and_pinned_resets(monkeypatch, tmp_path):
     import robotics_experiments.workflows.isaac_lab as workflow
     from robotics_experiments.config import load_config

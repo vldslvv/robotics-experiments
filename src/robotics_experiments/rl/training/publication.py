@@ -10,6 +10,7 @@ from pathlib import Path
 __all__ = ["publish_policy_labels"]
 
 _TRAINING_REPORT = "training_report.json"
+_REPORT_SCHEMA_VERSION = 29
 
 
 def _publish_label(*, policy_root: Path, run_dir: Path, label: str) -> None:
@@ -39,7 +40,7 @@ def _comparable_best_value(
     except (OSError, json.JSONDecodeError):
         return None
     if (
-        report.get("schema_version") != 28
+        report.get("schema_version") != _REPORT_SCHEMA_VERSION
         or report.get("comparison_fingerprint") != comparison_fingerprint
     ):
         return None

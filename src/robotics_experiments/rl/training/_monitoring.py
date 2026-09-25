@@ -19,7 +19,7 @@ __all__ = [
     "write_system_scalars",
 ]
 
-METRIC_REGISTRY_REVISION = 19
+METRIC_REGISTRY_REVISION = 20
 
 _HOVER_SIGNALS = {
     "position_error_enu_x": ("East position error", "m"),
@@ -198,6 +198,30 @@ EVALUATION_METRICS = (
     )
     for signal_name, (label, unit) in _HOVER_SIGNALS.items()
     for statistic, statistic_label in _BINDING_STATISTICS.items()
+)
+
+_CONTACT_METRICS = (
+    ("contact_progress_mean", "Mean contact task progress", "normalized", "maximize"),
+    ("contact_rate", "Episodes with intended button contact (fraction)", "fraction", "maximize"),
+    (
+        "stable_first_contact_rate",
+        "Stable first contacts among contacts (fraction)",
+        "fraction",
+        "maximize",
+    ),
+    ("toggle_rate", "Episodes with at least one toggle (fraction)", "fraction", "maximize"),
+    (
+        "retreat_rate",
+        "Successful retreats among toggled episodes (fraction)",
+        "fraction",
+        "maximize",
+    ),
+    ("multiple_toggle_rate", "Episodes with multiple toggles (fraction)", "fraction", "minimize"),
+    ("peak_compression_m", "Maximum pusher compression (meters)", "m", "minimize"),
+)
+EVALUATION_METRICS += tuple(
+    MetricSpec(name, label, unit, label, direction)
+    for name, label, unit, direction in _CONTACT_METRICS
 )
 
 

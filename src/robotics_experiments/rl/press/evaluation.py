@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from robotics_experiments.config import PressApproachAcceptanceConfig
-from robotics_experiments.flight_parameters import FlightParameters, SignalStatistics
+from robotics_experiments.config import PressTaskConfig
+from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.rl.evaluation import PolicyEvaluation
 
 __all__ = [
@@ -27,13 +27,18 @@ _BINDING_STATISTICS = (
 
 
 @dataclass(frozen=True)
-class PressAcceptanceCriteria:
-    """Requirements fixed before a press-policy campaign starts."""
+class _Requirement:
+    name: str
+    metric: str
+    comparison: str
+    required: float
 
-    success_rate_min: float
-    collision_rate_max: float
-    minimum_range_m: float
-    hover_limits: tuple[SignalStatistics, ...]
+
+@dataclass(frozen=True)
+class PressAcceptanceCriteria:
+    """Fixed physical requirements, independent of reward and stage labels."""
+
+    requirements: tuple[_Requirement, ...]
 
 
 @dataclass(frozen=True)
@@ -58,17 +63,57 @@ class AcceptanceResult:
 
 def create_press_acceptance_criteria(
     *,
-    config: PressApproachAcceptanceConfig,
+    config: PressTaskConfig,
     flight_parameters: FlightParameters,
 ) -> PressAcceptanceCriteria:
     """Combine task requirements with the pinned measured hover limits."""
 
-    return PressAcceptanceCriteria(
-        success_rate_min=float(config.success_rate_min),
-        collision_rate_max=float(config.collision_rate_max),
-        minimum_range_m=float(config.minimum_range_m),
-        hover_limits=flight_parameters.hover.acceptance_limits,
-    )
+    acceptance = config.acceptance
+    requirements = [
+        _Requirement("trace finiteness", "all_traces_finite", "==", 1.0),
+        _Requirement("success rate", "success_rate", ">=", acceptance.success_rate_min),
+        _Requirement("collision rate", "collision_rate", "<=", acceptance.collision_rate_max),
+        _Requirement(
+            "minimum closest range", "minimum_closest_range_m", ">=", acceptance.minimum_range_m
+        ),
+        _Requirement("other flight-failure rate", "other_flight_failure_rate", "==", 0.0),
+    ]
+    if config.task in {"contact", "press"}:
+        requirements.extend(
+            (
+                _Requirement(
+                    "stable first contact",
+                    "stable_first_contact_rate",
+                    ">=",
+                    config.contact.first_contact_rate_min,
+                ),
+                _Requirement(
+                    "pusher compression",
+                    "peak_compression_m",
+                    "<=",
+                    config.contact.compression_max_m,
+                ),
+                _Requirement("multiple toggles", "multiple_toggle_rate", "==", 0.0),
+            )
+        )
+        if config.task == "press":
+            requirements.append(
+                _Requirement(
+                    "retreat among toggles", "retreat_rate", ">=", config.contact.retreat_rate_min
+                )
+            )
+    else:
+        requirements.extend(
+            _Requirement(
+                f"flight parameters {limit.name} {metric_name}",
+                f"flight_parameters.{limit.name}.{metric_name}",
+                "<=",
+                float(getattr(limit, field_name)),
+            )
+            for limit in flight_parameters.hover.acceptance_limits
+            for metric_name, field_name in _BINDING_STATISTICS
+        )
+    return PressAcceptanceCriteria(requirements=tuple(requirements))
 
 
 def evaluate_press_acceptance(
@@ -78,69 +123,29 @@ def evaluate_press_acceptance(
 ) -> AcceptanceResult:
     """Apply the campaign's fixed criteria to one raw policy evaluation."""
 
-    requirements = (
-        ("trace finiteness", evaluation.metric("all_traces_finite"), "==", 1.0),
-        (
-            "success rate",
-            evaluation.metric("success_rate"),
-            ">=",
-            criteria.success_rate_min,
-        ),
-        (
-            "collision rate",
-            evaluation.metric("collision_rate"),
-            "<=",
-            criteria.collision_rate_max,
-        ),
-        (
-            "minimum closest range",
-            evaluation.metric("minimum_closest_range_m"),
-            ">=",
-            criteria.minimum_range_m,
-        ),
-        (
-            "other flight-failure rate",
-            evaluation.metric("other_flight_failure_rate"),
-            "==",
-            0.0,
-        ),
-    ) + tuple(
-        (
-            f"flight parameters {limit.name} {metric_name}",
-            next(
-                (
-                    float(metric.value)
-                    for metric in evaluation.metrics
-                    if metric.name == f"flight_parameters.{limit.name}.{metric_name}"
-                    and metric.value is not None
-                    and np.isfinite(metric.value)
-                ),
-                None,
-            ),
-            "<=",
-            float(getattr(limit, field_name)),
+    metrics = {metric.name: metric.value for metric in evaluation.metrics}
+    checks = []
+    for requirement in criteria.requirements:
+        actual = metrics.get(requirement.metric)
+        passed = (
+            actual is not None
+            and np.isfinite(actual)
+            and (
+                actual == requirement.required
+                if requirement.comparison == "=="
+                else actual >= requirement.required
+                if requirement.comparison == ">="
+                else actual <= requirement.required
+            )
         )
-        for limit in criteria.hover_limits
-        for metric_name, field_name in _BINDING_STATISTICS
-    )
-    checks = tuple(
-        AcceptanceCheck(
-            name=name,
-            passed=(
-                actual is not None
-                and (
-                    actual == required
-                    if comparison == "=="
-                    else actual >= required
-                    if comparison == ">="
-                    else actual <= required
-                )
-            ),
-            actual=actual,
-            comparison=comparison,
-            required=required,
+        checks.append(
+            AcceptanceCheck(
+                name=requirement.name,
+                passed=bool(passed),
+                actual=actual,
+                comparison=requirement.comparison,
+                required=requirement.required,
+            )
         )
-        for name, actual, comparison, required in requirements
-    )
     reasons = tuple(check.name for check in checks if not check.passed)
-    return AcceptanceResult(passed=not reasons, checks=checks, reasons=reasons)
+    return AcceptanceResult(passed=not reasons, checks=tuple(checks), reasons=reasons)

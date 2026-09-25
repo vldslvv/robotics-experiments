@@ -43,8 +43,8 @@ navigation_noise:
   lateral_align_max_m: 0.03374635443902746
   relative_attitude_error_max_rad: 0.01633899543191001
 
-# The target is common to hover and approach. Acceptance replaces these legacy
-# pose tolerances with the pinned flight parameters; the center remains task-owned.
+# Hover and approach use the pinned flight envelope around this range center.
+# Contact uses the alignment, attitude and speed limits to qualify first touch.
 goal:
   range_min_m: 0.47
   range_max_m: 0.49
@@ -108,3 +108,22 @@ acceptance:
   success_rate_min: 0.95
   collision_rate_max: 0.0
   minimum_range_m: 0.40
+
+# Provisional Lab milestones. Tighten after the complete curriculum is trainable.
+contact:
+  stable_steps: 5
+  target_range_m: 0.36
+  compression_max_m: 0.015
+  first_contact_rate_min: 0.85
+  retreat_rate_min: 0.95
+  approach_progress_weight: 10.0
+  contact_hold_weight: 1.0
+  button_progress_weight: 10.0
+  toggle_weight: 30.0
+  retreat_progress_weight: 10.0
+  step_cost: 0.01
+  feasibility_approach_mps: 0.02
+  feasibility_press_increment_mps: 0.01
+  feasibility_retreat_mps: 0.04
+  feasibility_compression_m: 0.0004
+  feasibility_compression_gain_per_s: 5.0

@@ -1,0 +1,20 @@
+# @package _global_
+# Nominal pressing is blocked by the asset/latch mismatch documented in
+# docs/phase_f/F4_curriculum_and_randomization.md. Resolve it before training.
+defaults:
+  - /base_curriculum
+  - _self_
+
+policy_name: press
+initial_learner: null
+stages:
+  - name: hover
+    config_path: configs/train/stage/press_hover_quad.yaml
+  - name: approach
+    config_path: configs/train/stage/press_approach_quad.yaml
+  - name: gentle_contact
+    config_path: configs/train/stage/press_contact_quad.yaml
+  - name: easy_press_retreat
+    config_path: configs/train/stage/press_easy_quad.yaml
+  - name: nominal_press_retreat
+    config_path: configs/train/stage/press_nominal_quad.yaml

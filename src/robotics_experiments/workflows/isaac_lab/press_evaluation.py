@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -21,6 +21,7 @@ from robotics_experiments.rl.press import (
     PressApproachResult,
     PressApproachRewardTerms,
 )
+from robotics_experiments.rl.training._monitoring import evaluation_metric_names
 
 __all__ = [
     "PressApproachEpisodeMetrics",
@@ -571,7 +572,7 @@ def press_policy_evaluation(
         if not np.isfinite(value):
             raise ValueError(f"non-finite evaluation {name}: source={source} iteration={iteration}")
     hover_statistics = {statistics.name: statistics for statistics in result.hover_statistics}
-    return PolicyEvaluation(
+    evaluation = PolicyEvaluation(
         iteration=iteration,
         checkpoint_path=checkpoint_path,
         policy_digest=policy_digest,
@@ -619,4 +620,11 @@ def press_policy_evaluation(
         ),
         reward_means=result.reward_means,
         source=source,
+    )
+    metrics = {metric.name: metric for metric in evaluation.metrics}
+    return replace(
+        evaluation,
+        metrics=tuple(
+            metrics.get(name, EvaluationMetric(name, None)) for name in evaluation_metric_names()
+        ),
     )

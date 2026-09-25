@@ -1,8 +1,22 @@
 # F4 -- Contact curriculum and domain randomization
 
-Status: PLANNED; depends on an accepted contact policy from F3. Contact-task
-training and domain randomization remain separate work from the existing hover
-and approach tasks.
+Status: Task implementation and curriculum configuration are available, but
+nominal pressing is physically blocked; PPO has not started. Domain randomization
+remains planned and depends on an accepted nominal contact policy. See
+`configs/train/press_curriculum_quad.yaml` and the RL workflow for the provisional
+80/85/95 Lab requirements; these must tighten after the curriculum is trainable.
+
+The 2026-09-25 validation-seed feedback checks passed hover, approach, gentle
+contact and easy press-and-retreat. Easy pressing completed all 300 episodes
+with one toggle, full retreat, zero unsafe contacts and 99.7% stable first
+contacts. Nominal pressing produced 300 unintended pad collisions and no toggles.
+The unscaled button protrudes 8.399 mm from the solid base collider; at the
+configured 10 mm threshold its collider is fully enclosed by that base.
+The existing deployment experiments instead use a 5 mm latch threshold.
+Resolve that task-definition mismatch before launching the full curriculum;
+do not lower collision acceptance or modify assets to hide it. Exact geometry,
+asset digest and runtime evidence are in
+`.build/press-curriculum-20260925/nominal-blocker.json` and the adjacent reports.
 
 The shared stage runner and ordered curriculum `stages` provide execution and
 checkpoint forwarding. Curriculum configurations live in `configs/train/` and
@@ -24,8 +38,8 @@ Each accepted stage supplies its complete selected learner to the next stage.
 The curriculum reads only the acceptance boolean. It must not inspect contact
 measurements or promote a task from rolling training metrics. Fresh environments
 apply the next experiment's task parameters; simulator state is not inherited.
-Contact task identity and its policy contract require their own implementation
-and tests before adding those experiments.
+The contact and press tasks share the schema-3 observation contract and have
+separate physical completion rules and acceptance requirements.
 
 ## Domain randomization
 

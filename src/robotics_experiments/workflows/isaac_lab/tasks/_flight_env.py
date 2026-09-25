@@ -92,6 +92,15 @@ class _FlightDirectRLEnv(DirectRLEnv):
             policy_rate_hz=self.cfg.policy_rate_hz,
         )
 
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[Any, dict]:
+        """Start explicit full resets with the same policy and command timing."""
+        self._policy_cadence = _CadenceState(previous_time_ns=0)
+        self._command_refresh_cadence = _CadenceState(previous_time_ns=0)
+        self._command_refresh_steps_remaining = 0
+        return super().reset(seed=seed, options=options)
+
     def step(self, action: torch.Tensor) -> tuple[Any, ...]:
         self._policy_cadence, self.cfg.decimation = _next_interval_steps(
             state=self._policy_cadence,

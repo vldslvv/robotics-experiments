@@ -31,7 +31,7 @@ _FLIGHT_PARAMETERS = load_flight_parameters(
 
 def _acceptance_criteria(config):
     return create_press_acceptance_criteria(
-        config=config.rl.press.acceptance,
+        config=config.rl.press,
         flight_parameters=_FLIGHT_PARAMETERS,
     )
 
@@ -401,7 +401,11 @@ def test_successful_hover_selection_minimizes_error_and_preserves_passing_ties()
     assert eligible == frozenset({"actor-0", "actor-1", "actor-2"})
     assert (
         select_best_evaluation(
-            criteria=config.rl.training.plateau,
+            criteria=replace(
+                config.rl.training.plateau,
+                metric_name="hover_envelope_utilization_mean",
+                direction="minimize",
+            ),
             evaluations=candidates,
             eligible_policy_digests=eligible,
         )
@@ -415,7 +419,7 @@ def _report(*, fingerprint: str, value: float) -> str:
     return json.dumps(
         {
             "comparison_fingerprint": fingerprint,
-            "schema_version": 28,
+            "schema_version": 29,
             "selected": {
                 "metric": {
                     "name": "evaluation_diagnostic_cost",

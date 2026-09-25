@@ -66,7 +66,11 @@ from robotics_experiments.rl.training.progress import (
     advance_plateau,
     select_best_evaluation,
 )
-from robotics_experiments.rl.training.publication import publish_policy_labels
+from robotics_experiments.rl.training.publication import (
+    _REPORT_SCHEMA_VERSION,
+    publish_policy_labels,
+)
+from robotics_experiments.workflows.isaac_lab._contact_evaluation import _evaluate_contact_policy
 
 __all__ = [
     "LearnerCheckpoint",
@@ -80,7 +84,6 @@ __all__ = [
 _REPORT_FILENAME = "training_report.json"
 _ATTEMPT_REPORT_FILENAME = "attempt_report.json"
 _TELEMETRY_FILENAME = "telemetry.json"
-_REPORT_SCHEMA_VERSION = 28
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _INITIAL_LEARNER_ENV = "RL_INITIAL_LEARNER"
 _CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
@@ -455,27 +458,40 @@ def _evaluation_worker_main(
 
                 telemetry.start(role="val" if workload_role == "validation" else "test")
                 try:
-                    rollout = evaluate_press_approach_policy(
-                        env=env,
-                        policy=policy,
-                        seeds=seeds,
-                        episodes_per_seed=evaluation_config.episodes_per_seed,
-                        hold_steps=round(config.rl.press.goal.stable_steps),
-                        flight_parameters=candidate_metadata.flight_parameters,
-                        report=_report,
-                        trace_worst_episode=False,
-                    )
+                    if config.rl.press.task in {"contact", "press"}:
+                        evaluation = _evaluate_contact_policy(
+                            env=env,
+                            policy=policy,
+                            seeds=seeds,
+                            episodes_per_seed=evaluation_config.episodes_per_seed,
+                            iteration=int(iteration),
+                            checkpoint_path=Path(checkpoint_name),
+                            policy_digest=str(policy_digest),
+                            source=f"fresh-{workload_role}",
+                            report=_report,
+                        )
+                    else:
+                        rollout = evaluate_press_approach_policy(
+                            env=env,
+                            policy=policy,
+                            seeds=seeds,
+                            episodes_per_seed=evaluation_config.episodes_per_seed,
+                            hold_steps=config.rl.press.goal.stable_steps,
+                            flight_parameters=candidate_metadata.flight_parameters,
+                            report=_report,
+                            trace_worst_episode=False,
+                        )
+                        evaluation = press_policy_evaluation(
+                            iteration=int(iteration),
+                            checkpoint_path=Path(checkpoint_name),
+                            policy_digest=str(policy_digest),
+                            result=rollout,
+                            source=f"fresh-{workload_role}",
+                        )
                 finally:
                     telemetry_interval = telemetry.finish(
                         work_items=len(seeds) * evaluation_config.episodes_per_seed
                     )
-                evaluation = press_policy_evaluation(
-                    iteration=int(iteration),
-                    checkpoint_path=Path(checkpoint_name),
-                    policy_digest=str(policy_digest),
-                    result=rollout,
-                    source=f"fresh-{workload_role}",
-                )
                 result_queue.put(("evaluation", (evaluation, telemetry_interval)))
         finally:
             _close_resource(env)
@@ -952,7 +968,7 @@ def run_attempt(
     """Train exactly one attempt in this process, with fresh simulator state."""
     seed = config.rl.training.attempt_seeds[attempt_index]
     acceptance_criteria = create_press_acceptance_criteria(
-        config=config.rl.press.acceptance, flight_parameters=inputs.flight_parameters
+        config=config.rl.press, flight_parameters=inputs.flight_parameters
     )
     comparison_fingerprint = _press_comparison_fingerprint(
         config=config,
@@ -1263,7 +1279,7 @@ def run_attempt(
             )
             write_training_progress()
             branch_iteration = 0
-            randomize_episode_lengths = config.rl.press.task != "hover"
+            randomize_episode_lengths = config.rl.press.task == "approach"
             for phase_index, phase in enumerate(phases):
                 parent = _select_attempt_candidate(
                     criteria=plateau_criteria,
@@ -1495,7 +1511,7 @@ def run_training(
     if initial_learner is not None:
         validate_learner(learner=initial_learner, config=config, inputs=inputs)
     criteria = create_press_acceptance_criteria(
-        config=config.rl.press.acceptance, flight_parameters=inputs.flight_parameters
+        config=config.rl.press, flight_parameters=inputs.flight_parameters
     )
     fingerprint = _press_comparison_fingerprint(
         config=config,

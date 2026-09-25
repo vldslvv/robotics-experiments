@@ -1,4 +1,4 @@
-"""Ground-truth Isaac Lab DirectRLEnv for the press approach curriculum stage."""
+"""Ground-truth Isaac Lab hover, approach, contact and press tasks."""
 
 from __future__ import annotations
 
@@ -31,10 +31,17 @@ from robotics_experiments.rl.press import (
     PressObservationMask,
     initial_press_approach_state,
     pack_press_observation,
+    quaternion_geodesic_error_rad,
     reset_press_approach_state,
     step_press_approach,
 )
 from robotics_experiments.rl.press._switch_asset import ASSET_TO_CANONICAL_WXYZ, SQRT_HALF
+from robotics_experiments.rl.press.contact import (
+    PressContactResult,
+    initial_press_contact_state,
+    reset_press_contact_state,
+    step_press_contact,
+)
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
 from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
     _DRONE_PRIM_PATH,
@@ -266,6 +273,26 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
         self._pusher_collision_latch = torch.zeros_like(self._body_collision_latch)
         self._completed_episode_count = torch.zeros((), device=self.device)
+        self._contact_task = self._experiment_config.rl.press.task in {"contact", "press"}
+        self._contact_state = initial_press_contact_state(ranges=relative_position[:, 0])
+        self._contact_result: PressContactResult | None = None
+        self._intended_contact = torch.zeros_like(self._body_collision_latch)
+        self._compression_peak_m = torch.zeros_like(relative_position[:, 0])
+        self._contact_seen = torch.zeros_like(self._body_collision_latch)
+        self._first_contact_stable = torch.zeros_like(self._body_collision_latch)
+        self._previous_contact_quality = torch.zeros_like(self._body_collision_latch)
+        if self._contact_task:
+            stroke = (
+                self.drone.data.joint_pos_limits[:, self._pusher_joint_id, 1]
+                - (self.drone.data.joint_pos_limits[:, self._pusher_joint_id, 0])
+            )
+            if bool(torch.any(stroke < self._experiment_config.rl.press.contact.compression_max_m)):
+                raise ValueError("contact compression limit exceeds the authored pusher stroke")
+
+    @property
+    def press_contact_result(self):
+        """Contact evidence from the completed step, retained across auto-reset."""
+        return self._contact_result
 
     @property
     def press_approach_result(self):
@@ -309,6 +336,10 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         if len(buttons) != 1:
             raise RuntimeError(f"switch requires exactly one ButtonMesh prim, found {len(buttons)}")
         button = buttons[0]
+        if self._experiment_config.rl.press.task in {"contact", "press"}:
+            self.cfg.pusher_contact_sensor_cfg.filter_prim_paths_expr = [
+                str(button.GetPath()).replace("env_0", "env_.*")
+            ]
         scale = self._experiment_config.rl.press.reset.button_geometry_scale
         if button.IsA(UsdGeom.Mesh):
             mesh = UsdGeom.Mesh(button)
@@ -376,13 +407,57 @@ class SwitchPressEnv(_FlightDirectRLEnv):
 
     def _latch_collision_sample(self) -> None:
         self._body_collision_latch |= self._collision_flag(sensor=self.body_contact_sensor)
-        self._pusher_collision_latch |= self._collision_flag(sensor=self.contact_sensor)
+        pad_contact = self._collision_flag(sensor=self.contact_sensor)
+        if not self._contact_task:
+            self._pusher_collision_latch |= pad_contact
+            return
+        self._compression_peak_m = torch.maximum(
+            self._compression_peak_m,
+            self._pusher_extension_target[:, 0]
+            - self.drone.data.joint_pos[:, self._pusher_joint_id],
+        )
+        force_matrix = self.contact_sensor.data.force_matrix_w
+        if force_matrix is None:
+            raise RuntimeError("contact task requires filtered pad/button contact forces")
+        button_force = force_matrix.sum(dim=2)
+        threshold = self._experiment_config.rl.press.termination.contact_force_threshold_n
+        intended = torch.linalg.vector_norm(button_force, dim=-1).amax(dim=-1) >= threshold
+        other_force = self.contact_sensor.data.net_forces_w - button_force
+        self._pusher_collision_latch |= (
+            torch.linalg.vector_norm(other_force, dim=-1).amax(dim=-1) >= threshold
+        )
+        self._intended_contact |= intended
+        first = intended & ~self._contact_seen
+        self._first_contact_stable |= first & self._previous_contact_quality
+        self._contact_seen |= intended
+        relative_position, relative_quat = self._relative_switch_pose()
+        goal = self._experiment_config.rl.press.goal
+        self._previous_contact_quality = (
+            (
+                torch.linalg.vector_norm(relative_position[:, 1:3], dim=-1)
+                <= goal.alignment_error_max_m
+            )
+            & (
+                quaternion_geodesic_error_rad(quaternion_xyzw=relative_quat)
+                <= goal.relative_attitude_error_max_rad
+            )
+            & (
+                torch.linalg.vector_norm(self.drone.data.root_lin_vel_b, dim=-1)
+                <= goal.linear_speed_max_mps
+            )
+            & (
+                torch.linalg.vector_norm(self.drone.data.root_ang_vel_b, dim=-1)
+                <= goal.angular_speed_max_radps
+            )
+        )
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         super()._pre_physics_step(actions)
         self._physics_substep_index = 0
         self._body_collision_latch.zero_()
         self._pusher_collision_latch.zero_()
+        self._intended_contact.zero_()
+        self._compression_peak_m.zero_()
 
     def _apply_action(self) -> None:
         # At substep N, sensor buffers contain the result of substep N-1. Skip
@@ -440,13 +515,46 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             flight_parameters=self._flight_parameters,
             hold_steps=self._experiment_config.rl.press.goal.stable_steps,
             approach_enabled=self._experiment_config.rl.press.task == "approach",
-            training=self._training,
+            training=self._training or self._contact_task,
         )
+        self._task_state = self._task_result.state
+        if self._contact_task:
+            self._contact_result = step_press_contact(
+                state=self._contact_state,
+                flight=self._task_result,
+                button_position_m=self.switch.data.joint_pos[:, self._switch_joint_id],
+                compression_m=self._compression_peak_m,
+                intended_contact=self._intended_contact,
+                contact_seen=self._contact_seen.clone(),
+                first_contact_stable=self._first_contact_stable.clone(),
+                action=self.actions,
+                config=press,
+                press_threshold_m=(
+                    self._experiment_config.switches.press_threshold
+                    * press.reset.button_threshold_scale
+                ),
+                confirm_steps=self._experiment_config.switches.press_confirm_steps,
+            )
+            self._contact_state = self._contact_result.state
+            return (
+                self._contact_result.success | self._contact_result.failure,
+                self._contact_result.timeout,
+            )
         result = self._task_result
-        self._task_state = result.state
         return result.termination.terminated, result.termination.time_out
 
     def _get_rewards(self) -> torch.Tensor:
+        if self._contact_task:
+            if self._contact_result is None:
+                raise RuntimeError("contact transition must advance before rewards")
+            self.extras["log"] = {
+                f"training/reward/{name}": value.mean()
+                for name, value in self._contact_result.rewards.items()
+            }
+            self.extras["log"]["training/Contact task progress"] = (
+                self._contact_result.progress.mean()
+            )
+            return self._contact_result.reward
         if self._task_result is None:
             raise RuntimeError("press transition must advance in _get_dones before rewards")
         result = self._task_result
@@ -510,7 +618,11 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             pusher_compression_rate_mps=-self.drone.data.joint_vel[:, self._pusher_joint_id],
             contact_valid=ones,
             contact_flag=self._contact_flag(),
-            lamp_state=zeros,
+            lamp_state=(
+                self._contact_state.toggle_count.remainder(2).float()
+                if self._contact_task
+                else zeros
+            ),
             lamp_confidence=ones,
             lamp_age_s=zeros,
             previous_action=self.actions,
@@ -613,3 +725,13 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             )
             self._body_collision_latch[env_ids] = False
             self._pusher_collision_latch[env_ids] = False
+            self._contact_state = reset_press_contact_state(
+                state=self._contact_state,
+                env_ids=torch.as_tensor(env_ids, device=self.device),
+                ranges=wall_normal,
+            )
+            self._intended_contact[env_ids] = False
+            self._compression_peak_m[env_ids] = 0.0
+            self._contact_seen[env_ids] = False
+            self._first_contact_stable[env_ids] = False
+            self._previous_contact_quality[env_ids] = False

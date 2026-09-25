@@ -9,7 +9,10 @@ scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
   episode_length_s: 45.0
-  num_envs: 32768
+  num_envs: 4096
+  inputs:
+    controller_artifact: .build/alignment/x500-px4-v1/20260912T211745Z/controller.json
+    flight_parameters_artifact: .build/flight-parameters/holybro-x500-v2-hover-v1/20260912T102640Z
   action:
     max_body_velocity_mps: 0.5
   press:
@@ -21,6 +24,7 @@ rl:
         - source: pinned_flight_parameters
           weight: 0.2
     policy:
+      normalize_observations: true
       actor:
         initial_noise_std: 0.03
   training:
@@ -53,9 +57,9 @@ rl:
     evaluation_worker_timeout_s: 600.0
     telemetry_sample_interval_s: 1.0
     gpu_utilization_target_rate: 0.95
-    num_steps_per_env: 32
+    num_steps_per_env: 256
     gamma: 0.995
-    lam: 0.95
+    lam: 0.99
     clip_param: 0.2
     value_loss_coef: 1.0
     num_learning_epochs: 5

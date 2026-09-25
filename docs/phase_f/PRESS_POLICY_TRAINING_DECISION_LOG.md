@@ -1,17 +1,17 @@
 # Press policy training decision log
 
-Status: HOVER COMPARISON COMPLETE; GENTLE REFINEMENT INTERRUPTED AFTER
-THREE DECLINING VALIDATIONS (2026-09-05). No accepted policy. Continue from
-entry 94 before requesting another hover campaign; approach remains out of scope.
+Status: Historical campaign decisions through 2026-09-05. The current curriculum,
+checkpoint initialization and acceptance contracts are in `docs/RL_WORKFLOW.md`.
+The full nominal press execution record is under `.build/press-curriculum-20260925/`.
 
 
 This is the chronological record for press-policy scratch training, checkpoint
 selection, acceptance, and deployment decisions. Controller fitting and its
 evidence remain in `docs/phase_f/F3_TRAINING_DECISION_LOG.md`. Each entry states
 the practical intuition first, followed by the implementation-level reasoning
-and measurements. Every training attempt records enough provenance to explain
-what changed and why; post-run fine-tuning and checkpoint-initialized retries
-are unsupported.
+and measurements. Entries describe the configuration and workflow in force for
+that historical campaign; their continuation notes do not override the current
+curriculum configuration or an explicitly authorized new run.
 
 ## Run ledger
 

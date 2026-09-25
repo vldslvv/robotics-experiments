@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+  - /train/stage/press_easy_quad
+  - _self_
+
+# This target is retained for diagnosis: the nominal button protrudes only
+# 8.4 mm from its solid base collider, so a collision-free 10 mm press is blocked.
+switches:
+  press_threshold: 0.01
+
+rl:
+  press:
+    reset:
+      mix:
+        - source: measured_navigation_handoff
+          weight: 0.8
+        - source: pinned_flight_parameters
+          weight: 0.2
+      button_geometry_scale: 1.0
+      button_stiffness_scale: 1.0
+      button_threshold_scale: 1.0

@@ -59,7 +59,9 @@ def _evaluation() -> PolicyEvaluation:
         iteration=10,
         checkpoint_path=Path("model_10.pt"),
         policy_digest="digest",
-        metrics=tuple(EvaluationMetric(name, values[name]) for name in evaluation_metric_names()),
+        metrics=tuple(
+            EvaluationMetric(name, values.get(name, 0.0)) for name in evaluation_metric_names()
+        ),
         reward_means=(),
         source="fresh-validation",
     )
@@ -99,7 +101,7 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
 
 def test_metric_registry_names_rates_and_units() -> None:
     registry = metric_registry_payload()
-    assert registry["revision"] == 19
+    assert registry["revision"] == 20
     assert all("_" not in spec.suffix for spec in EVALUATION_METRICS)
     assert "Mean longest continuous hover (seconds)" in {spec.suffix for spec in EVALUATION_METRICS}
     assert all(not spec.suffix.endswith("_percent") for spec in EVALUATION_METRICS)

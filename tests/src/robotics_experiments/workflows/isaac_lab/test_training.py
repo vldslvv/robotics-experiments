@@ -65,7 +65,7 @@ def _inputs(tmp_path: Path):
 
 def _acceptance_criteria(config):
     return create_press_acceptance_criteria(
-        config=config.rl.press.acceptance,
+        config=config.rl.press,
         flight_parameters=load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters"),
     )
 
@@ -577,7 +577,7 @@ def saved_learner(monkeypatch, tmp_path):
         "artifact_run_id": run_dir.name,
         "status": "validation_failed",
         "acceptance": None,
-        "schema_version": 28,
+        "schema_version": 29,
         "report_kind": "training",
         "progress": {"completed_updates": 100},
         "selected": {
@@ -790,7 +790,7 @@ def test_training_campaign_selection_and_failures(monkeypatch, tmp_path, outcome
                 "phase_index": 0 if outcome == "refinement" else 2,
             }
             report = {
-                "schema_version": 28,
+                "schema_version": 29,
                 "report_kind": "attempt",
                 "artifact_run_id": run_dir.name,
                 "attempt_index": self.index,

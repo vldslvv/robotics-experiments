@@ -19,6 +19,7 @@ __all__ = [
     "PressResetSourceConfig",
     "PressResetConfig",
     "PressTaskConfig",
+    "PressContactConfig",
     "RlConfig",
     "RlPolicyActorConfig",
     "RlPolicyConfig",
@@ -377,11 +378,33 @@ class RlTrainingConfig(_FreezableConfig):
 
 
 @dataclass
+class PressContactConfig(_FreezableConfig):
+    """Contact-task goals, incremental rewards and provisional qualification."""
+
+    stable_steps: int
+    target_range_m: float
+    compression_max_m: float
+    first_contact_rate_min: float
+    retreat_rate_min: float
+    approach_progress_weight: float
+    contact_hold_weight: float
+    button_progress_weight: float
+    toggle_weight: float
+    retreat_progress_weight: float
+    step_cost: float
+    feasibility_approach_mps: float
+    feasibility_press_increment_mps: float
+    feasibility_retreat_mps: float
+    feasibility_compression_m: float
+    feasibility_compression_gain_per_s: float
+
+
+@dataclass
 class PressTaskConfig(_FreezableConfig):
     """Press task behavior, independent of training pipeline order.
 
     Attributes:
-        task: Explicit hover or approach behavior.
+        task: Explicit hover, approach, contact or press behavior.
         policy: Task-owned actor/critic topology.
         handoff: Thresholds for the nav -> policy handoff gate.
         navigation_noise: Measured final-waypoint position variation that the
@@ -392,6 +415,7 @@ class PressTaskConfig(_FreezableConfig):
         termination: Shared safety termination conditions.
         evaluation: Shared deterministic validation/test workloads and costs.
         acceptance: Requirements applied to validation and the final test.
+        contact: Contact goals, incremental rewards and provisional qualification.
     """
 
     task: str
@@ -404,6 +428,7 @@ class PressTaskConfig(_FreezableConfig):
     termination: PressApproachTerminationConfig
     evaluation: PressApproachEvaluationConfig
     acceptance: PressApproachAcceptanceConfig
+    contact: PressContactConfig
 
 
 @dataclass

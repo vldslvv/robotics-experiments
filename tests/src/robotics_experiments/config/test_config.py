@@ -259,10 +259,13 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 0.5
     assert not config.rl.lab_vehicle.enable_gyroscopic_forces
-    assert config.rl.inputs.controller_artifact == ".build/alignment/x500-px4-v1/best"
-    assert config.rl.inputs.flight_parameters_artifact.endswith("/latest")
+    assert (
+        config.rl.inputs.controller_artifact
+        == ".build/alignment/x500-px4-v1/20260912T211745Z/controller.json"
+    )
+    assert config.rl.inputs.flight_parameters_artifact.endswith("/20260912T102640Z")
     assert config.rl.press.reset.physical_contact_enabled
-    assert config.rl.num_envs == 32768
+    assert config.rl.num_envs == 4096
     assert config.rl.press.task == "approach"
     assert config.rl.episode_length_s == 45.0
     assert tuple(source.source for source in config.rl.press.reset.mix) == (
@@ -291,9 +294,9 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
         False,
     )
     assert tuple(phase.evaluation_interval for phase in hover_training.phases) == (5, 5)
-    assert hover_training.plateau.metric_name == "hover_envelope_utilization_mean"
-    assert hover_training.plateau.direction == "minimize"
-    assert hover_training.plateau.minimum_delta == 0.003
+    assert hover_training.plateau.metric_name == "episode_longest_hover_duration_mean_s"
+    assert hover_training.plateau.direction == "maximize"
+    assert hover_training.plateau.minimum_delta == 0.01
     assert hover_training.plateau.patience_evaluations == 5
     assert training.telemetry_sample_interval_s == 1.0
     assert training.gpu_utilization_target_rate == 0.95
@@ -326,8 +329,8 @@ def test_press_hover_training_configuration():
     assert policy.activation == "elu"
     assert reward.position_progress_weight == 0.1
     assert reward.hover_stabilization == "boundary_weighted"
-    assert reward.stabilization_weight == 0.03
-    assert reward.outside_envelope_weight == 0.09
+    assert reward.stabilization_weight == 0.01
+    assert reward.outside_envelope_weight == 0.03
     assert reward.action_effort_weight == 1.0
     assert reward.predictive_barrier_weight == 0.1
     assert reward.hold_progress_weight == 0.01
@@ -660,7 +663,7 @@ def test_task_policy_validation(tmp_path, override, match):
     [
         (
             {"rl": {"press": {"task": "future"}}},
-            "rl.press.task must be hover or approach",
+            "rl.press.task must be hover, approach, contact or press",
         ),
         (
             {"rl": {"press": {"goal": {"range_min_m": 0.50}}}},
