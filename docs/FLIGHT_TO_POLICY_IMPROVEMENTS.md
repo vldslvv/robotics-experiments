@@ -456,7 +456,7 @@ only declared parameters or evidenced implementation errors.
 
 After controller qualification and hover feasibility pass, pin both accepted
 producer paths for all hover campaigns. Campaign one uses
-`configs/train_press_hover_quad.yaml`: scratch seed 42, 15 broad updates at
+`configs/train/press_hover_quad.yaml`: scratch seed 42, 15 broad updates at
 3e-5 then up to 100 refinement updates at 1e-6, evaluation every five updates,
 and the existing plateau rule. Validation is 100 episodes each at 101/202/303;
 the frozen actor's acceptance workload is 100 episodes each at 404/505/606.
@@ -667,7 +667,7 @@ are distinct from policy acceptance's successful-hold pooled statistics.
 
 The accepted controller SHA-256 is
 `f293d818ef9925d6f6f89bc070e84614dd91f9d9073ad4f50aa2958d7e871c12`.
-`configs/train_press_hover_quad.yaml` now pins its exact controller file and
+`configs/train/press_hover_quad.yaml` now pins its exact controller file and
 flight bundle `20260912T102640Z`, whose flight-parameter digest remains
 `65f02c5e5bfe6d74291329967033510839acad8b5d6254961b10e39e36c73661`.
 Host policy-input validation confirms matching lineage and passing controller
@@ -686,7 +686,7 @@ feasible feedback through the actual press action/reset/evaluation path before
 PPO; it is not trained-policy acceptance.
 
 Hover campaign one is `20260912T212725Z`, launched from scratch with seed 42
-using the pinned `configs/train_press_hover_quad.yaml` and unchanged initial
+using the pinned `configs/train/press_hover_quad.yaml` and unchanged initial
 15-update broad / up-to-100-update refinement schedule. Its operator log is
 `press-hover-campaign-01.log`. Every policy campaign retains the same accepted
 controller and immutable flight bundle.
@@ -776,7 +776,7 @@ cross-campaign progress count. Campaign one establishes the first overall best
 at 7.693000 s; consecutive campaigns without a 0.01 s improvement are zero.
 
 Campaign two changes only `rl.training.num_learning_epochs` from 1 to 4 in
-`configs/train_press_hover_quad.yaml`. It starts from scratch with seed 42.
+`configs/train/press_hover_quad.yaml`. It starts from scratch with seed 42.
 The hypothesis is that more optimizer passes over each million-transition
 rollout can learn a stronger stabilizing policy during the existing 15 broad
 updates before the 1e-6 refinement phase. Campaign one's optimizer consumed
@@ -1583,7 +1583,7 @@ Exact inputs and workload:
   SHA-256 `f293d818ef9925d6f6f89bc070e84614dd91f9d9073ad4f50aa2958d7e871c12`.
 - Flight bundle: `.build/flight-parameters/holybro-x500-v2-hover-v1/20260912T102640Z`,
   payload SHA-256 `65f02c5e5bfe6d74291329967033510839acad8b5d6254961b10e39e36c73661`.
-- Config: `configs/train_press_hover_quad.yaml`; validation seeds 101/202/303,
+- Config: `configs/train/press_hover_quad.yaml`; validation seeds 101/202/303,
   100 episodes each, 40-second episode limit and 30-second required hover.
 - Feedback gains: position 1.25/s, velocity damping 0.2, yaw 2.0/s. Existing
   normalized action limits and the production reset/evaluation logic apply.
@@ -1651,7 +1651,7 @@ before the separately authorized training campaign below.
 ## 2026-09-13: body-relative press-hover PPO qualification
 
 Campaign `20260913T222441Z` starts from scratch with seed 42 using
-`configs/train_press_hover_quad.yaml`, the controller and flight bundle recorded
+`configs/train/press_hover_quad.yaml`, the controller and flight bundle recorded
 above, and press observation schema 3 (35 values). The first campaign retains
 the previously successful PPO settings to isolate the representation change:
 4,096 environments, 256 steps per rollout, gamma 0.995, GAE lambda 0.99,
@@ -1732,7 +1732,7 @@ improvement 0.003 and five stale evaluations. Validation-passing actors retain
 priority; the lowest error wins, with the earlier actor retained on exact ties.
 This distinguishes actors that all reach the 30-second hold.
 
-Only `configs/train_press_hover_quad.yaml` overrides reward strengths. Campaign
+Only `configs/train/press_hover_quad.yaml` overrides reward strengths. Campaign
 one uses inside/outside stabilization weights 0.03/0.09 and action effort 1.0.
 After diagnosis, campaigns two and three may use 0.10/0.30 and 0.30/0.90,
 respectively. Each starts from scratch with seed 42, 4,096 environments, up to

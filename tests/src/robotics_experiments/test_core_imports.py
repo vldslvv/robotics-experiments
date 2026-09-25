@@ -1,6 +1,7 @@
 import ast
 import importlib
 import importlib.abc
+import json
 import subprocess
 import sys
 import tomllib
@@ -466,9 +467,24 @@ def test_commanding_public_api_contract_is_explicit():
 
 
 def test_config_eagerly_imports_hydra() -> None:
-    _drop_modules("hydra", "omegaconf", "robotics_experiments.config")
-    config = importlib.import_module("robotics_experiments.config")
-    assert config.__all__ == [
+    # Import in a fresh process so Hydra's singleton registries remain intact
+    # for tests that already hold references to configuration modules.
+    code = """
+import json
+import sys
+sys.path.insert(0, "src")
+import robotics_experiments.config as config
+assert "hydra" in sys.modules
+assert "omegaconf" in sys.modules
+print(json.dumps(config.__all__))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True, text=True, cwd=REPO_ROOT
+    )
+    assert json.loads(result.stdout) == [
+        "CurriculumConfig",
+        "CurriculumStageConfig",
+        "load_curriculum_config",
         "BoundingBox",
         "DroneSpawnConfig",
         "ExperimentConfig",
@@ -498,8 +514,6 @@ def test_config_eagerly_imports_hydra() -> None:
         "VehicleConfig",
         "load_config",
     ]
-    assert "hydra" in sys.modules
-    assert "omegaconf" in sys.modules
 
 
 def test_simulation_package_remains_lazy_without_isaac(monkeypatch):

@@ -40,7 +40,7 @@ def test_prepare_policy_inputs_pins_and_matches_both_artifacts(
 ) -> None:
     import robotics_experiments.rl.workflow as workflow
 
-    config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    config = load_config(REPO_ROOT / "configs/train/stage/press_hover_quad.yaml")
     flight_parameters_path = REPO_ROOT / "tests/fixtures/flight_parameters"
     flight_parameters = load_flight_parameters(flight_parameters_path)
     controller_path = tmp_path / "controller.json"
@@ -72,7 +72,7 @@ def test_prepare_policy_inputs_rejects_flight_parameters_not_used_by_controller(
 ) -> None:
     import robotics_experiments.rl.workflow as workflow
 
-    config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    config = load_config(REPO_ROOT / "configs/train/stage/press_hover_quad.yaml")
     flight_parameters_path = REPO_ROOT / "tests/fixtures/flight_parameters"
     flight_parameters = load_flight_parameters(flight_parameters_path)
     controller_path = tmp_path / "controller.json"

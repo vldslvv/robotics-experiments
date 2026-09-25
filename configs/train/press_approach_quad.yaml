@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /base_curriculum
+  - _self_
+
+policy_name: press-approach
+initial_learner: null
+stages:
+  - name: learn
+    config_path: configs/train/stage/press_approach_quad.yaml

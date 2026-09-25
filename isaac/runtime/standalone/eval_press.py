@@ -14,14 +14,21 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from robotics_experiments.config import ExperimentConfig, load_config
-from robotics_experiments.rl import POLICY_FILENAME, prepare_policy_inputs, validate_policy_artifact
+from robotics_experiments.config import ExperimentConfig, load_config, load_curriculum_config
+from robotics_experiments.rl import (
+    POLICY_FILENAME,
+    PolicyInputs,
+    prepare_policy_inputs,
+    validate_policy_artifact,
+)
 from robotics_experiments.rl.press import (
     create_press_acceptance_criteria,
     evaluate_press_acceptance,
     press_policy_contract,
 )
 from robotics_experiments.rl.press._fingerprint import _press_comparison_fingerprint
+from robotics_experiments.rl.workflow import _load_pinned_policy_inputs
+from robotics_experiments.workflows.isaac_lab.training import _config_values
 
 if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab import PressApproachEvaluationResult
@@ -149,7 +156,9 @@ def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
         raise
 
 
-def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvaluationResult:
+def _run(
+    *, config: ExperimentConfig, artifact_dir: Path, inputs: PolicyInputs
+) -> PressApproachEvaluationResult:
     # AppLauncher must start before the Isaac Lab workflow import.
     from robotics_experiments.workflows.isaac_lab import (
         evaluate_press_approach_policy,
@@ -173,7 +182,6 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     )
     if metadata.values.get("comparison_fingerprint") != comparison_fingerprint:
         raise ValueError("published policy does not match the selected press configuration")
-    inputs = prepare_policy_inputs(config=config, repo_root=_repo_root())
     if inputs.flight_parameters != metadata.flight_parameters:
         raise ValueError("configured flight parameters differ from policy metadata")
     env, env_cfg = make_isaac_lab_env(
@@ -264,16 +272,38 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     return result
 
 
-def _resolve_artifact_dir(
-    *,
-    explicit_artifact_dir: Path | None,
-    config: ExperimentConfig,
-) -> Path:
+def _resolve_artifact_dir(*, explicit_artifact_dir: Path | None, config_path: Path) -> Path:
     if explicit_artifact_dir is not None:
-        return explicit_artifact_dir
-    policy_root = _repo_root() / ".build" / "training" / config.rl.training.policy_name
+        return explicit_artifact_dir.resolve(strict=True)
+    curriculum = load_curriculum_config(config_path)
+    policy_root = _repo_root() / ".build/training" / curriculum.policy_name
     run_id = os.environ.get(_RUN_ID_ENV)
-    return policy_root / run_id if run_id else policy_root / "latest"
+    if not run_id:
+        return (policy_root / "latest").resolve(strict=True)
+    report = json.loads((policy_root / run_id / "curriculum_report.json").read_text())
+    published = [stage for stage in report["stages"] if stage["published"]]
+    if not published:
+        raise ValueError("curriculum has no published stage")
+    return Path(published[-1]["report_path"]).resolve(strict=True).parent
+
+
+def _producer_config(artifact_dir: Path) -> tuple[ExperimentConfig, PolicyInputs]:
+    report = json.loads((artifact_dir / "training_report.json").read_text())
+    if report["schema_version"] != 28 or report["report_kind"] != "training":
+        raise ValueError("unsupported producer training report")
+    provenance = report["provenance"]
+    config = load_config(provenance["config_path"])
+    if _config_values(config) != provenance["resolved_config"]:
+        raise ValueError("producer stage configuration has changed")
+    report = json.loads((artifact_dir / "training_report.json").read_text())
+    evidence = report["provenance"]["inputs"]
+    inputs = _load_pinned_policy_inputs(
+        controller_path=Path(evidence["controller"]["path"]),
+        controller_digest=evidence["controller"]["sha256"],
+        flight_parameters_path=Path(evidence["flight_parameters"]["path"]),
+        flight_parameters_digest=evidence["flight_parameters"]["sha256"],
+    )
+    return config, inputs
 
 
 def main() -> None:
@@ -290,22 +320,20 @@ def main() -> None:
     app_launcher = AppLauncher(headless=True)
     simulation_app = app_launcher.app
     try:
-        config_path = os.environ[_CONFIG_PATH_ENV]
-        config = load_config(config_path)
+        config_path = Path(os.environ[_CONFIG_PATH_ENV])
         if args.hover_feasibility:
             run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
             _run_feasibility(
-                config=config,
+                config=load_config(config_path),
                 output_dir=args.output_dir
                 or _repo_root() / ".build" / "hover-feasibility" / run_id,
             )
         else:
-            _run(
-                config=config,
-                artifact_dir=_resolve_artifact_dir(
-                    explicit_artifact_dir=args.artifact_dir, config=config
-                ),
+            artifact_dir = _resolve_artifact_dir(
+                explicit_artifact_dir=args.artifact_dir, config_path=config_path
             )
+            config, inputs = _producer_config(artifact_dir)
+            _run(config=config, inputs=inputs, artifact_dir=artifact_dir)
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
         raise

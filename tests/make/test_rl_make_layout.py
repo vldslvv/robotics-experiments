@@ -182,7 +182,7 @@ def test_training_uses_one_merged_container_invocation() -> None:
             "generate-drone-usd",
             "train-rl",
             "RL_RUN_ID=layout-test",
-            "HYDRA_CONFIG=configs/train_press_approach_quad.yaml",
+            "HYDRA_CONFIG=configs/train/press_approach_quad.yaml",
         ],
         cwd=REPO_ROOT,
         check=False,

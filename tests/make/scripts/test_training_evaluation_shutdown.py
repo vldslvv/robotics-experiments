@@ -213,7 +213,7 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
         for part in call_lines[1].split()
         if part.startswith("RL_TRACKIO_DIR=")
     )
-    assert trackio_dir == f".build/training/press/{artifact_ids.pop()}/monitoring"
+    assert trackio_dir == f".build/training/press/{next(iter(artifact_ids))}/monitoring"
     assert "TRAIN_ARGS=--iterations 3" in call_lines[0]
     assert "EVAL_ARGS=--episodes 4" in call_lines[2]
     assert "sudo " not in calls
@@ -225,11 +225,13 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
     console = next((tmp_path / "logs").glob("*.console.log")).read_text(encoding="utf-8")
     assert "shutdown=disabled" in console
     assert (
-        "Trackio URL: http://127.0.0.1:7860/?project=press&runs=attempt_01" in console
+        f"Trackio URL: http://127.0.0.1:7860/?project=press&runs={next(iter(artifact_ids))}.stage_01.attempt_01"
+        in console
         and "metrics loaded" in console
     )
     assert (
-        "Trackio URL: http://127.0.0.1:7860/?project=press&runs=attempt_01" in result.stdout
+        f"Trackio URL: http://127.0.0.1:7860/?project=press&runs={next(iter(artifact_ids))}.stage_01.attempt_01"
+        in result.stdout
         and "metrics loaded" in result.stdout
     )
     assert "smoothing=0&accordion=hidden&metric_filter=" in console

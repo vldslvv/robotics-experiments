@@ -1,7 +1,7 @@
 defaults:
   - base
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
-  - override experiment/routine@vehicles.x500_01.routine: policy_press_transfer
+  - override experiment/routine@vehicles.x500_01.routine: policy_press_hover_transfer
   - _self_
 
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
@@ -23,8 +23,6 @@ vehicles:
       yaw_rad: 0.0
 
 rl:
-  training:
-    policy_name: press-hover
   episode_length_s: 40.0
   press:
     task: hover

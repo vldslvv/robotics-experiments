@@ -213,18 +213,21 @@ def test_rsl_metrics_are_remapped_and_x_coordinate_never_rewinds() -> None:
     with torch.no_grad():
         policy.actor.weight.add_(0.1)
         policy.critic.weight.add_(0.2)
+    runner.learner_updates = 169
     runner.logger.log(it=170)
     runner.logger.writer.configure_phase(
         phase=SimpleNamespace(learning_rate=3.0e-5),
         phase_number=2,
     )
+    runner.learner_updates = 140
     runner.logger.log(it=141)
     runner.logger.writer.configure_phase(
         phase=SimpleNamespace(learning_rate=1.0e-5),
         phase_number=3,
     )
+    runner.learner_updates = 140
     runner.logger.log(it=141)
-    assert rsl_rl.monitoring_step(runner=runner) == 3
+    assert runner.completed_updates == 3
     checkpoint_events = [
         (value, step)
         for tag, value, step in writer.events
@@ -260,7 +263,7 @@ def test_embedded_runner_logging_surface_uses_the_same_registry() -> None:
     runner.writer.add_scalar("Loss/value_function", 1.0, 7)
     runner.writer.add_scalar("Perf/collection time", 0.2, 7)
     runner.writer.add_scalar("Perf/learning_time", 0.3, 7)
-    assert rsl_rl.monitoring_step(runner=runner) == 1
+    assert runner.completed_updates == 1
     assert runner.log_dir == "logs"
     assert {tag for tag, _value, _step in writer.events} >= {
         "training/Critic return prediction loss",
@@ -301,6 +304,7 @@ def test_training_chunk_advances_when_restored_learner_iteration_repeats() -> No
         iterations=1,
         randomize_initial_episode_lengths=True,
     )
+    runner.learner_updates = 0
     runner.writer.configure_phase(phase=phase, phase_number=2)
     rsl_rl.train_chunk(
         runner=runner,
@@ -309,7 +313,7 @@ def test_training_chunk_advances_when_restored_learner_iteration_repeats() -> No
         randomize_initial_episode_lengths=False,
     )
 
-    assert rsl_rl.monitoring_step(runner=runner) == 2
+    assert runner.completed_updates == 2
     assert [
         (value, step)
         for tag, value, step in writer.events

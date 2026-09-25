@@ -230,26 +230,37 @@ the current contents and the intended home for that kind of code.
   settings, certified control modes, digest, and fingerprints before PPO, and selection/evaluation must reuse
   that embedded record. Policy artifacts without alignment provenance are
   unsupported. Controller and policy artifacts are strict v1 contracts; older
-  schemas and compatibility migrations are unsupported. A training invocation runs
-  one independent stage or the ordered `rl.training.pipeline` list of complete
-  experiments. Each stage owns a campaign of attempt seeds; every attempt starts
-  in a distinct Isaac process with fresh environments, rollout buffers, and runner.
-  `rl.inputs.initial_checkpoint` optionally names a producer training report whose
-  selected complete learner supplies actor, critic, optimizer, observation
-  statistics, and learned exploration parameters. Independent stages check
-  integrity and compatibility without requiring prior acceptance. The pipeline
-  requires an accepted matching starting learner, then advances only when the
-  preceding stage result is accepted, forwarding its exact pinned checkpoint.
-  Pipeline names are labels; `rl.press.task` owns hover/approach behavior,
-  `rl.press.reset.mix` owns reset distributions, `rl.episode_length_s` owns
-  duration, `rl.press.goal.stable_steps` owns the hold, and `rl.training` owns
-  phases and plateau rules. Referenced experiments have empty pipeline and initial
-  checkpoint settings. Stage results preserve selected diagnostic candidates on
-  failure, with `accepted: false`. No label lookup, retries, branches, checkpoint
-  merging, or process resume occurs between stages. The coordinator retains
-  reports and checkpoint references but never owns a training environment.
-  Later Hydra phases restore that attempt's complete validation-selected learner,
-  apply the new schedule, and reset environments before collecting rollouts.
+  schemas and compatibility migrations are unsupported. A training invocation loads a
+  `CurriculumConfig` from `configs/train/`, even for one stage. Complete stage
+  experiments live in `configs/train/stage/`. The root owns `policy_name`, optional
+  `initial_learner` (a producer training report), and a nonempty ordered list of
+  `{name, config_path}` stages. Labels never choose task behavior or compatibility.
+  Stages own all experiment, task, reward, reset, PPO, phase and acceptance settings;
+  they have no initializer or namespace. Every attempt starts a distinct Isaac
+  process with fresh environments, rollout buffers and runner. Compatible selected
+  learners from failed or interrupted runs may initialize any curriculum.
+  `rl/training/checkpoint.py` alone saves, validates and restores the strict complete
+  learner: actor, critic, learned exploration, both observation normalizers, optimizer
+  moments/steps, branch progress and RNG evidence. New attempts reseed from configured
+  seeds; RNG snapshots are not applied over them. No persistent return normalizer or
+  separate scheduler exists. Phase configuration overrides LR/schedule/entropy and
+  normalizer updates after restoration. Learner update ancestry may rewind; completed
+  curriculum work never rewinds and starts at zero for each invocation.
+  `workflows/isaac_lab/training.py` owns attempt campaigns, validation and fresh tests;
+  `curriculum.py` owns sequencing and publication, without a training environment.
+  Results retain selected diagnostic candidates with `accepted: false`. Accepted
+  stages publish before their exact pinned learner advances. Stop on rejection,
+  publication error, runtime error or interruption; no curriculum retries, branches,
+  checkpoint merging or process resume. Training/attempt reports are strict schema 28;
+  curriculum summaries are schema 1. Each level owns its terminal report. Publication
+  never rewrites completed training reports. All stages share one policy namespace and
+  curriculum Trackio database, with distinct stage/attempt identities. Supplemental
+  policy metadata records the accepted prefix and exact historical actor/report
+  digests, not retesting of a later actor on earlier tasks. `rl.press.task` owns
+  hover/approach behavior, `rl.press.reset.mix` owns resets, `rl.episode_length_s`
+  owns duration, `rl.press.goal.stable_steps` owns the hold, and `rl.training` owns
+  phases and plateau rules. Later phases restore the attempt's complete selected
+  learner, apply their schedule, and reset environments before new rollouts.
   Every checkpoint uses one fixed validation workload. The evaluator returns raw
   named metrics; each experiment owns its Hydra plateau rule, which reads one named
   scalar, and validation gates establish

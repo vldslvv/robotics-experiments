@@ -1,6 +1,7 @@
+# @package _global_
 defaults:
-  - base
-  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - /base
+  - /experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - _self_
 
 # Independent terminal-approach training; learner initialization is explicit.
@@ -49,7 +50,6 @@ rl:
       patience_evaluations: 10
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
-    policy_name: press-approach
     evaluation_worker_timeout_s: 600.0
     telemetry_sample_interval_s: 1.0
     gpu_utilization_target_rate: 0.95

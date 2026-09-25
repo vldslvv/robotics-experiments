@@ -38,9 +38,12 @@ def _comparable_best_value(
         report = json.loads(report_path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
-    if report.get("comparison_fingerprint") != comparison_fingerprint:
+    if (
+        report.get("schema_version") != 28
+        or report.get("comparison_fingerprint") != comparison_fingerprint
+    ):
         return None
-    selected = report.get("selected_metric")
+    selected = (report.get("selected") or {}).get("metric")
     if not isinstance(selected, dict):
         return None
     if selected.get("name") != metric_name or selected.get("direction") != direction:

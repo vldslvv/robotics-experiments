@@ -24,8 +24,6 @@ vehicles:
       yaw_rad: 0.0
 
 rl:
-  training:
-    policy_name: press-approach
   episode_length_s: 45.0
   press:
     task: approach

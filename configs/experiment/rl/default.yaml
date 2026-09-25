@@ -26,15 +26,12 @@ lab_vehicle:
 # PPO training (make train-rl, rl.training adapter). task_id selects the
 # Gymnasium task the entrypoint trains.
 inputs:
-  initial_checkpoint: null
   controller_artifact: .build/alignment/x500-px4-v1/best
   flight_parameters_artifact: .build/flight-parameters/holybro-x500-v2-hover-v1/latest
 
 training:
-  pipeline: []
   task_id: Isaac-Drone-Hover-Direct-v1
   vehicle_id: 0
-  policy_name: hover
   # Complete experiments override the training schedule for their task.
   phases:
     - max_iterations: 1500

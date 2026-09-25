@@ -16,8 +16,9 @@ after the app starts.
 Deferred modules include `omni.*`, `carb`, `pxr`,
 `robotics_experiments.drone` when accessing its spawn/despawn exports
 (loads the Isaac-only stage authoring implementation),
-`robotics_experiments.runtime` (imports `omni.physx`/`carb`), and
-`robotics_experiments.workflows.isaac_lab` / `isaaclab`. Put a one-line comment
+`robotics_experiments.runtime` (imports `omni.physx`/`carb`), and Isaac-dependent task exports from
+`robotics_experiments.workflows.isaac_lab` / `isaaclab`. The pure curriculum and
+training coordinators are host-importable and start no simulator at import time. Put a one-line comment
 on the first deferred import in each file noting why it is deferred.
 
 Only app-independent imports belong at module top: stdlib, `numpy`, `torch`, and
@@ -87,3 +88,12 @@ consumes the two diagnostic trace files and writes `controller.json` plus
 `selection.json.zst` without publishing. Finalize mode validates the complete
 bundle, including hard quality and boundary diagnostics, before atomically
 updating relative `latest`/`best` links. No migration mode is supported.
+
+## Training entrypoint
+
+`train_rl.py` is a CLI and worker startup shell. It loads a curriculum from
+`configs/train/`; complete stage experiments belong in `configs/train/stage/`.
+`workflows/isaac_lab/curriculum.py` sequences accepted stages and publishes them.
+`training.py` owns attempt campaigns and fresh tests. Only attempt and evaluation
+workers create Isaac applications. Checkpoint storage and restoration are explicit
+in `rl/training/checkpoint.py`; see `docs/RL_WORKFLOW.md` for state and report fields.

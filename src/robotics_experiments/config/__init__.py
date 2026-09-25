@@ -7,6 +7,7 @@ exported here.
 """
 
 from robotics_experiments.config._commanding import RoutineStepConfig
+from robotics_experiments.config._curriculum import CurriculumConfig, CurriculumStageConfig
 from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._px4 import Px4BridgeConfig
 from robotics_experiments.config._rl import (
@@ -32,9 +33,12 @@ from robotics_experiments.config._rl import (
 )
 from robotics_experiments.config._scene import BoundingBox, DroneSpawnConfig, LightSwitchConfig
 from robotics_experiments.config._simulation import SimSettings
-from robotics_experiments.config.loading import load_config
+from robotics_experiments.config.loading import load_config, load_curriculum_config
 
 __all__ = [
+    "CurriculumConfig",
+    "CurriculumStageConfig",
+    "load_curriculum_config",
     "BoundingBox",
     "DroneSpawnConfig",
     "ExperimentConfig",

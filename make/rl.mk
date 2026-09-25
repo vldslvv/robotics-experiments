@@ -19,8 +19,8 @@ PRESS_NAVIGATION_ROTATION_MARGIN_RAD ?= 0.004363323129985824
 PRESS_NAVIGATION_MEASUREMENT_ROOT ?= .build/benchmarks/press-navigation-handoff-campaigns
 PRESS_NAVIGATION_MEASUREMENT_RUNNER = make/scripts/run_press_navigation_handoff_measurement.sh
 
-# One campaign validates the configured scratch attempts, freshly tests the first
-# eligible immutable actor, and publishes only after final acceptance.
+# A curriculum trains each complete stage experiment and publishes its exact
+# freshly tested actor before the next stage starts.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 train-rl: generate-drone-usd
@@ -41,7 +41,7 @@ train-rl: generate-drone-usd
 # supplied it evaluates that exact published run instead of resolving latest.
 .PHONY: eval-press
 eval-press: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-eval-press: HYDRA_CONFIG = configs/train_press_approach_quad.yaml
+eval-press: HYDRA_CONFIG = configs/train/press_approach_quad.yaml
 eval-press: ISAAC_TEST_EXTRA_ARGS = $(EVAL_ARGS)
 eval-press: generate-drone-usd
 	@TEST_TARGET='eval-press' \

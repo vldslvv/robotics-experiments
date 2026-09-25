@@ -1,7 +1,7 @@
 """Public contract for the Isaac Lab workflow integration.
 
-This package root is the only supported import surface for code outside
-``robotics_experiments.workflows.isaac_lab``. It stays lightweight at import
+This package root exposes task and evaluation concepts. Training and curriculum
+entrypoints live in their dedicated host-safe workflow modules. It stays lightweight at import
 time: ordinary torch-backed helpers are imported eagerly, while Isaac Lab task
 modules are loaded only when their exported symbols are requested.
 """

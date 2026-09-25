@@ -1,5 +1,6 @@
 import functools
 import math
+import re
 from collections.abc import Iterable
 from dataclasses import fields
 from os import PathLike
@@ -12,11 +13,12 @@ from hydra._internal.utils import create_config_search_path
 from hydra.types import RunMode
 from omegaconf import OmegaConf, open_dict
 
+from robotics_experiments.config._curriculum import CurriculumConfig
 from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._immutability import _freeze_config_graph
 from robotics_experiments.config._schemas import _register_schemas
 
-__all__ = ["load_config"]
+__all__ = ["load_config", "load_curriculum_config"]
 
 _PX4_OFFBOARD_LOSS_ACTION_PARAMS = {
     "position": 0,
@@ -282,16 +284,6 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.training.attempt_seeds must be nonempty and unique")
     _validate_training_phases(phases=training.phases, path="rl.training.phases")
     _validate_plateau(plateau=training.plateau, path="rl.training.plateau")
-    names = [stage.name for stage in training.pipeline]
-    if any(not name.strip() for name in names) or len(set(names)) != len(names):
-        raise ValueError("rl.training.pipeline names must be nonempty and unique")
-    if any(not stage.config_path.strip() for stage in training.pipeline):
-        raise ValueError("rl.training.pipeline config paths must be nonempty")
-    if (
-        experiment.rl.inputs.initial_checkpoint is not None
-        and not experiment.rl.inputs.initial_checkpoint.strip()
-    ):
-        raise ValueError("rl.inputs.initial_checkpoint must be null or a report path")
     if (
         not math.isfinite(training.evaluation_worker_timeout_s)
         or training.evaluation_worker_timeout_s <= 0.0
@@ -646,14 +638,22 @@ def _enrich_fleet(cfg, airframe_config_dir: Path) -> None:
             entry.px4_sys_autostart = int(sitl["sys_autostart"])
 
 
+def _config_root(config_path: Path) -> Path:
+    return next(
+        (parent for parent in config_path.parents if (parent / "base.yaml").is_file()),
+        config_path.parent,
+    )
+
+
 def _compose_config(config_path: Path):
     """Compose with an isolated Hydra loader, leaving ``GlobalHydra`` untouched."""
 
-    search_path = create_config_search_path(f"file://{config_path.parent}")
+    config_root = _config_root(config_path)
+    search_path = create_config_search_path(f"file://{config_root}")
     loader = ConfigLoaderImpl(config_search_path=search_path)
     hydra = Hydra(task_name="robotics_experiments", config_loader=loader)
     cfg = hydra.compose_config(
-        config_name=config_path.stem,
+        config_name=str(config_path.relative_to(config_root).with_suffix("")),
         overrides=[],
         run_mode=RunMode.RUN,
         from_shell=False,
@@ -683,7 +683,9 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
 
     _register_schemas()
     cfg = _compose_config(config_path)
-    airframe_config_dir = config_path.parent / "airframes"
+    if OmegaConf.get_type(cfg) is not ExperimentConfig:
+        raise ValueError("expected an experiment configuration using base_experiment")
+    airframe_config_dir = _config_root(config_path) / "airframes"
 
     _enrich_fleet(cfg, airframe_config_dir)
     experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
@@ -694,3 +696,27 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     _validate_press_task(experiment)
     _validate_switches(experiment)
     return _freeze_config_graph(experiment)
+
+
+@functools.cache
+def load_curriculum_config(path: str | PathLike[str], /) -> CurriculumConfig:
+    """Compose and freeze the explicit curriculum root, without fleet enrichment."""
+    config_path = Path(path)
+    if not config_path.is_absolute():
+        config_path = Path(__file__).resolve().parents[3] / config_path
+    config_path = config_path.resolve(strict=True)
+    _register_schemas()
+    cfg = _compose_config(config_path)
+    if OmegaConf.get_type(cfg) is not CurriculumConfig:
+        raise ValueError("expected a curriculum configuration using base_curriculum")
+    curriculum = cast(CurriculumConfig, OmegaConf.to_object(cfg))
+    if re.fullmatch(r"[A-Za-z0-9_-]+", curriculum.policy_name) is None:
+        raise ValueError("policy_name must contain only letters, digits, '_' or '-'")
+    names = [stage.name for stage in curriculum.stages]
+    if not names or any(not name.strip() for name in names) or len(set(names)) != len(names):
+        raise ValueError("curriculum stages must be nonempty with unique nonempty names")
+    if any(not stage.config_path.strip() for stage in curriculum.stages):
+        raise ValueError("curriculum stage config_path must be nonempty")
+    if curriculum.initial_learner is not None and not curriculum.initial_learner.strip():
+        raise ValueError("initial_learner must be null or a producer report path")
+    return _freeze_config_graph(curriculum)

@@ -109,7 +109,7 @@ def _params(*, inference=lambda _obs: np.array([0.2, 0.0, 0.0, 0.0])):
         goal=_GOAL,
         flight_parameters=_ENVELOPE,
         handoff_feedback=load_config(
-            REPO_ROOT / "configs/train_press_hover_quad.yaml"
+            REPO_ROOT / "configs/train/stage/press_hover_quad.yaml"
         ).rl.press.handoff,
         max_body_velocity_mps=0.5,
         max_yaw_rate_radps=1.5,

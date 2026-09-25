@@ -1,5 +1,6 @@
+# @package _global_
 defaults:
-  - train_press_hover_quad
+  - /train/stage/press_hover_quad
   - _self_
 
 # Controlled comparison: change only the hover stabilization reward.

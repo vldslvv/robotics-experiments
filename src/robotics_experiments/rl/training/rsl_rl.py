@@ -4,20 +4,19 @@ Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``isaaclab.sh --install``); it is never imported on the core path. The ordinary
 ``rsl_rl`` and torch dependencies are eager, while the Isaac Lab adapter stays
 deferred until the application is running. The package-root contract --
-``build_runner`` / ``configure_phase`` / ``train_chunk`` / ``save_checkpoint`` /
-``restore_checkpoint`` / ``configure_monitoring`` / ``monitoring_step`` /
-``deterministic_actor`` / ``initialize_actor_output`` / ``export_policy`` plus ``TrainingResult``
+``build_runner`` / ``configure_phase`` / ``train_chunk`` /
+``configure_monitoring`` /
+``deterministic_actor`` / ``initialize_actor_output`` / ``export_policy``
 over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
-re-implements.
+re-implements. Complete learner storage belongs to ``checkpoint.py``.
 """
 
 from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 import torch
 from rsl_rl.networks import EmpiricalNormalization
@@ -25,78 +24,20 @@ from rsl_rl.runners import OnPolicyRunner
 
 from robotics_experiments.config import RlPolicyConfig, RlTrainingConfig, RlTrainingPhaseConfig
 from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
+from robotics_experiments.rl.training.checkpoint import _policy_module, _PolicyRunner
 
 if TYPE_CHECKING:
     from isaaclab.envs import DirectRLEnv
 
 __all__ = [
-    "TrainingResult",
     "build_runner",
     "configure_phase",
     "configure_monitoring",
     "deterministic_actor",
     "export_policy",
     "initialize_actor_output",
-    "monitoring_step",
-    "restore_checkpoint",
-    "save_checkpoint",
     "train_chunk",
 ]
-
-
-class _ActorCritic(Protocol):
-    actor: torch.nn.Module
-    actor_obs_normalizer: torch.nn.Module
-    critic: torch.nn.Module
-    critic_obs_normalizer: torch.nn.Module
-
-    def state_dict(self) -> dict[str, Any]:
-        """Return the complete actor-critic parameter state."""
-        ...
-
-
-class _Algorithm(Protocol):
-    policy: _ActorCritic
-    actor_critic: _ActorCritic
-    optimizer: torch.optim.Optimizer
-    learning_rate: float
-    entropy_coef: float
-    schedule: str
-
-
-class _PolicyRunner(Protocol):
-    """The runner surface the adapter contract relies on."""
-
-    alg: _Algorithm
-    log_dir: str | None
-    save_interval: int
-    current_learning_iteration: int
-    logger: Any
-    writer: Any
-    logger_type: str
-    save: Any
-
-    def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
-        """Run the training loop for the given number of iterations."""
-        ...
-
-    def load(
-        self,
-        path: str,
-        load_optimizer: bool = True,
-        map_location: str | None = None,
-    ) -> dict[str, Any]:
-        """Restore a runner checkpoint."""
-        del path, load_optimizer, map_location
-        return {}
-
-
-@dataclass(frozen=True)
-class TrainingResult:
-    """Outcome of a training run."""
-
-    iterations: int
-    log_dir: str
 
 
 class _PresentationWriter:
@@ -108,24 +49,20 @@ class _PresentationWriter:
         writer,
         phase: RlTrainingPhaseConfig,
         phase_number: int,
-        policy: _ActorCritic,
+        runner: _PolicyRunner,
     ) -> None:
         self._writer = writer
         self._phase = phase
         self._phase_number = phase_number
-        self._policy = policy
-        self._actor_parameters = self._snapshot(policy.actor)
-        self._critic_parameters = self._snapshot(policy.critic)
+        self._runner = runner
+        self._policy = _policy_module(runner)
+        self._actor_parameters = self._snapshot(self._policy.actor)
+        self._critic_parameters = self._snapshot(self._policy.critic)
         self._last_learner_step: int | None = None
         self._new_update_pending = False
-        self._presentation_step = 0
         self._collection_time_s = 0.0
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
-
-    @property
-    def presentation_step(self) -> int:
-        return self._presentation_step
 
     def configure_phase(self, *, phase: RlTrainingPhaseConfig, phase_number: int) -> None:
         self._phase = phase
@@ -175,12 +112,12 @@ class _PresentationWriter:
         self._write(
             tag="training/Relative change in policy weights",
             value=actor_change,
-            step=self._presentation_step,
+            step=self._runner.completed_updates,
         )
         self._write(
             tag="training/Relative change in value model weights",
             value=critic_change,
-            step=self._presentation_step,
+            step=self._runner.completed_updates,
         )
 
     def refresh_parameters(self) -> None:
@@ -192,8 +129,9 @@ class _PresentationWriter:
             return
         self._new_update_pending = False
         self._last_learner_step = learner_step
-        self._presentation_step += 1
-        step = self._presentation_step
+        self._runner.completed_updates += 1
+        self._runner.learner_updates += 1
+        step = self._runner.completed_updates
         self._write(tag="training/Training phase (number)", value=self._phase_number, step=step)
         self._write(
             tag="training/Optimizer learning rate",
@@ -201,7 +139,9 @@ class _PresentationWriter:
             step=step,
         )
         self._write(
-            tag="training/Updates in current learner checkpoint", value=learner_step, step=step
+            tag="training/Updates in current learner checkpoint",
+            value=self._runner.learner_updates,
+            step=step,
         )
 
     def add_scalar(self, tag: str, scalar_value, global_step: int, /, *args, **kwargs) -> None:
@@ -213,7 +153,7 @@ class _PresentationWriter:
         }:
             return
         self._start_step(learner_step=int(global_step))
-        step = self._presentation_step
+        step = self._runner.completed_updates
         if tag.startswith("training/"):
             mapped = tag
         elif tag in {"Loss/value", "Loss/value_function"}:
@@ -373,11 +313,13 @@ def configure_monitoring(
     phase_number: int,
 ) -> None:
     """Install the sole namespaced monitoring writer for one attempt."""
+    runner.learner_updates = 0
+    runner.completed_updates = 0
     presentation = _PresentationWriter(
         writer=writer,
         phase=phase,
         phase_number=phase_number,
-        policy=_policy_module(runner),
+        runner=runner,
     )
     if hasattr(runner, "logger"):
         runner.logger = _MetricLogger(base=runner.logger, writer=presentation)
@@ -388,16 +330,6 @@ def configure_monitoring(
     runner.save = _ignore_internal_checkpoint
 
 
-def monitoring_step(*, runner: _PolicyRunner) -> int:
-    """Return total attempted updates, independent of learner restoration."""
-    logger = getattr(runner, "logger", None)
-    if isinstance(logger, _MetricLogger):
-        return logger.writer.presentation_step
-    if isinstance(getattr(runner, "writer", None), _PresentationWriter):
-        return runner.writer.presentation_step
-    raise RuntimeError("training monitoring has not been configured")
-
-
 def configure_phase(
     *,
     runner: _PolicyRunner,
@@ -405,6 +337,7 @@ def configure_phase(
     phase_number: int = 1,
 ) -> None:
     """Apply optimizer and normalization settings without replacing learner state."""
+    _refresh_parameter_monitoring(runner=runner)
     runner.alg.learning_rate = float(phase.learning_rate)
     runner.alg.entropy_coef = float(phase.entropy_coef)
     runner.alg.schedule = str(phase.schedule)
@@ -427,7 +360,7 @@ def train_chunk(
     completed_iterations: int,
     iterations: int,
     randomize_initial_episode_lengths: bool,
-) -> TrainingResult:
+) -> int:
     """Train exact new updates and number the terminal model by completed updates."""
     if completed_iterations < 0 or iterations <= 0:
         raise ValueError("completed_iterations must be non-negative and iterations positive")
@@ -441,56 +374,7 @@ def train_chunk(
         num_learning_iterations=iterations,
         init_at_random_ep_len=randomize_initial_episode_lengths,
     )
-    return TrainingResult(
-        iterations=iterations,
-        log_dir=str(getattr(runner, "log_dir", "")),
-    )
-
-
-def save_checkpoint(
-    *,
-    runner: _PolicyRunner,
-    checkpoint_path: Path,
-    iteration: int,
-) -> None:
-    """Persist one evaluation checkpoint without external-logger side effects."""
-    runner.current_learning_iteration = iteration
-    torch.save(
-        {
-            "model_state_dict": _policy_module(runner).state_dict(),
-            "optimizer_state_dict": runner.alg.optimizer.state_dict(),
-            "iter": runner.current_learning_iteration,
-            "infos": None,
-        },
-        checkpoint_path,
-    )
-
-
-def restore_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str) -> int:
-    """Restore actor, critic, optimizer, and learner iteration for refinement."""
-    policy = _policy_module(runner)
-    # RSL-RL replaces normalization buffers during inference-mode rollouts.
-    # Loading outside that mode requires writable buffers, including for PPO.
-    for normalizer in (policy.actor_obs_normalizer, policy.critic_obs_normalizer):
-        for name, buffer in normalizer.named_buffers(recurse=False):
-            if buffer.is_inference():
-                normalizer.register_buffer(name, buffer.clone())
-    runner.load(
-        str(checkpoint_path),
-        load_optimizer=True,
-        map_location=device,
-    )
-    payload = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    iteration = int(payload["iter"])
-    runner.current_learning_iteration = iteration
-    _refresh_parameter_monitoring(runner=runner)
-    return iteration
-
-
-def _policy_module(runner: _PolicyRunner) -> _ActorCritic:
-    # rsl_rl 3.x names the PPO policy `alg.policy`; 2.x used `alg.actor_critic`.
-    policy = getattr(runner.alg, "policy", None)
-    return policy if policy is not None else runner.alg.actor_critic
+    return iterations
 
 
 def _refresh_parameter_monitoring(*, runner: _PolicyRunner) -> None:

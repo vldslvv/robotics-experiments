@@ -490,6 +490,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
     observed = evaluator._run(  # noqa: SLF001 - standalone entrypoint
         config=_config(),
         artifact_dir=artifact_dir,
+        inputs=evaluator.prepare_policy_inputs(),
     )
     assert observed == result
     assert len(factory_calls) == 1
@@ -553,6 +554,9 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         evaluator._run(  # noqa: SLF001 - standalone entrypoint
             config=_config(),
             artifact_dir=Path("artifact"),
+            inputs=SimpleNamespace(
+                flight_parameters=_FLIGHT_PARAMETERS, hover_reset_samples="hover-reset-samples"
+            ),
         )
     assert close_calls == [True]
 
@@ -569,6 +573,9 @@ def test_evaluation_rejects_stage_mismatch(monkeypatch) -> None:
         evaluator._run(  # noqa: SLF001 - standalone entrypoint
             config=_config(),
             artifact_dir=Path("artifact"),
+            inputs=SimpleNamespace(
+                flight_parameters=_FLIGHT_PARAMETERS, hover_reset_samples="hover-reset-samples"
+            ),
         )
 
 
@@ -580,7 +587,7 @@ def test_hover_feedback_signs_frames_and_limits():
     from robotics_experiments.config import load_config
 
     module = _load_eval_press_module()
-    config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    config = load_config(REPO_ROOT / "configs/train/stage/press_hover_quad.yaml")
     from robotics_experiments.rl import pack_pose_observation
 
     policy = module._HoverFeedback(config=config)  # noqa: SLF001 - CLI feedback test
@@ -625,7 +632,7 @@ def test_hover_feasibility_reuses_production_evaluation_and_pinned_resets(monkey
     from robotics_experiments.config import load_config
 
     module = _load_eval_press_module()
-    config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    config = load_config(REPO_ROOT / "configs/train/stage/press_hover_quad.yaml")
     samples = object()
     inputs = SimpleNamespace(
         controller=SimpleNamespace(

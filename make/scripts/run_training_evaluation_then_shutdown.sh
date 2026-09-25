@@ -127,7 +127,7 @@ policy_name="$(
     ROBOTICS_EXPERIMENT_CONFIG_PATH="${hydra_config}" \
         PYTHONPATH="src${PYTHONPATH:+:${PYTHONPATH}}" \
         uv run python -c \
-        'import os; from robotics_experiments.config import load_config; print(load_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).rl.training.policy_name)'
+        'import os; from robotics_experiments.config import load_curriculum_config; print(load_curriculum_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).policy_name)'
 )"
 validate_name "policy name" "${policy_name}"
 
@@ -145,7 +145,7 @@ trackio_host="127.0.0.1"
 trackio_port="${RL_TRACKIO_PORT:-7860}"
 trackio_base_url="http://${trackio_host}:${trackio_port}/"
 trackio_primary_filter='^(training/Mean|training/reward/|validation/)'
-trackio_url="${trackio_base_url}?project=${policy_name}&runs=attempt_01&smoothing=0&accordion=hidden&metric_filter=${trackio_primary_filter}"
+trackio_url="${trackio_base_url}?project=${policy_name}&runs=${artifact_run_id}.stage_01.attempt_01&smoothing=0&accordion=hidden&metric_filter=${trackio_primary_filter}"
 trackio_container_name="vv-rl-trackio.${artifact_run_id}"
 trackio_dir=".build/training/${policy_name}/${artifact_run_id}/monitoring"
 trackio_ready_file="${log_dir}/${run_id}.trackio-ready"
@@ -271,19 +271,19 @@ serve_trackio_when_ready() {
                 curl --fail --silent \
                     --request POST \
                     --header 'Content-Type: application/json' \
-                    --data "{\"project\":\"${policy_name}\",\"run\":\"attempt_01\"}" \
+                    --data "{\"project\":\"${policy_name}\",\"run\":\"${artifact_run_id}.stage_01.attempt_01\"}" \
                     "${trackio_base_url}api/get_metrics_for_run" ||
                     true
             )"
             if [[ "${metrics}" == *'"training/reset/Measured reset states (count)"'* ]]; then
-                printf '[%s] Trackio URL: %s (run: %s/attempt_01; metrics loaded)\n' \
+                printf '[%s] Trackio URL: %s (run: %s; metrics loaded)\n' \
                     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     "${trackio_url}" \
-                    "${policy_name}" |
+                    "${artifact_run_id}.stage_01.attempt_01" |
                     tee -a "${console_log}"
-                printf '[%s] Trackio opens complete metric names with smoothing=0; exact selected-step values are in %s/training_report.json\n' \
+                printf '[%s] Trackio opens complete metric names with smoothing=0; exact selected-step values are in attempt reports referenced by %s/training_report.json\n' \
                     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                    ".build/training/${policy_name}/${artifact_run_id}" |
+                    ".build/training/${policy_name}/${artifact_run_id}.stage_01" |
                     tee -a "${console_log}"
                 : >"${trackio_ready_file}"
                 wait "${server_pid}"

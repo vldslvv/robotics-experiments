@@ -1,6 +1,7 @@
 from hydra.core.config_store import ConfigStore
 
 from robotics_experiments.config._commanding import DriverConfig, RoutineConfig
+from robotics_experiments.config._curriculum import CurriculumConfig
 from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._px4 import Px4BridgeConfig
 from robotics_experiments.config._rl import PressTaskConfig, RlConfig
@@ -19,6 +20,7 @@ def _register_schemas() -> None:
     """
     cs = ConfigStore.instance()
     cs.store(name="base_experiment", node=ExperimentConfig)
+    cs.store(name="base_curriculum", node=CurriculumConfig)
     # Group schemas are stored under the experiment/ subdir where their YAML
     # building blocks live, so each group file's ``defaults: - base_<group>``
     # resolves within its own group; the top-level entry configs at configs/

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from robotics_experiments.config._immutability import _FreezableConfig
 
@@ -26,7 +26,6 @@ __all__ = [
     "RlPlateauCriteriaConfig",
     "RlTrainingPhaseConfig",
     "RlTrainingConfig",
-    "RlPipelineStageConfig",
 ]
 
 
@@ -82,7 +81,6 @@ class RlActionConfig(_FreezableConfig):
 class RlInputsConfig(_FreezableConfig):
     """Producer artifacts selected for controller-backed policy training."""
 
-    initial_checkpoint: Optional[str]
     controller_artifact: str
     flight_parameters_artifact: str
 
@@ -335,14 +333,6 @@ class RlTrainingPhaseConfig(_FreezableConfig):
 
 
 @dataclass
-class RlPipelineStageConfig(_FreezableConfig):
-    """A display label and a complete experiment path in an ordered pipeline."""
-
-    name: str
-    config_path: str
-
-
-@dataclass
 class RlTrainingConfig(_FreezableConfig):
     """PPO training hyperparameters + task selection for ``make train-rl``.
 
@@ -351,9 +341,6 @@ class RlTrainingConfig(_FreezableConfig):
 
     Attributes:
         task_id: Gymnasium task id the entrypoint trains.
-        policy_name: Required artifact namespace under ``.build/training``;
-            completed runs publish their selected artifacts to that namespace's
-            ``latest`` symlink.
         phases: Ordered PPO phases.
         plateau: Validation progress and stopping rule.
         telemetry_sample_interval_s: Diagnostic hardware sampling cadence.
@@ -370,10 +357,8 @@ class RlTrainingConfig(_FreezableConfig):
         attempt_seeds: Independent training seeds (env reset + torch).
     """
 
-    pipeline: List[RlPipelineStageConfig]
     task_id: str
     vehicle_id: int
-    policy_name: str
     phases: List[RlTrainingPhaseConfig]
     plateau: RlPlateauCriteriaConfig
     evaluation_worker_timeout_s: float

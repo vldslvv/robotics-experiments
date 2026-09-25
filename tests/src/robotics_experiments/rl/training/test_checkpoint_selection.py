@@ -163,7 +163,7 @@ def test_comparison_fingerprint_tracks_effective_press_settings(*, stage_name: s
     from robotics_experiments.config import load_config
     from robotics_experiments.rl import PolicyContract, PolicyInterface
 
-    config = load_config(REPO_ROOT / "configs" / f"train_press_{stage_name}_quad.yaml")
+    config = load_config(REPO_ROOT / "configs" / f"train/stage/press_{stage_name}_quad.yaml")
     contract = PolicyContract(
         policy_interface=PolicyInterface.PRESS,
         obs_schema_version=3,
@@ -207,7 +207,7 @@ def test_comparison_fingerprint_tracks_effective_press_settings(*, stage_name: s
 def test_acceptance_uses_only_named_evaluation_metrics() -> None:
     from robotics_experiments.config import load_config
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    config = load_config(REPO_ROOT / "configs" / "train/stage/press_approach_quad.yaml")
     evaluation = _scored(
         collision_rate=0.0,
         min_closest_range_m=0.399,
@@ -224,7 +224,7 @@ def test_acceptance_uses_only_named_evaluation_metrics() -> None:
 def test_acceptance_includes_configured_range_safety_boundary() -> None:
     from robotics_experiments.config import load_config
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    config = load_config(REPO_ROOT / "configs" / "train/stage/press_approach_quad.yaml")
     acceptance = evaluate_press_acceptance(
         criteria=_acceptance_criteria(config),
         evaluation=_scored(
@@ -247,7 +247,7 @@ def test_acceptance_includes_configured_range_safety_boundary() -> None:
 def test_every_acceptance_check_is_individually_binding(overrides, failed_gate: str) -> None:
     from robotics_experiments.config import load_config
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    config = load_config(REPO_ROOT / "configs" / "train/stage/press_approach_quad.yaml")
     acceptance = evaluate_press_acceptance(
         criteria=_acceptance_criteria(config),
         evaluation=_scored(**overrides),
@@ -263,7 +263,7 @@ def test_every_acceptance_check_is_individually_binding(overrides, failed_gate: 
 def test_every_flight_parameter_statistic_is_binding(metric_name: str) -> None:
     from robotics_experiments.config import load_config
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    config = load_config(REPO_ROOT / "configs" / "train/stage/press_approach_quad.yaml")
     evaluation = _scored(
         collision_rate=0.0,
     )
@@ -293,7 +293,7 @@ def test_every_flight_parameter_statistic_is_binding(metric_name: str) -> None:
 def test_missing_flight_parameter_statistic_is_a_json_null_failure() -> None:
     from robotics_experiments.config import load_config
 
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    config = load_config(REPO_ROOT / "configs" / "train/stage/press_approach_quad.yaml")
     evaluation = _scored()
     missing_name = "flight_parameters.position_error.max"
     acceptance = evaluate_press_acceptance(
@@ -374,7 +374,7 @@ def test_validation_passing_candidate_ranks_ahead_of_lower_cost_failure() -> Non
 def test_successful_hover_selection_minimizes_error_and_preserves_passing_ties() -> None:
     from robotics_experiments.config import load_config
 
-    config = load_config(REPO_ROOT / "configs/train_press_hover_quad.yaml")
+    config = load_config(REPO_ROOT / "configs/train/stage/press_hover_quad.yaml")
     candidates = tuple(
         replace(
             _scored(
@@ -415,10 +415,13 @@ def _report(*, fingerprint: str, value: float) -> str:
     return json.dumps(
         {
             "comparison_fingerprint": fingerprint,
-            "selected_metric": {
-                "name": "evaluation_diagnostic_cost",
-                "direction": "minimize",
-                "value": value,
+            "schema_version": 28,
+            "selected": {
+                "metric": {
+                    "name": "evaluation_diagnostic_cost",
+                    "direction": "minimize",
+                    "value": value,
+                }
             },
         }
     )

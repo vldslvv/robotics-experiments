@@ -148,32 +148,38 @@ cannot resolve different entry bounds. Invalid or uncovered navigation
 measurements, handoff/goal/velocity-reference bounds, negative or non-finite
 reward weights, invalid rates, and unknown tasks fail during `load_config`.
 
-`rl.training` owns shared PPO parameters, rollout settings, task selection,
-artifact namespace, and `attempt_seeds`. Shipped configs author `[42]`: one
-training attempt whose checkpoints are evaluated across multiple validation
-seeds. Its `phases` and `plateau` fields apply to every task. Each phase owns its maximum iteration
-count, validation cadence, learning rate, schedule, and entropy coefficient.
-The campaign coordinator starts each attempt in a distinct Isaac process.
-Each later phase restores the
-attempt-wide validation-selected actor, critic, optimizer, and iteration before
-applying its configuration and resetting the environments.
-`rl.inputs.initial_checkpoint` optionally selects a producer training report's
-complete learner and associated policy artifact. Independent stages require
-integrity and compatibility, regardless of producer acceptance. Paths, producer
-run ID, and digests are pinned and recorded; producer files remain unchanged.
-`rl.training.pipeline` is an optional ordered list of `{name, config_path}` entries.
-Names must be unique and nonempty. Paths reference complete experiments relative
-to the repository, with empty pipeline and null initial checkpoint settings.
-The pipeline accepts only a qualified matching starting learner, then advances
-only on each stage's acceptance boolean and forwards the exact selected checkpoint.
-`policy_name` owns artifact namespaces; each stage execution gets a distinct run
-ID. Empty pipeline means an independent stage. Process resume is unsupported.
-See `RL_WORKFLOW.md` for stage results and pipeline reporting. The
-controller artifact at `rl.inputs.controller_artifact` defaults to
-`.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
-constructed. `CONTROLLER_ARTIFACT` or the training CLI override selects an exact
-run for reproduction. `rl.inputs.flight_parameters_artifact` selects the matching
-task-neutral schema-1 evidence bundle required before training.
+Training curricula use a separate `CurriculumConfig` and
+`load_curriculum_config(path)` boundary. Their YAML entrypoints live in
+`configs/train/`, with complete `ExperimentConfig` stage files subordinate in
+`configs/train/stage/`. Both loaders use the same isolated Hydra composition and
+immutable caching. Nested files declare `# @package _global_` and reference root
+defaults using `/base` or `/base_curriculum`. Airframe enrichment remains rooted
+at `configs/airframes`, independent of the experiment's directory.
+
+A curriculum has exactly `policy_name`, optional `initial_learner`, and a nonempty
+`stages` list of unique `{name, config_path}` entries. Stage paths resolve from the
+repository root. One-stage curricula use this same schema. Names are display
+labels. The curriculum owns the namespace and initializer; stage experiments own
+all task, PPO, phase, plateau, evaluation and acceptance settings. Sharing stage
+settings uses normal Hydra defaults, not a second shared-training section.
+
+`rl.training` owns PPO, rollout settings, task selection and attempt seeds. Each
+phase owns its maximum updates, validation cadence, learning rate, schedule,
+entropy coefficient and observation-normalization updates. Every attempt starts
+in a fresh Isaac process. Later phases restore the attempt-wide selected complete
+learner, apply their schedule, then reset environments.
+
+`initial_learner` is a producer training report, accepted or unaccepted, whose
+selected complete learner must be intact and compatible. The coordinator then
+advances only on each stage's acceptance, publishing before forwarding its exact
+selected learner. There are no stage-local initializers, implicit standalone
+mode, nested curricula or process resume. See `RL_WORKFLOW.md` for checkpoints,
+reports and examples.
+
+`rl.inputs.controller_artifact` and `rl.inputs.flight_parameters_artifact` remain
+stage-owned evidence selectors. Preparation resolves them to canonical producer
+paths and digests before creating a training run. Workers revalidate those pinned
+files; they never resolve a newer label implicitly.
 
 `rl.action` is task-neutral and contains only normalized action kind,
 dimension, and scales. Controller gains, command delay, maximum tilt, and
@@ -189,7 +195,7 @@ campaign without retrying another checkpoint. Accepted campaigns automatically a
 may instead assign `latest` to a strict diagnostic candidate without changing
 `best` or its recorded qualification status. Only an accepted actor is exported
 as a campaign publication.
-`configs/train_press_hover_quad.yaml` selects the `hover` task and `press-hover`
+`configs/train/press_hover_quad.yaml` selects the `hover` task and `press-hover`
 artifact namespace; it authors 40-second episodes.
-`configs/train_press_approach_quad.yaml` selects the `approach` task and
+`configs/train/press_approach_quad.yaml` selects the `approach` task and
 `press-approach` namespace; it authors 45-second episodes.

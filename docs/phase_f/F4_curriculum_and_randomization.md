@@ -4,8 +4,10 @@ Status: PLANNED; depends on an accepted contact policy from F3. Contact-task
 training and domain randomization remain separate work from the existing hover
 and approach tasks.
 
-The shared stage runner and ordered `rl.training.pipeline` provide execution and
-checkpoint forwarding. See [RL workflow](../RL_WORKFLOW.md) for the current
+The shared stage runner and ordered curriculum `stages` provide execution and
+checkpoint forwarding. Curriculum configurations live in `configs/train/` and
+their complete stage experiments in `configs/train/stage/`.
+See [RL workflow](../RL_WORKFLOW.md) for the current
 contract. F4 must define complete task experiments rather than add a second
 curriculum manager, promotion loop, or workflow framework.
 
@@ -15,11 +17,11 @@ Define complete Hydra experiments that progressively tighten switch geometry,
 button stiffness, press threshold, wall tilt, contact point, stand-off distance,
 and friction toward the real X500 pusher and switch. Each experiment owns its
 reward, reset distribution, training phases, plateau rule, validation workload,
-and acceptance criteria. Pipeline entries contain only labels and config paths.
+and acceptance criteria. Curriculum entries contain only names and config paths.
 Task code implements the configured behavior; labels never select behavior.
 
 Each accepted stage supplies its complete selected learner to the next stage.
-The pipeline reads only the acceptance boolean. It must not inspect contact
+The curriculum reads only the acceptance boolean. It must not inspect contact
 measurements or promote a task from rolling training metrics. Fresh environments
 apply the next experiment's task parameters; simulator state is not inherited.
 Contact task identity and its policy contract require their own implementation
@@ -38,7 +40,7 @@ randomization. Candidate areas include:
 
 Each experiment authors its own ranges, units, nominal values, sampling law, and
 fixed evaluation distribution. There is no `stage_introduced` field or implicit
-lookup by pipeline label. Training and evaluation must reproduce their respective
+lookup by curriculum label. Training and evaluation must reproduce their respective
 sample sequences from recorded seeds. Controller randomization must respect the
 controller-artifact and flight-evidence ownership rules in `AGENTS.md`.
 
@@ -46,11 +48,13 @@ controller-artifact and flight-evidence ownership rules in `AGENTS.md`.
 
 Test the task's reset parameter application, reproducible sampling, reward
 calculations, and independent acceptance measurements before training. Reuse the
-shared pipeline sequencing tests; contact behavior does not need another
+shared curriculum sequencing tests; contact behavior does not need another
 advancement implementation.
 
-A future F4 campaign may start from a compatible accepted F3 learner through
-`rl.inputs.initial_checkpoint`. Run it with `make train-rl`, retain per-stage
+A future F4 campaign may start from a compatible F3 learner through the
+curriculum's `initial_learner` producer-report reference. Each stage must pass its
+own fresh acceptance test before publication or advancement.
+Run it with `make train-rl`, retain per-stage
 reports and monitoring, and stop on failed acceptance. Recorded targets for the
 mature randomized contact task are press success at least 85%, first-contact
 stability at least 95%, retreat at least 99%, and bounded compression overshoot.

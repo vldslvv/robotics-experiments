@@ -31,7 +31,7 @@ steps:
     hold_s: 1.0
   - kind: policy
     label: policy-transfer-0.460
-    artifact: .build/training/${rl.training.policy_name}/latest
+    artifact: .build/training/press-approach/latest
     switch_index: 0
     timeout_s: 45.0
   - kind: goto
@@ -52,7 +52,7 @@ steps:
     hold_s: 1.0
   - kind: policy
     label: policy-transfer-0.475
-    artifact: .build/training/${rl.training.policy_name}/latest
+    artifact: .build/training/press-approach/latest
     switch_index: 0
     timeout_s: 45.0
   - kind: goto
@@ -73,6 +73,6 @@ steps:
     hold_s: 1.0
   - kind: policy
     label: policy-transfer-0.490
-    artifact: .build/training/${rl.training.policy_name}/latest
+    artifact: .build/training/press-approach/latest
     switch_index: 0
     timeout_s: 45.0

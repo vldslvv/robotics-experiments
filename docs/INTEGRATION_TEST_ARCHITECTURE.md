@@ -27,7 +27,7 @@ report when a host wrapper is canceled.
 
 `make/integration-tests.mk` owns the general integration harness variables,
 aggregate suite, and non-RL target definitions. `make/rl.mk` owns merged
-training/evaluation, independent press evaluation, and all press/Isaac Lab task
+curriculum training, independent press evaluation, and all press/Isaac Lab task
 targets. `make/alignment.mk` exclusively owns controller capture, target sweep,
 fit/publication, and the alignment target-envelope gate.
 `INTEGRATION_TEST_TARGETS` deliberately remains in
@@ -314,3 +314,15 @@ one opportunity to complete that deadline. The DRIVE allowance comes from the
 fully built routine's summed step budgets and Hydra-owned
 `drive_budget_multiplier`; the shell does not maintain a second estimate of
 routine duration.
+
+## Curriculum procedural checks
+
+`make train-rl HYDRA_CONFIG=configs/train/press_hover_quad.yaml` loads a curriculum,
+not a simulator experiment. It passes complete experiments under
+`configs/train/stage/` to isolated attempt workers. `RL_RUN_ID` names the curriculum;
+stage reports use `.stage_01`, `.stage_02`, and subsequent suffixes. Normal
+`eval-press` follows the last published stage recorded by that curriculum, or the
+explicit artifact selector. It uses that stage's configuration and pinned evidence.
+The feasibility diagnostic instead takes a complete stage experiment directly.
+`--procedural-smoke` executes one update per phase without reserved test seeds or
+publication. See `RL_WORKFLOW.md` for initialization and monitoring.
