@@ -16,6 +16,7 @@ from robotics_experiments.flight_parameters import (
 from robotics_experiments.rl import prepare_policy_inputs
 from robotics_experiments.rl.workflow import _load_pinned_policy_inputs
 from tests.support.paths import REPO_ROOT
+from tests.support.switches import write_switch_asset
 
 
 def _controller(*, config, flight_parameters, fingerprint: str | None = None):
@@ -52,9 +53,10 @@ def test_prepare_policy_inputs_pins_and_matches_both_artifacts(
         lambda _path: _controller(config=config, flight_parameters=flight_parameters),
     )
 
+    write_switch_asset(root=tmp_path, model=config.switches.model)
     inputs = prepare_policy_inputs(
         config=config,
-        repo_root=REPO_ROOT,
+        repo_root=tmp_path,
         controller_artifact=controller_path,
         flight_parameters_artifact=flight_parameters_path,
     )
@@ -91,7 +93,7 @@ def test_prepare_policy_inputs_rejects_flight_parameters_not_used_by_controller(
     with pytest.raises(ValueError, match="artifact fingerprint does not match"):
         prepare_policy_inputs(
             config=config,
-            repo_root=REPO_ROOT,
+            repo_root=tmp_path,
             controller_artifact=controller_path,
             flight_parameters_artifact=flight_parameters_path,
         )
@@ -110,7 +112,11 @@ def test_load_pinned_policy_inputs_checks_identity_without_revalidating_compatib
     flight_parameters_path = REPO_ROOT / "tests/fixtures/flight_parameters"
     bundle = load_flight_parameters_bundle(path=flight_parameters_path)
 
+    config = load_config(REPO_ROOT / "configs/train/stage/press_hover_quad.yaml")
+    asset = write_switch_asset(root=tmp_path, model=config.switches.model)
     inputs = _load_pinned_policy_inputs(
+        config=config,
+        switch_asset=asset,
         controller_path=controller_path,
         controller_digest=hashlib.sha256(b"pinned controller").hexdigest(),
         flight_parameters_path=flight_parameters_path,
@@ -122,6 +128,8 @@ def test_load_pinned_policy_inputs_checks_identity_without_revalidating_compatib
 
     with pytest.raises(ValueError, match="controller artifact changed"):
         _load_pinned_policy_inputs(
+            config=config,
+            switch_asset=asset,
             controller_path=controller_path,
             controller_digest="wrong",
             flight_parameters_path=flight_parameters_path,

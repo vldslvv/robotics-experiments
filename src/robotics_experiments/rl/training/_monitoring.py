@@ -19,7 +19,7 @@ __all__ = [
     "write_system_scalars",
 ]
 
-METRIC_REGISTRY_REVISION = 20
+METRIC_REGISTRY_REVISION = 21
 
 _HOVER_SIGNALS = {
     "position_error_enu_x": ("East position error", "m"),
@@ -222,6 +222,22 @@ _CONTACT_METRICS = (
 EVALUATION_METRICS += tuple(
     MetricSpec(name, label, unit, label, direction)
     for name, label, unit, direction in _CONTACT_METRICS
+)
+
+EVALUATION_METRICS += (
+    *(
+        MetricSpec(
+            f"{name}_rate", f"Episodes with {label} (fraction)", "fraction", label, "minimize"
+        )
+        for name, label in (
+            ("button_contact", "pad to button contact"),
+            ("housing_collision", "pad to housing collision"),
+            ("wall_collision", "pad to wall collision"),
+            ("other_pad_collision", "other pad collisions"),
+            ("body_collision", "drone body collisions"),
+            ("simultaneous_contact", "simultaneous contact categories"),
+        )
+    ),
 )
 
 

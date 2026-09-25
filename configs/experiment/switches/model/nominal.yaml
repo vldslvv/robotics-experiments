@@ -1,0 +1,22 @@
+defaults:
+  - base_model
+  - _self_
+
+button_width_m: 0.06
+button_height_m: 0.08
+button_thickness_m: 0.01
+# Preserve the source asset's reference pose and rest center.
+button_rest_y_m: -0.013399239124577633
+housing_width_m: 0.10
+housing_height_m: 0.15
+clearance_m: 0.002
+back_plate_thickness_m: 0.003
+contact_offset_m: 0.0005
+travel_m: 0.02
+activation_displacement_m: 0.01
+# Legrand Mallia F01402EN/00: handling force 2.6-3.5 N.
+activation_force_n: 2.6
+# Mass, damping, travel, confirmation and linear response are simulation choices.
+button_mass_kg: 0.01
+damping_ratio: 0.7
+confirmation_s: 0.25

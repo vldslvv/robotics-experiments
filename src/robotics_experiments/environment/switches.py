@@ -1,25 +1,24 @@
-from __future__ import annotations
+"""One simulation-time button latch for scalar runtime and batched Lab consumers."""
 
+import math
 from dataclasses import dataclass, replace
+
+import numpy as np
+
+from robotics_experiments.config import SwitchModelConfig
+from robotics_experiments.switches import ButtonLatchState, step_button_latch
 
 __all__ = ["SwitchState", "apply_button_sample"]
 
 
 @dataclass(frozen=True)
 class SwitchState:
-    """Runtime state for a single spawned light switch.
-
-    ``press_steps`` counts how many consecutive samples the button has stayed at
-    or above the press threshold, and ``toggle_latched`` records that the current
-    sustained press has already produced its single toggle. Together they drive
-    the N-step confirmation window; both reset
-    when the button releases.
-    """
+    """One lamp and its button's immutable progress."""
 
     prim_path: str
     lamp_prim_path: str = ""
     state: bool = False
-    press_steps: int = 0
+    press_duration_s: float = 0.0
     toggle_latched: bool = False
 
 
@@ -27,31 +26,24 @@ def apply_button_sample(
     *,
     switch: SwitchState,
     button_position: float,
-    press_threshold: float,
-    confirm_steps: int,
+    dt_s: float,
+    model: SwitchModelConfig,
 ) -> tuple[SwitchState, bool]:
-    """Return the successor state for one button position sample.
-
-    Implements the light-state latch: a press toggles the switch only once it
-    has stayed at or above ``press_threshold`` for
-    ``confirm_steps`` consecutive samples. A rapid tap that releases before the
-    window completes does not count; a sustained press toggles exactly once and
-    will not re-toggle until the button is released and pressed again.
-
-    The input state is never mutated. The boolean result is ``True`` only on
-    the sample that confirms the toggle.
-    """
-    if button_position < press_threshold:
-        return replace(switch, press_steps=0, toggle_latched=False), False
-
-    press_steps = switch.press_steps + 1
-    toggled = press_steps >= confirm_steps and not switch.toggle_latched
-    return (
-        replace(
-            switch,
-            state=not switch.state if toggled else switch.state,
-            press_steps=press_steps,
-            toggle_latched=switch.toggle_latched or toggled,
+    """Apply the shared vector transition to one runtime switch and lamp."""
+    if not math.isfinite(button_position):
+        raise ValueError("button displacement must be finite")
+    latch, event = step_button_latch(
+        state=ButtonLatchState(
+            np.asarray(switch.press_duration_s), np.asarray(switch.toggle_latched)
         ),
-        toggled,
+        displacement_m=np.asarray(button_position),
+        dt_s=dt_s,
+        model=model,
     )
+    toggled = bool(event)
+    return replace(
+        switch,
+        press_duration_s=float(latch.duration_s),
+        toggle_latched=bool(latch.latched),
+        state=not switch.state if toggled else switch.state,
+    ), toggled

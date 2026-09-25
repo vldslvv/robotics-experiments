@@ -2,6 +2,7 @@
 defaults:
   - /base
   - /experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - override /experiment/switches/model@switches.model: easy
   - _self_
 
 # Press-hover task: target-local measured-envelope hold.

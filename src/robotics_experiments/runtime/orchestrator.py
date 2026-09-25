@@ -129,8 +129,6 @@ class FleetState:
     flying: tuple[FlyingDrone, ...]
     driver_cadence: _CadenceState
     switches: SwitchesRuntimeState
-    switch_cadence: _CadenceState
-    switch_rate_hz: float
     switch_events: tuple[SwitchToggleEvent, ...]
 
 
@@ -227,8 +225,6 @@ def create_fleet(*, config: ExperimentConfig) -> FleetState:
         flying=(),
         driver_cadence=_CadenceState(previous_time_ns=0),
         switches=create_switches_runtime(config=config.switches, stage=None),
-        switch_cadence=_CadenceState(previous_time_ns=0),
-        switch_rate_hz=config.rl.policy_rate_hz,
         switch_events=(),
     )
 
@@ -275,8 +271,7 @@ def spawn_fleet(
     """Spawn vehicles and optionally preflight production policy artifacts."""
     if state.stage is None:
         raise RuntimeError(f"{_LOG_PREFIX} spawn_fleet called before the stage was adopted")
-    switch_rate_hz = state.switch_rate_hz
-    policy_preflight = _PolicyPreflight(policies=(), press_rate_hz=None)
+    policy_preflight = _PolicyPreflight(policies=())
     if preflight_policy_artifacts and any(
         descriptor.get("kind") == "policy"
         for vehicle in state.config.vehicles.values()
@@ -286,8 +281,6 @@ def spawn_fleet(
             config=state.config,
             repo_root=_repo_root(),
         )
-        if policy_preflight.press_rate_hz is not None:
-            switch_rate_hz = policy_preflight.press_rate_hz
     summary = ", ".join(
         f"{label}: id={vehicle.id} prim={vehicle.spawn.prim_name} "
         f"px4_enabled={vehicle.bridge.enabled} endpoint={vehicle.mavlink_port} "
@@ -343,7 +336,6 @@ def spawn_fleet(
             drones=prepared_drones,
             flying=(),
             switches=switches,
-            switch_rate_hz=switch_rate_hz,
             switch_events=(),
         )
     except Exception:
@@ -396,8 +388,6 @@ def _prepare_policy_observer(
         action_dim=press_descriptors[0][1].action_dim,
         contact_force_threshold_n=(state.config.rl.press.termination.contact_force_threshold_n),
         physical_contact_enabled=reset.physical_contact_enabled,
-        button_geometry_scale=reset.button_geometry_scale,
-        button_stiffness_scale=reset.button_stiffness_scale,
         switch_wall_offset_m=reset.switch_wall_offset_m,
         wall_half_extents_m=reset.wall_half_extents_m,
         pusher_effort_limit_n=lab_vehicle.pusher_effort_limit_n,
@@ -500,29 +490,18 @@ def tick_drivers(
     previous_time_ns = state.driver_cadence.previous_time_ns
     assert previous_time_ns is not None
     control_time_ns = previous_time_ns + int(round(physics_dt_s * 1_000_000_000))
-    switch_cadence, switch_due = _advance_cadence(
-        state=state.switch_cadence,
-        time_ns=control_time_ns,
-        rate_hz=state.switch_rate_hz,
+    toggles: list[tuple[int, bool]] = []
+    switches = step_switches_runtime(
+        state=state.switches,
+        dt_s=physics_dt_s,
+        on_toggle=lambda index, value: toggles.append((index, value)),
     )
-    switches = state.switches
-    switch_events = state.switch_events
-    if switch_due:
-        toggles: list[tuple[int, bool]] = []
-        switches = step_switches_runtime(
-            state=switches,
-            on_toggle=lambda index, value: toggles.append((index, value)),
+    switch_events = state.switch_events + tuple(
+        SwitchToggleEvent(
+            sequence=len(state.switch_events) + offset, switch_index=index, state=value
         )
-        if toggles:
-            first_sequence = len(switch_events)
-            switch_events += tuple(
-                SwitchToggleEvent(
-                    sequence=first_sequence + offset,
-                    switch_index=index,
-                    state=value,
-                )
-                for offset, (index, value) in enumerate(toggles, start=1)
-            )
+        for offset, (index, value) in enumerate(toggles, start=1)
+    )
     cadence, due = _advance_cadence(
         state=state.driver_cadence,
         time_ns=control_time_ns,
@@ -533,7 +512,6 @@ def tick_drivers(
             state,
             driver_cadence=cadence,
             switches=switches,
-            switch_cadence=switch_cadence,
             switch_events=switch_events,
         )
     tick = DriverTick(
@@ -559,7 +537,6 @@ def tick_drivers(
         driver_cadence=cadence,
         flying=tuple(advanced),
         switches=switches,
-        switch_cadence=switch_cadence,
         switch_events=switch_events,
     )
 
@@ -587,6 +564,5 @@ def teardown(*, state: FleetState) -> FleetState:
         flying=(),
         driver_cadence=_CadenceState(previous_time_ns=0),
         switches=switches,
-        switch_cadence=_CadenceState(previous_time_ns=0),
         switch_events=(),
     )

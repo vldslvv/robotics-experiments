@@ -88,13 +88,14 @@ def step_switches(
     switch_state: tuple[SwitchState, ...],
     articulations: Sequence[SingleArticulation],
     config: LightSwitchConfig,
+    dt_s: float,
     on_toggle: Callable[[int, bool], None] | None = None,
 ) -> tuple[SwitchState, ...]:
     """Detect confirmed button presses and toggle the paired lamps.
 
     Reads the first DOF of each articulation; once it has stayed at or above the
-    configured press threshold for ``press_confirm_steps`` consecutive steps (the
-    light-state latch), the switch's ``state`` flips, the lamp is
+    configured activation displacement for the confirmation duration, its state
+    flips, the lamp is
     updated on stage, and ``on_toggle`` is invoked with the switch index and new
     state.
 
@@ -114,8 +115,8 @@ def step_switches(
         next_switch, toggled = apply_button_sample(
             switch=sw,
             button_position=float(button_pos),
-            press_threshold=config.press_threshold,
-            confirm_steps=config.press_confirm_steps,
+            model=config.model,
+            dt_s=dt_s,
         )
         successor.append(next_switch)
         if toggled:

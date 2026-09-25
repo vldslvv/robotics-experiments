@@ -16,9 +16,10 @@ from omegaconf import OmegaConf, open_dict
 from robotics_experiments.config._curriculum import CurriculumConfig
 from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._immutability import _freeze_config_graph
+from robotics_experiments.config._scene import SwitchModelConfig
 from robotics_experiments.config._schemas import _register_schemas
 
-__all__ = ["load_config", "load_curriculum_config"]
+__all__ = ["load_config", "load_curriculum_config", "load_switch_model"]
 
 _PX4_OFFBOARD_LOSS_ACTION_PARAMS = {
     "position": 0,
@@ -337,10 +338,8 @@ def _validate_press_task(experiment: ExperimentConfig) -> None:
     for name in ("first_contact_rate_min", "retreat_rate_min"):
         if getattr(press.contact, name) > 1:
             raise ValueError(f"rl.press.contact.{name} must be at most 1")
-    for name in ("button_geometry_scale", "button_stiffness_scale", "button_threshold_scale"):
-        value = getattr(press.reset, name)
-        if not math.isfinite(value) or value <= 0:
-            raise ValueError(f"rl.press.reset.{name} must be finite and positive")
+    if press.termination.contact_data_capacity_per_body <= 0:
+        raise ValueError("contact_data_capacity_per_body must be positive")
     if press.task in {"contact", "press"} and not press.reset.physical_contact_enabled:
         raise ValueError("contact tasks require physical contact")
     if any(
@@ -558,9 +557,20 @@ def _validate_press_task(experiment: ExperimentConfig) -> None:
 
 def _validate_switches(experiment: ExperimentConfig) -> None:
     switches = experiment.switches
+    switches.model.validate()
+    for field in fields(switches.verification):
+        value = getattr(switches.verification, field.name)
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"switches.verification.{field.name} must be finite and positive")
+    if switches.verification.near_stop_margin_m >= switches.model.travel_m:
+        raise ValueError("switch verification margin must lie inside travel")
+    if (
+        switches.model.back_extent_m + switches.model.contact_offset_m
+        >= experiment.rl.press.reset.switch_wall_offset_m
+    ):
+        raise ValueError("switch back plate must clear the surrounding wall")
     positive_integers = {
         "switches.num_switches": switches.num_switches,
-        "switches.press_confirm_steps": switches.press_confirm_steps,
         "switches.max_spawn_retries": switches.max_spawn_retries,
     }
     for name, value in positive_integers.items():
@@ -733,3 +743,16 @@ def load_curriculum_config(path: str | PathLike[str], /) -> CurriculumConfig:
     if curriculum.initial_learner is not None and not curriculum.initial_learner.strip():
         raise ValueError("initial_learner must be null or a producer report path")
     return _freeze_config_graph(curriculum)
+
+
+@functools.cache
+def load_switch_model(path: str | PathLike[str], /) -> SwitchModelConfig:
+    """Compose and validate a named switch model without generating assets."""
+    config_path = Path(path)
+    if not config_path.is_absolute():
+        config_path = Path(__file__).resolve().parents[3] / config_path
+    _register_schemas()
+    cfg = _compose_config(config_path.resolve(strict=True))
+    model = cast(SwitchModelConfig, OmegaConf.to_object(cfg.experiment.switches.model))
+    model.validate()
+    return _freeze_config_graph(model)

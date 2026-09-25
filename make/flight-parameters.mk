@@ -24,7 +24,7 @@ FLIGHT_PARAMETERS_RESPONSE_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalon
 .PHONY: test-integration-flight-parameters-sample
 test-integration-flight-parameters-sample: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-flight-parameters-sample: SCENE = @config
-test-integration-flight-parameters-sample: generate-drone-usd
+test-integration-flight-parameters-sample: generate-assets
 	@mkdir -p '$(FLIGHT_PARAMETERS_TRIAL_DIR_HOST)'
 	@TEST_TARGET='test-integration-flight-parameters-sample' \
 	    HOST_ISAAC_LOG_BASENAME='flight_parameters_capture.log' \
@@ -44,7 +44,7 @@ test-integration-flight-parameters-sample: generate-drone-usd
 .PHONY: test-integration-flight-parameters-response-sample
 test-integration-flight-parameters-response-sample: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-flight-parameters-response-sample: SCENE = @config
-test-integration-flight-parameters-response-sample: generate-drone-usd
+test-integration-flight-parameters-response-sample: generate-assets
 	@mkdir -p '$(FLIGHT_PARAMETERS_RESPONSE_DIR_HOST)'
 	@TEST_TARGET='test-integration-flight-parameters-response-sample' \
 	    HOST_ISAAC_LOG_BASENAME='flight_parameters_capture_response.log' \

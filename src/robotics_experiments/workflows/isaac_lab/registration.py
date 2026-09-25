@@ -12,6 +12,7 @@ from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.controller import ControllerSettings
 from robotics_experiments.flight_parameters import FlightParameters
 from robotics_experiments.rl import HoverResetSamples, PolicyContract, PolicyInterface
+from robotics_experiments.switches import SwitchAsset
 
 __all__ = [
     "DRONE_HOVER_TASK_ID",
@@ -104,6 +105,7 @@ def make_isaac_lab_env(
     policy_contract: PolicyContract | None = None,
     flight_parameters: FlightParameters | None = None,
     hover_reset_samples: HoverResetSamples | None = None,
+    switch_asset: SwitchAsset | None = None,
 ) -> tuple[gym.Env, object]:
     """Build a task, optionally interpreting actions through an artifact contract."""
     if not register_isaac_lab_tasks():
@@ -127,6 +129,10 @@ def make_isaac_lab_env(
         "experiment_config": experiment_config,
         "policy_contract": policy_contract,
     }
+    if task_id == SWITCH_PRESS_TASK_ID:
+        if switch_asset is None:
+            raise ValueError("the press task requires a pinned switch asset")
+        factory_kwargs["switch_asset"] = switch_asset
     env_cfg = factory(**factory_kwargs)
     if seed is not None and hasattr(env_cfg, "seed"):
         env_cfg.seed = seed

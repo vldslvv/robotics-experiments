@@ -31,13 +31,14 @@ from robotics_experiments.controller import (
 )
 from robotics_experiments.flight_parameters import FlightParameters, load_flight_parameters_bundle
 from robotics_experiments.rl.hover import HoverResetSamples, load_hover_reset_samples
+from robotics_experiments.switches import SwitchAsset, load_switch_asset
 
 __all__ = ["PolicyInputs", "prepare_policy_inputs"]
 
 
 @dataclass(frozen=True)
 class PolicyInputs:
-    """The two validated, pinned producer artifacts used by one campaign."""
+    """Validated, pinned controller, flight evidence and switch used by one campaign."""
 
     controller: ControllerArtifact
     controller_path: Path
@@ -45,6 +46,7 @@ class PolicyInputs:
     flight_parameters: FlightParameters
     flight_parameters_path: Path
     flight_parameters_digest: str
+    switch_asset: SwitchAsset
     hover_reset_samples: HoverResetSamples
 
 
@@ -80,7 +82,7 @@ def prepare_policy_inputs(
     controller_artifact: str | Path | None = None,
     flight_parameters_artifact: str | Path | None = None,
 ) -> PolicyInputs:
-    """Load, validate, match, and pin the two policy-training inputs."""
+    """Load, validate, match, and pin the policy-training inputs."""
 
     controller_path = resolve_controller_path(
         _resolve_path(
@@ -135,6 +137,7 @@ def prepare_policy_inputs(
         raise ValueError("flight parameters are incompatible: " + "; ".join(flight_mismatches))
 
     return PolicyInputs(
+        switch_asset=load_switch_asset(model=config.switches.model, repo_root=repo_root),
         controller=controller,
         controller_path=controller_path,
         controller_digest=_file_sha256(controller_path),
@@ -147,6 +150,8 @@ def prepare_policy_inputs(
 
 def _load_pinned_policy_inputs(
     *,
+    config: ExperimentConfig,
+    switch_asset: SwitchAsset,
     controller_path: Path,
     controller_digest: str,
     flight_parameters_path: Path,
@@ -161,6 +166,7 @@ def _load_pinned_policy_inputs(
     if bundle.flight_parameters_digest != flight_parameters_digest:
         raise ValueError("flight parameters changed after campaign preparation")
     return PolicyInputs(
+        switch_asset=load_switch_asset(model=config.switches.model, expected=switch_asset),
         controller=load_controller_artifact(resolved_controller),
         controller_path=resolved_controller,
         controller_digest=controller_digest,

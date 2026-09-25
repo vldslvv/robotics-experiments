@@ -44,7 +44,6 @@ class _ConfiguredPolicy:
 @dataclass(frozen=True)
 class _PolicyPreflight:
     policies: tuple[_ConfiguredPolicy, ...]
-    press_rate_hz: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -68,7 +67,6 @@ def _preflight_policy_artifacts(
 ) -> _PolicyPreflight:
     """Validate every configured artifact before simulator mutation."""
     policies = []
-    press_rates: set[float] = set()
     for label, vehicle in config.vehicles.items():
         for descriptor in vehicle.routine.steps:
             if descriptor.get("kind") != "policy":
@@ -91,7 +89,6 @@ def _preflight_policy_artifacts(
                         f"{contract.curriculum_stage!r} does not match configured "
                         f"stage {config.rl.press.task!r}"
                     )
-                press_rates.add(contract.policy_rate_hz)
                 if contract.curriculum_stage == "hover":
                     load_hover_reset_bounds(
                         path=_artifact_path(
@@ -109,15 +106,7 @@ def _preflight_policy_artifacts(
                     metadata=metadata,
                 )
             )
-    if len(press_rates) > 1:
-        raise ValueError(
-            "press policy artifacts in one fleet must share one policy_rate_hz; "
-            f"found {sorted(press_rates)}"
-        )
-    return _PolicyPreflight(
-        policies=tuple(policies),
-        press_rate_hz=next(iter(press_rates), None),
-    )
+    return _PolicyPreflight(policies=tuple(policies))
 
 
 def _hover_adapter(

@@ -491,6 +491,8 @@ print(json.dumps(config.__all__))
         "HoverTaskConfig",
         "IsaacLabVehicleConfig",
         "LightSwitchConfig",
+        "SwitchModelConfig",
+        "load_switch_model",
         "PressApproachAcceptanceConfig",
         "PressApproachEvaluationConfig",
         "PressApproachGoalConfig",

@@ -38,9 +38,17 @@ from robotics_experiments.rl.press import (
 from robotics_experiments.rl.press._switch_asset import ASSET_TO_CANONICAL_WXYZ, SQRT_HALF
 from robotics_experiments.rl.press.contact import (
     PressContactResult,
+    classify_press_contacts,
+    contact_force_totals,
     initial_press_contact_state,
     reset_press_contact_state,
     step_press_contact,
+)
+from robotics_experiments.switches import (
+    ButtonLatchState,
+    SwitchAsset,
+    load_switch_asset,
+    step_button_latch,
 )
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
 from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
@@ -98,6 +106,7 @@ class SwitchPressEnvCfg(DirectRLEnvCfg):
 def make_switch_press_env_cfg(
     *,
     experiment_config: ExperimentConfig,
+    switch_asset: SwitchAsset,
     policy_contract: PolicyContract | None = None,
 ) -> SwitchPressEnvCfg:
     """Build the press task from one immutable resolved experiment config."""
@@ -150,7 +159,14 @@ def make_switch_press_env_cfg(
         switch_cfg=ArticulationCfg(
             prim_path=_SWITCH_PRIM_PATH,
             spawn=UsdFileCfg(
-                usd_path=experiment_config.switches.switch_usd_path,
+                usd_path=str(
+                    load_switch_asset(
+                        model=experiment_config.switches.model, expected=switch_asset
+                    ).path
+                ),
+                collision_props=sim_utils.CollisionPropertiesCfg(
+                    collision_enabled=reset.physical_contact_enabled
+                ),
             ),
             init_state=ArticulationCfg.InitialStateCfg(
                 pos=switch_position,
@@ -180,11 +196,25 @@ def make_switch_press_env_cfg(
             prim_path=_BODY_PRIM_PATH,
             update_period=0.0,
             history_length=0,
+            max_contact_data_count_per_prim=rl.press.termination.contact_data_capacity_per_body,
+            filter_prim_paths_expr=[
+                f"{_SWITCH_PRIM_PATH}/LightSwitch/Button",
+                f"{_SWITCH_PRIM_PATH}/LightSwitch/BaseMesh",
+                _WALL_PRIM_PATH,
+                _PAD_PRIM_PATH,
+            ],
         ),
         pusher_contact_sensor_cfg=ContactSensorCfg(
             prim_path=_PAD_PRIM_PATH,
             update_period=0.0,
             history_length=0,
+            max_contact_data_count_per_prim=rl.press.termination.contact_data_capacity_per_body,
+            filter_prim_paths_expr=[
+                f"{_SWITCH_PRIM_PATH}/LightSwitch/Button",
+                f"{_SWITCH_PRIM_PATH}/LightSwitch/BaseMesh",
+                _WALL_PRIM_PATH,
+                _BODY_PRIM_PATH,
+            ],
         ),
         scene=InteractiveSceneCfg(
             num_envs=rl.num_envs,
@@ -247,11 +277,6 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             dtype=torch.float32,
             device=self.device,
         )
-        stiffness = (
-            self.switch.data.default_joint_stiffness[:, switch_joint_ids]
-            * self._experiment_config.rl.press.reset.button_stiffness_scale
-        )
-        self.switch.write_joint_stiffness_to_sim(stiffness, joint_ids=switch_joint_ids)
         relative_position, relative_quat_xyzw = self._relative_switch_pose()
         position_error_enu_m, attitude_error_wxyz = self._hover_pose_errors(
             relative_position=relative_position,
@@ -274,6 +299,14 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._pusher_collision_latch = torch.zeros_like(self._body_collision_latch)
         self._completed_episode_count = torch.zeros((), device=self.device)
         self._contact_task = self._experiment_config.rl.press.task in {"contact", "press"}
+        self._button_latch = ButtonLatchState(
+            torch.zeros_like(relative_position[:, 0]), torch.zeros_like(self._body_collision_latch)
+        )
+        self._button_toggle_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._contact_categories = torch.zeros(
+            (self.num_envs, 5), dtype=torch.bool, device=self.device
+        )
+        self._simultaneous_contact = torch.zeros_like(self._body_collision_latch)
         self._contact_state = initial_press_contact_state(ranges=relative_position[:, 0])
         self._contact_result: PressContactResult | None = None
         self._intended_contact = torch.zeros_like(self._body_collision_latch)
@@ -302,7 +335,6 @@ class SwitchPressEnv(_FlightDirectRLEnv):
     def _setup_scene(self) -> None:
         self.drone = Articulation(self.cfg.drone_cfg)
         self.switch = Articulation(self.cfg.switch_cfg)
-        self._scale_switch_button()
         self.wall = RigidObject(self.cfg.wall_cfg)
         self.body_contact_sensor = ContactSensor(self.cfg.body_contact_sensor_cfg)
         self.contact_sensor = ContactSensor(self.cfg.pusher_contact_sensor_cfg)
@@ -315,43 +347,6 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self.scene.clone_environments(copy_from_source=False)
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=["/World/ground"])
-
-    def _scale_switch_button(self) -> None:
-        """Enlarge the pressable target without enlarging the boom-blocking plate."""
-        from pxr import Gf, UsdGeom, UsdPhysics
-
-        stage = sim_utils.get_current_stage()
-        switch_root = stage.GetPrimAtPath("/World/envs/env_0/Switch")
-        if not self._experiment_config.rl.press.reset.physical_contact_enabled:
-            for prim in stage.Traverse():
-                if prim.GetPath().HasPrefix(switch_root.GetPath()) and prim.HasAPI(
-                    UsdPhysics.CollisionAPI
-                ):
-                    UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr(False)
-        buttons = [
-            prim
-            for prim in stage.Traverse()
-            if prim.GetPath().HasPrefix(switch_root.GetPath()) and prim.GetName() == "ButtonMesh"
-        ]
-        if len(buttons) != 1:
-            raise RuntimeError(f"switch requires exactly one ButtonMesh prim, found {len(buttons)}")
-        button = buttons[0]
-        if self._experiment_config.rl.press.task in {"contact", "press"}:
-            self.cfg.pusher_contact_sensor_cfg.filter_prim_paths_expr = [
-                str(button.GetPath()).replace("env_0", "env_.*")
-            ]
-        scale = self._experiment_config.rl.press.reset.button_geometry_scale
-        if button.IsA(UsdGeom.Mesh):
-            mesh = UsdGeom.Mesh(button)
-            points = mesh.GetPointsAttr().Get()
-            mesh.GetPointsAttr().Set(
-                [Gf.Vec3f(point[0] * scale, point[1] * scale, point[2] * scale) for point in points]
-            )
-        elif button.IsA(UsdGeom.Cube):
-            cube = UsdGeom.Cube(button)
-            cube.GetSizeAttr().Set(float(cube.GetSizeAttr().Get()) * scale)
-        else:
-            raise RuntimeError(f"unsupported ButtonMesh type {button.GetTypeName()!r}")
 
     def _contact_frame_quat(self) -> torch.Tensor:
         switch_quat = self.switch.data.root_quat_w
@@ -396,36 +391,55 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
         return position_error, relative_quat_xyzw[:, [3, 0, 1, 2]]
 
-    def _collision_flag(self, *, sensor: ContactSensor) -> torch.Tensor:
-        force_norm = torch.linalg.norm(sensor.data.net_forces_w, dim=-1)
-        threshold = self._experiment_config.rl.press.termination.contact_force_threshold_n
-        return force_norm.amax(dim=-1) >= threshold
+    def _contact_pair_forces(self, *, sensor: ContactSensor) -> torch.Tensor:
+        # Sum positive normal force magnitudes per filtered pair. Opposing
+        # contacts cannot cancel, including a button and housing hit together.
+        forces, _points, _normals, _distances, counts, starts = (
+            sensor.contact_physx_view.get_contact_data(dt=self.physics_dt)
+        )
+        sums = contact_force_totals(forces=forces, counts=counts, starts=starts)
+        pairs = sums.reshape(self.num_envs, -1)
+        # GPU PhysX filters rigid actors only. The sole unfiltered collider in
+        # this scene is the static ground plane, whose normals are parallel.
+        # Remove the explicit actor vectors before measuring its remaining force.
+        view = sensor.contact_physx_view
+        vectors = view.get_contact_force_matrix(dt=self.physics_dt).reshape(self.num_envs, -1, 3)
+        net = view.get_net_contact_forces(dt=self.physics_dt).reshape(self.num_envs, 3)
+        ground = torch.linalg.vector_norm(net - vectors.sum(dim=1), dim=-1)
+        return torch.cat((pairs, ground[:, None]), dim=-1)
 
     def _contact_flag(self) -> torch.Tensor:
-        """Return instantaneous pusher/pad contact for the policy observation."""
-        return self._collision_flag(sensor=self.contact_sensor)
+        threshold = self._experiment_config.rl.press.termination.contact_force_threshold_n
+        return self._contact_pair_forces(sensor=self.contact_sensor).amax(dim=-1) >= threshold
 
     def _latch_collision_sample(self) -> None:
-        self._body_collision_latch |= self._collision_flag(sensor=self.body_contact_sensor)
-        pad_contact = self._collision_flag(sensor=self.contact_sensor)
+        self._button_latch, toggled = step_button_latch(
+            state=self._button_latch,
+            displacement_m=self.switch.data.joint_pos[:, self._switch_joint_id],
+            dt_s=self.physics_dt,
+            model=self._experiment_config.switches.model,
+        )
+        self._button_toggle_count += toggled.long()
+        threshold = self._experiment_config.rl.press.termination.contact_force_threshold_n
+        body_force = self._contact_pair_forces(sensor=self.body_contact_sensor).amax(dim=-1)
+        forces = self._contact_pair_forces(sensor=self.contact_sensor)
+        categories = classify_press_contacts(
+            pad_forces_n=forces, body_force_n=body_force, threshold_n=threshold
+        )
+        body = categories[:, 4]
+        self._contact_categories |= categories
+        self._simultaneous_contact |= categories.sum(dim=-1) > 1
+        self._body_collision_latch |= body
         if not self._contact_task:
-            self._pusher_collision_latch |= pad_contact
+            self._pusher_collision_latch |= categories[:, :4].any(dim=-1)
             return
         self._compression_peak_m = torch.maximum(
             self._compression_peak_m,
             self._pusher_extension_target[:, 0]
             - self.drone.data.joint_pos[:, self._pusher_joint_id],
         )
-        force_matrix = self.contact_sensor.data.force_matrix_w
-        if force_matrix is None:
-            raise RuntimeError("contact task requires filtered pad/button contact forces")
-        button_force = force_matrix.sum(dim=2)
-        threshold = self._experiment_config.rl.press.termination.contact_force_threshold_n
-        intended = torch.linalg.vector_norm(button_force, dim=-1).amax(dim=-1) >= threshold
-        other_force = self.contact_sensor.data.net_forces_w - button_force
-        self._pusher_collision_latch |= (
-            torch.linalg.vector_norm(other_force, dim=-1).amax(dim=-1) >= threshold
-        )
+        intended = categories[:, 0]
+        self._pusher_collision_latch |= categories[:, 1:4].any(dim=-1)
         self._intended_contact |= intended
         first = intended & ~self._contact_seen
         self._first_contact_stable |= first & self._previous_contact_quality
@@ -458,6 +472,8 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._pusher_collision_latch.zero_()
         self._intended_contact.zero_()
         self._compression_peak_m.zero_()
+        self._contact_categories.zero_()
+        self._simultaneous_contact.zero_()
 
     def _apply_action(self) -> None:
         # At substep N, sensor buffers contain the result of substep N-1. Skip
@@ -525,15 +541,14 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 button_position_m=self.switch.data.joint_pos[:, self._switch_joint_id],
                 compression_m=self._compression_peak_m,
                 intended_contact=self._intended_contact,
+                contact_categories=self._contact_categories.clone(),
+                simultaneous_contact=self._simultaneous_contact.clone(),
                 contact_seen=self._contact_seen.clone(),
                 first_contact_stable=self._first_contact_stable.clone(),
                 action=self.actions,
                 config=press,
-                press_threshold_m=(
-                    self._experiment_config.switches.press_threshold
-                    * press.reset.button_threshold_scale
-                ),
-                confirm_steps=self._experiment_config.switches.press_confirm_steps,
+                press_threshold_m=self._experiment_config.switches.model.activation_displacement_m,
+                toggle_count=self._button_toggle_count.clone(),
             )
             self._contact_state = self._contact_result.state
             return (
@@ -618,11 +633,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             pusher_compression_rate_mps=-self.drone.data.joint_vel[:, self._pusher_joint_id],
             contact_valid=ones,
             contact_flag=self._contact_flag(),
-            lamp_state=(
-                self._contact_state.toggle_count.remainder(2).float()
-                if self._contact_task
-                else zeros
-            ),
+            lamp_state=(self._button_toggle_count.remainder(2).float()),
             lamp_confidence=ones,
             lamp_age_s=zeros,
             previous_action=self.actions,
@@ -732,6 +743,11 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             )
             self._intended_contact[env_ids] = False
             self._compression_peak_m[env_ids] = 0.0
+            self._button_latch.duration_s[env_ids] = 0.0
+            self._button_latch.latched[env_ids] = False
+            self._button_toggle_count[env_ids] = 0
+            self._contact_categories[env_ids] = False
+            self._simultaneous_contact[env_ids] = False
             self._contact_seen[env_ids] = False
             self._first_contact_stable[env_ids] = False
             self._previous_contact_quality[env_ids] = False

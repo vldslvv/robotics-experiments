@@ -32,9 +32,18 @@ from robotics_experiments.config._rl import (
     RlTrainingConfig,
     RlTrainingPhaseConfig,
 )
-from robotics_experiments.config._scene import BoundingBox, DroneSpawnConfig, LightSwitchConfig
+from robotics_experiments.config._scene import (
+    BoundingBox,
+    DroneSpawnConfig,
+    LightSwitchConfig,
+    SwitchModelConfig,
+)
 from robotics_experiments.config._simulation import SimSettings
-from robotics_experiments.config.loading import load_config, load_curriculum_config
+from robotics_experiments.config.loading import (
+    load_config,
+    load_curriculum_config,
+    load_switch_model,
+)
 
 __all__ = [
     "CurriculumConfig",
@@ -46,6 +55,8 @@ __all__ = [
     "HoverTaskConfig",
     "IsaacLabVehicleConfig",
     "LightSwitchConfig",
+    "SwitchModelConfig",
+    "load_switch_model",
     "PressApproachAcceptanceConfig",
     "PressApproachEvaluationConfig",
     "PressApproachGoalConfig",

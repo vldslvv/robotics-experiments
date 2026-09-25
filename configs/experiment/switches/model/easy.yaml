@@ -1,0 +1,7 @@
+defaults:
+  - nominal
+  - _self_
+
+button_width_m: 0.09
+button_height_m: 0.12
+button_thickness_m: 0.015

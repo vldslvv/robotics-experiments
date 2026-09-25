@@ -120,6 +120,7 @@ def test_contract_and_mode_are_forwarded_to_task_config_and_environment(*, monke
     contract = types.SimpleNamespace(policy_interface=PolicyInterface.PRESS)
     flight_parameters = object()
     hover_reset_samples = object()
+    switch_asset = object()
     calls = {}
     env_cfg = types.SimpleNamespace(scene=types.SimpleNamespace(num_envs=1))
     factory_module = types.SimpleNamespace(
@@ -150,11 +151,13 @@ def test_contract_and_mode_are_forwarded_to_task_config_and_environment(*, monke
         policy_contract=contract,
         flight_parameters=flight_parameters,
         hover_reset_samples=hover_reset_samples,
+        switch_asset=switch_asset,
     )
 
     assert env == "environment"
     assert returned_cfg is env_cfg
     assert calls["factory"]["policy_contract"] is contract
+    assert calls["factory"]["switch_asset"] is switch_asset
     assert "use_training_reset_distribution" not in calls["factory"]
     assert calls["gym"][1]["policy_contract"] is contract
     assert calls["gym"][1]["controller_settings"] == "aligned-controller"

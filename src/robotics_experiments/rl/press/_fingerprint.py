@@ -8,6 +8,7 @@ from dataclasses import asdict
 
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.rl.policy import PolicyContract, PolicyInterface
+from robotics_experiments.switches import switch_fingerprint
 
 __all__: list[str] = []
 
@@ -26,7 +27,8 @@ def _press_comparison_fingerprint(
         if item.id == config.rl.training.vehicle_id
     )
     payload = {
-        "comparison_revision": 39,
+        "comparison_revision": 40,
+        "switch_definition_fingerprint": switch_fingerprint(config.switches.model),
         "acceptance": asdict(config.rl.press.acceptance),
         "contact": {
             name: value

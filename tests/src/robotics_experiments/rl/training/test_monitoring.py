@@ -101,7 +101,7 @@ def test_validation_and_test_share_exact_ordered_suffixes_and_report_values() ->
 
 def test_metric_registry_names_rates_and_units() -> None:
     registry = metric_registry_payload()
-    assert registry["revision"] == 20
+    assert registry["revision"] == 21
     assert all("_" not in spec.suffix for spec in EVALUATION_METRICS)
     assert "Mean longest continuous hover (seconds)" in {spec.suffix for spec in EVALUATION_METRICS}
     assert all(not spec.suffix.endswith("_percent") for spec in EVALUATION_METRICS)

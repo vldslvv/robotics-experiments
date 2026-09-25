@@ -23,7 +23,15 @@ from tests.support.paths import REPO_ROOT
 
 
 def _step(
-    *, state, config, button=0.0, contact=True, retreat=False, compression=0.005, collision=False
+    *,
+    state,
+    config,
+    button=0.0,
+    contact=True,
+    retreat=False,
+    compression=0.005,
+    collision=False,
+    toggles=None,
 ):
     flag = torch.tensor([False])
     flight = SimpleNamespace(
@@ -44,13 +52,14 @@ def _step(
         button_position_m=torch.tensor([button]),
         compression_m=torch.tensor([compression]),
         intended_contact=torch.tensor([contact]),
+        contact_categories=torch.tensor([[contact, collision, False, False, False]]),
+        simultaneous_contact=torch.tensor([contact and collision]),
         contact_seen=torch.tensor([True]),
         first_contact_stable=torch.tensor([True]),
         action=torch.zeros((1, 4)),
         config=config.rl.press,
-        press_threshold_m=config.switches.press_threshold
-        * config.rl.press.reset.button_threshold_scale,
-        confirm_steps=config.switches.press_confirm_steps,
+        press_threshold_m=config.switches.model.activation_displacement_m,
+        toggle_count=state.toggle_count if toggles is None else torch.tensor([toggles]),
     )
 
 
@@ -63,26 +72,32 @@ def test_contact_latch_matches_production_and_repeated_press_fails():
         switch, toggled = apply_button_sample(
             switch=switch,
             button_position=button,
-            press_threshold=0.005,
-            confirm_steps=5,
+            dt_s=0.05,
+            model=config.switches.model,
         )
-        result = _step(state=state, config=config, button=button)
+        result = _step(
+            state=state, config=config, button=button, toggles=sum(transitions) + toggled
+        )
         state = result.state
         transitions.append(toggled)
         assert bool(state.toggle_count.remainder(2)) == switch.state
-        assert int(state.press_steps) == switch.press_steps
-        assert bool(state.toggle_latched) == switch.toggle_latched
         assert torch.isfinite(result.reward).all()
     assert sum(transitions) == 2
     assert bool(result.failure)
     assert not bool(result.success)
 
 
-def test_press_requires_toggle_release_and_complete_retreat_hold():
+@pytest.mark.parametrize("stroke_fraction", [0.5, 1.0])
+def test_press_requires_toggle_release_and_complete_retreat_hold(*, stroke_fraction):
     config = load_config(REPO_ROOT / "configs/train/stage/press_easy_quad.yaml")
     state = initial_press_contact_state(ranges=torch.tensor([0.48]))
     for _ in range(5):
-        result = _step(state=state, config=config, button=0.01)
+        result = _step(
+            state=state,
+            config=config,
+            button=config.switches.model.travel_m * stroke_fraction,
+            toggles=1,
+        )
         state = result.state
     assert int(state.toggle_count) == 1
     assert not bool(result.success)
@@ -119,8 +134,7 @@ def test_gentle_contact_and_reset_do_not_carry_episode_state():
     assert not bool(fresh.contact_seen)
     assert int(fresh.stable_contact_steps) == 0
     assert int(state.stable_contact_steps) == config.rl.press.contact.stable_steps
-    toggled_state = replace(state, press_steps=torch.tensor([4]))
-    assert bool(_step(state=toggled_state, config=config, button=0.01).failure)
+    assert bool(_step(state=state, config=config, button=0.01, toggles=1).failure)
 
 
 def test_contact_acceptance_requires_real_contact_and_retreat_populations():
@@ -174,7 +188,8 @@ def test_complete_curriculum_shares_learner_contract_and_provisional_limits():
     assert experiments[0].rl.training.gamma == 0.995
     assert experiments[0].rl.training.lam == 0.99
     assert experiments[0].rl.training.plateau.metric_name == "episode_longest_hover_duration_mean_s"
-    assert experiments[-1].rl.press.reset.button_threshold_scale == 1.0
+    assert experiments[-1].switches.model.button_width_m == 0.06
+    assert all(config.switches.model.button_width_m == 0.09 for config in experiments[:-1])
     assert experiments[-1].rl.press.acceptance.success_rate_min == 0.8
     assert experiments[-1].rl.press.contact.first_contact_rate_min == 0.85
     assert experiments[-1].rl.press.contact.retreat_rate_min == 0.95

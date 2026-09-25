@@ -138,7 +138,7 @@ def test_usd_builder_all_discovers_airframe_configs():
 def test_usd_builder_all_generates_every_airframe_config(tmp_path):
     builder = _load_builder_module()
 
-    paths = builder._build_all_airframe_usds(
+    paths = builder.build_all_airframe_usds(
         config_dir=_CONFIG_DIR,
         overrides=[f"output_dir={tmp_path}"],
     )
@@ -163,7 +163,7 @@ def test_usd_builder_generates_quad_with_rotor_metadata(tmp_path):
     )
 
     stage_path = builder.build_drone_usd(
-        config.airframe,
+        cfg=config.airframe,
         output_dir=config.output_dir,
     )
     stage = Usd.Stage.Open(stage_path)
@@ -217,7 +217,7 @@ def test_usd_builder_default_quad_has_complete_pusher_tool(tmp_path):
         overrides=[f"output_dir={tmp_path}"],
     )
 
-    stage_path = builder.build_drone_usd(config.airframe, output_dir=config.output_dir)
+    stage_path = builder.build_drone_usd(cfg=config.airframe, output_dir=config.output_dir)
     stage = Usd.Stage.Open(stage_path)
     pusher = config.airframe.pusher
     assert pusher is not None
@@ -303,7 +303,7 @@ def test_usd_builder_pusher_disabled_omits_pusher(tmp_path):
     )
     assert config.airframe.pusher.enabled is False
 
-    stage_path = builder.build_drone_usd(config.airframe, output_dir=config.output_dir)
+    stage_path = builder.build_drone_usd(cfg=config.airframe, output_dir=config.output_dir)
     stage = Usd.Stage.Open(stage_path)
 
     # No pusher subtree is authored when disabled.
@@ -326,7 +326,7 @@ def test_usd_builder_esc_parallel_to_arm(tmp_path):
         overrides=[f"output_dir={tmp_path}"],
     )
 
-    stage_path = builder.build_drone_usd(config.airframe, output_dir=config.output_dir)
+    stage_path = builder.build_drone_usd(cfg=config.airframe, output_dir=config.output_dir)
     stage = Usd.Stage.Open(stage_path)
 
     from pxr import Gf  # noqa: PLC0415

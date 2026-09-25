@@ -2,6 +2,7 @@ defaults:
   - base
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - override experiment/routine@vehicles.x500_01.routine: policy_press_hover_transfer
+  - override /experiment/switches/model@switches.model: easy
   - _self_
 
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
@@ -9,7 +10,6 @@ scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 switches:
   num_switches: 1
   spawn_seed: 0
-  press_threshold: 0.005
   spawn_bounds:
     - min: [0.0, 17.99, 2.5]
       max: [0.0, 17.99, 2.5]

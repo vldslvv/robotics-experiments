@@ -8,6 +8,8 @@ from robotics_experiments.config import PressTaskConfig
 from robotics_experiments.rl.press.task import PressApproachResult
 
 __all__ = [
+    "contact_force_totals",
+    "classify_press_contacts",
     "PressContactState",
     "PressContactResult",
     "initial_press_contact_state",
@@ -16,12 +18,47 @@ __all__ = [
 ]
 
 
+def contact_force_totals(
+    *,
+    forces: torch.Tensor,
+    counts: torch.Tensor,
+    starts: torch.Tensor,
+) -> torch.Tensor:
+    """Sum individual normal-force magnitudes per PhysX pair without cancellation."""
+    cumulative = torch.cat((forces.new_zeros(1), forces.flatten().abs().cumsum(0)))
+    starts = starts.long()
+    return cumulative[starts + counts.long()] - cumulative[starts]
+
+
+def classify_press_contacts(
+    *,
+    pad_forces_n: torch.Tensor,
+    body_force_n: torch.Tensor,
+    threshold_n: float,
+) -> torch.Tensor:
+    """Return button, housing, wall, other-pad and body flags independently.
+
+    Pad columns are button, housing, wall, then each other collider. Each
+    contains a sum of nonnegative force magnitudes, never a net force vector.
+    """
+    button, housing, wall = pad_forces_n[:, :3].unbind(dim=-1)
+    other = pad_forces_n[:, 3:].sum(dim=-1)
+    return torch.stack(
+        (
+            button >= threshold_n,
+            housing >= threshold_n,
+            wall >= threshold_n,
+            other >= threshold_n,
+            body_force_n >= threshold_n,
+        ),
+        dim=-1,
+    )
+
+
 @dataclass(frozen=True)
 class PressContactState:
     """Episode memory; every tensor contains one value per environment."""
 
-    press_steps: torch.Tensor
-    toggle_latched: torch.Tensor
     toggle_count: torch.Tensor
     contact_seen: torch.Tensor
     first_contact_stable: torch.Tensor
@@ -43,6 +80,8 @@ class PressContactResult:
     failure: torch.Tensor
     timeout: torch.Tensor
     progress: torch.Tensor
+    contact_categories: torch.Tensor
+    simultaneous_contact: torch.Tensor
 
     @property
     def reward(self) -> torch.Tensor:
@@ -54,8 +93,6 @@ def initial_press_contact_state(*, ranges: torch.Tensor) -> PressContactState:
     flag = torch.zeros_like(ranges, dtype=torch.bool)
     zero = torch.zeros_like(ranges)
     return PressContactState(
-        press_steps=integer.clone(),
-        toggle_latched=flag.clone(),
         toggle_count=integer.clone(),
         contact_seen=flag.clone(),
         first_contact_stable=flag.clone(),
@@ -88,26 +125,23 @@ def step_press_contact(
     button_position_m: torch.Tensor,
     compression_m: torch.Tensor,
     intended_contact: torch.Tensor,
+    contact_categories: torch.Tensor,
+    simultaneous_contact: torch.Tensor,
     contact_seen: torch.Tensor,
     first_contact_stable: torch.Tensor,
     action: torch.Tensor,
     config: PressTaskConfig,
     press_threshold_m: float,
-    confirm_steps: int,
+    toggle_count: torch.Tensor,
 ) -> PressContactResult:
-    """Advance once per policy tick, matching the production switch-latch cadence.
+    """Advance task progress using toggle counts accumulated at physics cadence.
 
     Button displacement is privileged reward/evaluation evidence. The actor sees
     its existing compression, contact and lamp observations. Progress rewards
     are bounded by episode records, so repeated tapping cannot farm bonuses.
     """
     contact = config.contact
-    pressed = button_position_m >= press_threshold_m
-    press_steps = torch.where(pressed, state.press_steps + 1, 0)
-    toggled = (press_steps >= confirm_steps) & ~state.toggle_latched
-    toggle_latched = pressed & (state.toggle_latched | toggled)
-    toggle_count = state.toggle_count + toggled.long()
-    first_toggle = toggled & (state.toggle_count == 0)
+    first_toggle = (toggle_count > 0) & (state.toggle_count == 0)
     lamp_on = toggle_count.remainder(2) == 1
     gentle = (
         intended_contact
@@ -186,8 +220,6 @@ def step_press_contact(
             + (longest_retreat_steps / config.goal.stable_steps).clamp(0, 1)
         )
     successor = PressContactState(
-        press_steps=press_steps,
-        toggle_latched=toggle_latched,
         toggle_count=toggle_count,
         contact_seen=contact_seen,
         first_contact_stable=first_contact_stable,
@@ -199,4 +231,14 @@ def step_press_contact(
         best_retreat_error_m=best_retreat_error,
         peak_compression_m=peak_compression,
     )
-    return PressContactResult(successor, rewards, success, collision, failure, timeout, progress)
+    return PressContactResult(
+        successor,
+        rewards,
+        success,
+        collision,
+        failure,
+        timeout,
+        progress,
+        contact_categories,
+        simultaneous_contact,
+    )

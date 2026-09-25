@@ -44,6 +44,7 @@ from robotics_experiments.flight_parameters import (
     load_flight_parameters_bundle,
 )
 from robotics_experiments.rl import HoverResetSamples, load_hover_reset_samples
+from robotics_experiments.switches import load_switch_asset
 
 if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab import (
@@ -446,7 +447,20 @@ def _run_contact_chain(
             super()._pre_physics_step(actions)
             self._applied_actions = self.actions
 
+        def _latch_collision_sample(self):
+            nonlocal switch_state
+            super()._latch_collision_sample()
+            switch_state = step_switches(
+                stage=stage,
+                switch_state=switch_state,
+                articulations=(adapter,),
+                config=config.switches,
+                dt_s=self.physics_dt,
+                on_toggle=lambda _index, state: toggles.append(state),
+            )
+
         def _get_dones(self):
+            self._latch_collision_sample()
             no_done = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
             return no_done, no_done
 
@@ -461,7 +475,9 @@ def _run_contact_chain(
     contact_chain_duration_s = (
         config.rl.episode_length_s + config.rl.press.goal.stable_steps / config.rl.policy_rate_hz
     )
-    cfg = make_switch_press_env_cfg(experiment_config=config)
+    cfg = make_switch_press_env_cfg(
+        experiment_config=config, switch_asset=load_switch_asset(model=config.switches.model)
+    )
     cfg.scene.num_envs = 1
     cfg.episode_length_s = contact_chain_duration_s + _EPISODE_MARGIN_S
     if hasattr(cfg, "seed"):
@@ -565,13 +581,6 @@ def _run_contact_chain(
             max_contact_force = max(max_contact_force, contact_force)
             contact_now = contact_force >= config.rl.press.termination.contact_force_threshold_n
             contact_seen = contact_seen or contact_now
-            switch_state = step_switches(
-                stage=stage,
-                switch_state=switch_state,
-                articulations=(adapter,),
-                config=config.switches,
-                on_toggle=lambda _index, state: toggles.append(state),
-            )
             if toggles:
                 retreat_started = True
             _yaw, tilt = _yaw_tilt_from_quat(env.drone.data.root_quat_w)
@@ -622,7 +631,7 @@ def _run_contact_chain(
         )
         if not contact_seen or max_pusher <= 0.0:
             raise AssertionError("pusher contact/compression was not observed")
-        if max_button < config.switches.press_threshold:
+        if max_button < config.switches.model.activation_displacement_m:
             raise AssertionError("real button did not cross the configured press threshold")
         if toggles != [True]:
             raise AssertionError(
@@ -830,6 +839,11 @@ def _contact_chain_inputs(
 
 
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+    if args.switch_mechanics:
+        from _switch_mechanics import _run_switch_mechanics
+
+        _run_switch_mechanics(config)
+        return
     if args.contact_chain:
         controller_settings, flight_parameters, hover_reset_samples = _contact_chain_inputs(
             config=config
@@ -918,7 +932,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
         )
         provider = _setup_press_side_channel(
             goto_target_env0=switch_pos_env0,
-            switch_usd_path=config.switches.switch_usd_path,
+            switch_usd_path=str(load_switch_asset(model=config.switches.model).path),
         )
         action_dim = int(env.cfg.action_space)
         press_start_obs = _press_observation_sample(env, provider, action_dim)
@@ -965,6 +979,7 @@ def main() -> None:
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--alignment-report", type=Path)
     parser.add_argument("--diag", action="store_true", help="log per-step flight diagnostics")
+    parser.add_argument("--switch-mechanics", action="store_true")
     parser.add_argument("--seed", type=int, default=_DEFAULT_SEED)
     parser.add_argument("--num-envs", type=int, default=None)
     parser.add_argument("--log-every", type=int, default=10)
@@ -996,7 +1011,7 @@ def main() -> None:
             raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
         config = load_config(config_path)
         if args.alignment_report:
-            if args.contact_chain or args.ctbr_sanity:
+            if args.contact_chain or args.ctbr_sanity or args.switch_mechanics:
                 raise ValueError("alignment qualification requires the hover/goto check")
             artifact, _path = _controller_artifact(config=config)
             report = {
@@ -1018,7 +1033,9 @@ def main() -> None:
         if args.alignment_report:
             report.update(passed=True, failures=[])
             args.alignment_report.write_text(json.dumps(report, indent=2) + "\n")
-        if args.contact_chain:
+        if args.switch_mechanics:
+            _report("switch mechanics validation PASSED")
+        elif args.contact_chain:
             _report("press contact-chain validation PASSED")
         elif args.ctbr_sanity:
             _report("ctbr sanity validation PASSED")

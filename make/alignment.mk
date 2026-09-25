@@ -43,7 +43,7 @@ alignment-audit-actuators:
 .PHONY: alignment-sweep-target
 alignment-sweep-target: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 alignment-sweep-target: HYDRA_CONFIG = configs/alignment_px4_x500_velocity.yaml
-alignment-sweep-target: generate-drone-usd
+alignment-sweep-target: generate-assets
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
 	@TEST_TARGET='alignment-sweep-target' \
 	    ISAAC_TEST_LOG='/isaac-sim/.nvidia-omniverse/logs/alignment_sweep_target.log' \
@@ -55,7 +55,7 @@ alignment-sweep-target: generate-drone-usd
 alignment-benchmark-capacity: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 alignment-benchmark-capacity: HYDRA_CONFIG = configs/alignment_px4_x500_velocity.yaml
 alignment-benchmark-capacity: ALIGNMENT_CAPACITY_BENCHMARK = 1
-alignment-benchmark-capacity: generate-drone-usd
+alignment-benchmark-capacity: generate-assets
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
 	@TEST_TARGET='alignment-benchmark-capacity' \
 	    ISAAC_TEST_LOG='/isaac-sim/.nvidia-omniverse/logs/alignment_benchmark_capacity.log' \
@@ -108,7 +108,7 @@ align-controllers:
 .PHONY: test-integration-alignment-target
 test-integration-alignment-target: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-alignment-target: CONTROLLER_ARTIFACT = .build/alignment/$(ALIGNMENT_ID)/best
-test-integration-alignment-target: generate-drone-usd
+test-integration-alignment-target: generate-assets
 	@TEST_TARGET='test-integration-alignment-target' \
 	    ISAAC_TEST_LOG='$(ISAAC_PRESS_HOVER_GOTO_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \

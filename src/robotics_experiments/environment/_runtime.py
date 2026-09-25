@@ -124,6 +124,7 @@ def pause_switches_runtime(*, state: SwitchesRuntimeState) -> SwitchesRuntimeSta
 def step_switches_runtime(
     *,
     state: SwitchesRuntimeState,
+    dt_s: float,
     on_toggle: Callable[[int, bool], None] | None = None,
 ) -> SwitchesRuntimeState:
     """Retry articulation setup or advance switch interaction by one tick."""
@@ -146,6 +147,7 @@ def step_switches_runtime(
         switch_state=state.switches,
         articulations=state.articulations,
         config=state.config,
+        dt_s=dt_s,
         on_toggle=on_toggle,
     )
     return replace(state, switches=switches)

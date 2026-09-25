@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import tempfile
 from pathlib import Path
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
@@ -39,10 +40,12 @@ from robotics_experiments.drone._airframe import (
     load_builder_config,
 )
 
+__all__ = ["build_all_airframe_usds", "build_drone_usd"]
+
 ASSETS_DIR = "isaac/assets/LightSwitchWarehouse"
 
 
-def _build_all_airframe_usds(
+def build_all_airframe_usds(
     *,
     config_dir: str | os.PathLike[str] = CONFIG_DIR,
     overrides: list[str] | None = None,
@@ -53,7 +56,7 @@ def _build_all_airframe_usds(
             config_dir=config_dir,
             overrides=[f"airframes={name}", *(overrides or [])],
         )
-        paths.append(build_drone_usd(config.airframe, output_dir=config.output_dir))
+        paths.append(build_drone_usd(cfg=config.airframe, output_dir=config.output_dir))
     return paths
 
 
@@ -205,8 +208,8 @@ def _author_arm(
 
 
 def build_drone_usd(
-    cfg: AirframeConfig,
     *,
+    cfg: AirframeConfig,
     output_dir: str = ASSETS_DIR,
 ) -> str:
     stage_path = os.path.join(output_dir, cfg.output_filename)
@@ -214,7 +217,7 @@ def build_drone_usd(
     root_path = f"{wrapper_path}/body"
 
     os.makedirs(output_dir, exist_ok=True)
-    stage = Usd.Stage.CreateNew(stage_path)
+    stage = Usd.Stage.CreateInMemory()
 
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
@@ -335,12 +338,18 @@ def build_drone_usd(
         drive.CreateDampingAttr(pusher_drive.damping)
 
     stage.SetDefaultPrim(wrapper.GetPrim())
-    stage.Export(stage_path)
-    # OpenUSD's .usda text exporter ends the file with a trailing blank line
-    # ("}\n\n"); normalize to a single trailing newline so the generated asset is
-    # already end-of-file-fixer clean and regenerating it is a no-op diff.
     stage_file = Path(stage_path)
-    stage_file.write_text(stage_file.read_text().rstrip("\n") + "\n")
+    layer = stage.Flatten(addSourceFileComment=False)
+    layer.documentation = (
+        Sdf.Layer.FindOrOpen(str(stage_file)).documentation
+        if stage_file.exists()
+        else f"Generated from Composed Stage of root layer {stage_file.resolve()}\n"
+    )
+    content = (layer.ExportToString().rstrip("\n") + "\n").encode()
+    if not stage_file.exists() or stage_file.read_bytes() != content:
+        with tempfile.NamedTemporaryFile(dir=output_dir, delete=False) as temporary:
+            temporary.write(content)
+        os.replace(temporary.name, stage_file)
     return stage_path
 
 
@@ -391,7 +400,7 @@ if __name__ == "__main__":
     if args.all_configs:
         if args.config_name:
             raise SystemExit("--all cannot be combined with a positional airframe config name")
-        for path in _build_all_airframe_usds(config_dir=args.config_dir, overrides=overrides):
+        for path in build_all_airframe_usds(config_dir=args.config_dir, overrides=overrides):
             print(f"Saved: {path}")
     else:
         config = load_builder_config(
@@ -399,7 +408,7 @@ if __name__ == "__main__":
             overrides=overrides,
         )
         path = build_drone_usd(
-            config.airframe,
+            cfg=config.airframe,
             output_dir=config.output_dir,
         )
         print(f"Saved: {path}")

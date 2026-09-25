@@ -128,7 +128,7 @@ def _import_orchestrator(monkeypatch):
         stage=state.stage,
         phase="running",
     )
-    fake_environment.step_switches_runtime = lambda *, state, on_toggle=None: state
+    fake_environment.step_switches_runtime = lambda *, state, dt_s, on_toggle=None: state
     fake_environment.teardown_switches_runtime = lambda *, state: SimpleNamespace(
         config=state.config,
         stage=state.stage,
@@ -470,25 +470,22 @@ def test_tick_drivers_passes_context_and_progress_state(monkeypatch):
     assert fleet.flying[0].context is flying.context
 
 
-def test_switch_latch_uses_artifact_selected_cadence(monkeypatch):
+def test_switch_latch_samples_every_physics_tick(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
     env = _env()
-    fleet = replace(
-        module.create_fleet(config=env),
-        switch_rate_hz=10.0,
-    )
+    fleet = module.create_fleet(config=env)
     steps = []
     orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
     monkeypatch.setattr(
         orchestrator,
         "step_switches_runtime",
-        lambda *, state, on_toggle=None: steps.append(state) or state,
+        lambda *, state, dt_s, on_toggle=None: steps.append(state) or state,
     )
 
     for _ in range(250):
         fleet = module.tick_drivers(state=fleet, physics_dt_s=0.004, monotonic_s=7.0)
 
-    assert len(steps) == 10
+    assert len(steps) == 250
     assert env.rl.policy_rate_hz == 20.0
 
 

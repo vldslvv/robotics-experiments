@@ -49,8 +49,6 @@ class PressObservationIO:
         action_dim: int,
         contact_force_threshold_n: float,
         physical_contact_enabled: bool,
-        button_geometry_scale: float,
-        button_stiffness_scale: float,
         switch_wall_offset_m: float,
         wall_half_extents_m: tuple[float, float, float],
         pusher_effort_limit_n: float,
@@ -70,8 +68,6 @@ class PressObservationIO:
 
         self._configure_switch(
             physical_contact_enabled=physical_contact_enabled,
-            geometry_scale=float(button_geometry_scale),
-            stiffness_scale=float(button_stiffness_scale),
             wall_offset_m=float(switch_wall_offset_m),
             wall_half_extents_m=(
                 float(wall_half_extents_m[0]),
@@ -101,8 +97,6 @@ class PressObservationIO:
         self,
         *,
         physical_contact_enabled: bool,
-        geometry_scale: float,
-        stiffness_scale: float,
         wall_offset_m: float,
         wall_half_extents_m: tuple[float, float, float],
     ) -> None:
@@ -115,46 +109,6 @@ class PressObservationIO:
                     UsdPhysics.CollisionAPI
                 ):
                     UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr(False)
-        buttons = [
-            prim
-            for prim in self._stage.Traverse()
-            if prim.GetPath().HasPrefix(root.GetPath()) and prim.GetName() == "ButtonMesh"
-        ]
-        if len(buttons) != 1:
-            raise RuntimeError(f"switch requires exactly one ButtonMesh, found {len(buttons)}")
-        button = buttons[0]
-        if button.IsA(UsdGeom.Mesh):
-            mesh = UsdGeom.Mesh(button)
-            points = mesh.GetPointsAttr().Get()
-            mesh.GetPointsAttr().Set(
-                [
-                    Gf.Vec3f(
-                        point[0] * geometry_scale,
-                        point[1] * geometry_scale,
-                        point[2] * geometry_scale,
-                    )
-                    for point in points
-                ]
-            )
-        elif button.IsA(UsdGeom.Cube):
-            cube = UsdGeom.Cube(button)
-            cube.GetSizeAttr().Set(float(cube.GetSizeAttr().Get()) * geometry_scale)
-        else:
-            raise RuntimeError(f"unsupported ButtonMesh type {button.GetTypeName()!r}")
-
-        joints = [
-            prim
-            for prim in self._stage.Traverse()
-            if prim.GetPath().HasPrefix(root.GetPath()) and prim.IsA(UsdPhysics.PrismaticJoint)
-        ]
-        if len(joints) != 1:
-            raise RuntimeError(f"switch requires exactly one prismatic joint, found {len(joints)}")
-        drive = UsdPhysics.DriveAPI.Get(joints[0], "linear")
-        stiffness = drive.GetStiffnessAttr().Get()
-        if stiffness is None:
-            raise RuntimeError("switch button drive has no authored stiffness")
-        drive.GetStiffnessAttr().Set(float(stiffness) * stiffness_scale)
-
         if not physical_contact_enabled:
             return
 

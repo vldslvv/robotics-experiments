@@ -809,7 +809,10 @@ def test_rate_validation(tmp_path, overrides, match):
     ("overrides", "match"),
     [
         ({"switches": {"num_switches": 0}}, "num_switches must be positive"),
-        ({"switches": {"press_confirm_steps": 0}}, "press_confirm_steps must be positive"),
+        (
+            {"switches": {"model": {"confirmation_s": 0}}},
+            "confirmation_s must be finite and positive",
+        ),
         ({"switches": {"max_spawn_retries": 0}}, "max_spawn_retries must be positive"),
         ({"switches": {"spawn_bounds": []}}, "spawn_bounds must contain"),
         (

@@ -426,7 +426,7 @@ def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Pat
     assert validated.policies[0].metadata.contract.max_body_velocity_mps == 0.5
 
 
-def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> None:
+def test_policy_preflight_allows_independent_press_cadences(tmp_path: Path) -> None:
     artifacts = []
     for index, rate_hz in enumerate((10.0, 20.0)):
         artifact = tmp_path / f"artifact-{index}"
@@ -437,11 +437,14 @@ def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> 
         )
         artifacts.append(artifact)
 
-    with pytest.raises(ValueError, match="must share one policy_rate_hz"):
-        _preflight_policy_artifacts(
-            config=_preflight_config(artifacts=artifacts),
-            repo_root=tmp_path,
-        )
+    validated = _preflight_policy_artifacts(
+        config=_preflight_config(artifacts=artifacts),
+        repo_root=tmp_path,
+    )
+    assert [policy.metadata.contract.policy_rate_hz for policy in validated.policies] == [
+        10.0,
+        20.0,
+    ]
 
 
 def test_press_deployment_config_has_no_action_scale_override() -> None:

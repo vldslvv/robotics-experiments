@@ -17,6 +17,8 @@ Do not introduce new tooling unless explicitly requested.
 
 ## Context map
 Read area docs on demand when a task touches that area:
+- Generated assets: `docs/ASSET_GENERATION.md` for unified preparation, switch
+  mechanics, activation, immutable bundles and verification.
 - Development workflow: `docs/DEVELOPMENT_WORKFLOW.md` for host Python, `uv`,
   tests, quality gates, and Makefile maintenance.
 - Runtime operations: `docs/RUNTIME_OPERATIONS.md` for Docker runtime targets,
@@ -73,6 +75,8 @@ Read area docs on demand when a task touches that area:
 Place new code in the directory matching its purpose; each entry below is both
 the current contents and the intended home for that kind of code.
 - `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
+- `src/robotics_experiments/switches/` -> Host-safe switch asset identity and
+  vectorized simulation-time activation shared by runtime and RL.
 - `src/robotics_experiments/controller/` -> Host-safe controller settings,
   strict controller artifacts, and the normalized NumPy actuation reference.
   Shared by alignment and RL; no Isaac, Kit, PX4-container, alignment, or RL
@@ -154,7 +158,8 @@ the current contents and the intended home for that kind of code.
   core imports still work on the host.
 - Package layering runs `config -> controller -> {alignment, rl} -> workflows`
   with the independent `flight_parameters -> {alignment, rl}` evidence boundary
-  for controller alignment and learning, alongside `config -> domain (drone / environment /
+  for controller alignment and learning, `config -> switches -> {environment, rl}`
+  for shared switch assets and activation, alongside `config -> domain (drone / environment /
   simulation / px4_bridge) -> Isaac extensions`; `import robotics_experiments`
   (plus its subpackages) must succeed with Isaac absent. A domain leaf module that is
   wholly Isaac-only (every function operates on a live USD stage) may keep
@@ -251,7 +256,7 @@ the current contents and the intended home for that kind of code.
   Results retain selected diagnostic candidates with `accepted: false`. Accepted
   stages publish before their exact pinned learner advances. Stop on rejection,
   publication error, runtime error or interruption; no curriculum retries, branches,
-  checkpoint merging or process resume. Training/attempt reports are strict schema 29;
+  checkpoint merging or process resume. Training/attempt reports are strict schema 30;
   curriculum summaries are schema 1. Each level owns its terminal report. Publication
   never rewrites completed training reports. All stages share one policy namespace and
   curriculum Trackio database, with distinct stage/attempt identities. Supplemental
@@ -259,8 +264,8 @@ the current contents and the intended home for that kind of code.
   digests, not retesting of a later actor on earlier tasks. `rl.press.task` owns
   hover/approach/contact/press behavior, `rl.press.reset.mix` owns resets, `rl.episode_length_s`
   owns duration, `rl.press.goal.stable_steps` owns the hold, and `rl.training` owns
-  phases and plateau rules. Contact tasks read the real button joint at policy
-  cadence, classify filtered pad/button contact, and require one toggle followed
+  phases and plateau rules. Contact tasks read the real button joint each physics
+  step, share the simulation-time lamp latch, classify contact pairs without force cancellation, and require one toggle followed
   by release and the complete stable retreat hold. Contact limits 80% full
   success, 85% stable first contacts and 95% retreat among toggled episodes are
   provisional Lab milestones; tighten them after the full curriculum is
@@ -420,7 +425,9 @@ the current contents and the intended home for that kind of code.
   convention for all parameters: either make every parameter keyword-only so
   every argument is specified by name, or make every parameter positional-only
   so no argument can be specified by name.
-- Do NOT regenerate assets unless explicitly asked.
+- Do NOT regenerate assets unless explicitly asked. `make generate-assets` is
+  the shared preparation dependency for runtime, training and integration. Read
+  `docs/ASSET_GENERATION.md` before changing generators or switch behavior.
 - Do NOT hardcode absolute paths.
 - Input artifacts are immutable, producer-owned evidence. Consumers must
   resolve and pin exact validated paths, pin content digests when work crosses

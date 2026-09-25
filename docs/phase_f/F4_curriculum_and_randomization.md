@@ -1,5 +1,12 @@
 # F4 -- Contact curriculum and domain randomization
 
+Current switch geometry, mechanics and asset preparation are defined in
+[Generated simulation assets](../ASSET_GENERATION.md). Full curriculum training
+and domain randomization remain subsequent work. The validation record below
+predates the shared switch models and is retained as historical evidence.
+
+## Validation before unified asset generation
+
 Status: Task implementation and curriculum configuration are available, but
 nominal pressing is physically blocked; PPO has not started. Domain randomization
 remains planned and depends on an accepted nominal contact policy. See

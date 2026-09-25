@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, fields
 from typing import List, Tuple
 
 from robotics_experiments.config._immutability import _FreezableConfig
@@ -7,6 +8,7 @@ __all__ = [
     "BoundingBox",
     "DroneSpawnConfig",
     "LightSwitchConfig",
+    "SwitchModelConfig",
     "LightSwitchStatePublisherConfig",
     "RosQosConfig",
     "RosVehicleConfig",
@@ -87,30 +89,81 @@ class LightSwitchStatePublisherConfig(_FreezableConfig):
 
 
 @dataclass
+class SwitchModelConfig(_FreezableConfig):
+    """Geometry and linear spring model, in metres, kilograms, seconds and newtons."""
+
+    button_width_m: float
+    button_height_m: float
+    button_thickness_m: float
+    button_rest_y_m: float
+    housing_width_m: float
+    housing_height_m: float
+    clearance_m: float
+    back_plate_thickness_m: float
+    contact_offset_m: float
+    travel_m: float
+    activation_displacement_m: float
+    activation_force_n: float
+    button_mass_kg: float
+    damping_ratio: float
+    confirmation_s: float
+
+    @property
+    def stiffness_n_m(self) -> float:
+        return self.activation_force_n / self.activation_displacement_m
+
+    @property
+    def damping_n_s_m(self) -> float:
+        return 2 * self.damping_ratio * math.sqrt(self.button_mass_kg * self.stiffness_n_m)
+
+    @property
+    def back_extent_m(self) -> float:
+        return (
+            self.button_rest_y_m
+            + self.travel_m
+            + self.button_thickness_m / 2
+            + self.clearance_m
+            + self.back_plate_thickness_m
+        )
+
+    def validate(self) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if not math.isfinite(value) or (field.name != "button_rest_y_m" and value <= 0):
+                raise ValueError(f"switches.model.{field.name} must be finite and positive")
+        if not self.activation_displacement_m < self.travel_m:
+            raise ValueError("switch activation must be inside usable travel")
+        if self.clearance_m <= 2 * self.contact_offset_m:
+            raise ValueError("switch clearance must exceed both contact offsets")
+        if (
+            self.button_width_m + 2 * self.clearance_m >= self.housing_width_m
+            or self.button_height_m + 2 * self.clearance_m >= self.housing_height_m
+        ):
+            raise ValueError("switch housing must surround the full button swept volume")
+
+
+@dataclass
+class _SwitchVerificationConfig(_FreezableConfig):
+    pusher_mass_kg: float
+    pusher_stiffness_n_m: float
+    pusher_damping_n_s_m: float
+    pusher_speed_mps: float
+    force_tolerance_n: float
+    displacement_tolerance_m: float
+    near_stop_margin_m: float
+    hold_s: float
+    overtravel_m: float
+
+
+@dataclass
 class LightSwitchConfig(_FreezableConfig):
-    """Configuration for the light-switch spawner extension.
+    """Shared switch model, deterministic layout and lamp publication settings."""
 
-    Attributes:
-        switch_usd_path: Absolute path to the switch USD asset.
-        lamp_usd_path: Absolute path to the lamp USD asset.
-        num_switches: Number of switch/lamp pairs to spawn.
-        spawn_seed: Seed for deterministic switch positions and lamp heights.
-        press_threshold: Joint position above which the button is treated as pressed.
-        press_confirm_steps: Consecutive steps the button must stay pressed before
-            a toggle is confirmed (the light-state latch / confirmation window).
-        min_spawn_dist: Minimum pairwise distance between spawned switches, in meters.
-        max_spawn_retries: Retry budget per position before accepting overlap.
-        lamp_on_intensity: ``SphereLight`` intensity applied when the lamp is on.
-        spawn_bounds: Candidate axis-aligned regions used to sample positions.
-        state_publisher: ROS publisher settings for switch toggle events.
-    """
-
-    switch_usd_path: str
+    model: SwitchModelConfig
+    verification: _SwitchVerificationConfig
     lamp_usd_path: str
     num_switches: int
     spawn_seed: int
-    press_threshold: float
-    press_confirm_steps: int
     min_spawn_dist: float
     max_spawn_retries: int
     lamp_on_intensity: float

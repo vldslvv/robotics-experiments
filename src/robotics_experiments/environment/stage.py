@@ -17,6 +17,7 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 
 from robotics_experiments.config import BoundingBox, LightSwitchConfig
 from robotics_experiments.environment.switches import SwitchState
+from robotics_experiments.switches import load_switch_asset
 
 __all__ = ["spawn_switches", "despawn_switches", "validate_switches"]
 
@@ -201,11 +202,12 @@ def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> tuple[Swit
         One :class:`SwitchState` per successfully spawned switch, pairing the
         switch prim path with its lamp prim path.
     """
+    switch_usd_path = str(load_switch_asset(model=config.model).path)
     missing = next(
         (
             (kind, path)
             for kind, path in (
-                ("switch", config.switch_usd_path),
+                ("switch", switch_usd_path),
                 ("lamp", config.lamp_usd_path),
             )
             if not os.path.isfile(path)
@@ -233,7 +235,7 @@ def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> tuple[Swit
             min_distance=config.min_spawn_dist,
             max_retries=config.max_spawn_retries,
         )
-        switch_paths = _spawn_switches(stage, config.switch_usd_path, positions)
+        switch_paths = _spawn_switches(stage, switch_usd_path, positions)
         lamp_paths = _spawn_lamps(
             rng=rng,
             stage=stage,

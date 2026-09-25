@@ -10,7 +10,7 @@ from pathlib import Path
 __all__ = ["publish_policy_labels"]
 
 _TRAINING_REPORT = "training_report.json"
-_REPORT_SCHEMA_VERSION = 29
+_REPORT_SCHEMA_VERSION = 30
 
 
 def _publish_label(*, policy_root: Path, run_dir: Path, label: str) -> None:

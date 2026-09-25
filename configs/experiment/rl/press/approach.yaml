@@ -80,9 +80,6 @@ reset:
     - source: pinned_flight_parameters
       weight: 1.0
   physical_contact_enabled: true
-  button_geometry_scale: 1.5
-  button_stiffness_scale: 0.5
-  button_threshold_scale: 0.5
   switch_distance_from_env_origin_m: 0.40
   switch_wall_offset_m: 0.02
   switch_height_m: 1.0
@@ -94,6 +91,7 @@ termination:
   max_wall_normal_distance_m: 1.0
   max_lateral_error_m: 0.30
   max_vertical_error_m: 0.30
+  contact_data_capacity_per_body: 32
   contact_force_threshold_n: 0.25
 
 evaluation:

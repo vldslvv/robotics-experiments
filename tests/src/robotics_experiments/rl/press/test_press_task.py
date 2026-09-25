@@ -64,6 +64,7 @@ _TERMINATION = PressApproachTerminationConfig(
     max_wall_normal_distance_m=1.0,
     max_lateral_error_m=0.30,
     max_vertical_error_m=0.30,
+    contact_data_capacity_per_body=32,
     contact_force_threshold_n=0.25,
 )
 _ENVELOPE = load_flight_parameters(

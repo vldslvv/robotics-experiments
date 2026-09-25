@@ -33,7 +33,11 @@ def _import_stage(monkeypatch):
     monkeypatch.setitem(sys.modules, "carb", carb)
     monkeypatch.setitem(sys.modules, "pxr", pxr)
     sys.modules.pop("robotics_experiments.environment.stage", None)
-    return importlib.import_module("robotics_experiments.environment.stage")
+    module = importlib.import_module("robotics_experiments.environment.stage")
+    monkeypatch.setattr(
+        module, "load_switch_asset", lambda **_kwargs: SimpleNamespace(path="switch.usda")
+    )
+    return module
 
 
 def _config(seed):
@@ -43,7 +47,7 @@ def _config(seed):
         spawn_bounds=[SimpleNamespace(min=(-2.0, -1.0, 0.5), max=(2.0, 1.0, 2.5))],
         min_spawn_dist=0.1,
         max_spawn_retries=10,
-        switch_usd_path="switch.usd",
+        model=object(),
         lamp_usd_path="lamp.usd",
     )
 

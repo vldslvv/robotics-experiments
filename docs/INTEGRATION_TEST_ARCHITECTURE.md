@@ -185,6 +185,11 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   whose `_assert_navigation_routine_config` validates the `goto`/`goto ->
   hover` config per flying vehicle before running the strict takeoff scenario.
 
+`make test-integration-switch-mechanics` is part of the aggregate suite. It checks
+both generated switch profiles with controlled physical pushers, measures spring
+forces independently of the stop reaction, and verifies separate collision
+categories. Its raw evidence is described in `ASSET_GENERATION.md`.
+
 ## Concurrency
 
 `make test-integration-all` delegates aggregation to

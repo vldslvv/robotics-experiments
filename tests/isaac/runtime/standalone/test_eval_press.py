@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import signal
 import sys
 from dataclasses import fields, replace
 from pathlib import Path
@@ -99,6 +101,37 @@ def _load_eval_press_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_evaluation_interrupt_propagates_after_kit_installs_its_handler(*, monkeypatch, capsys):
+    module = _load_eval_press_module()
+    closed = []
+
+    def launch(*, headless):
+        assert headless
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        return SimpleNamespace(app=SimpleNamespace(close=lambda: closed.append(True)))
+
+    def interrupt(**_kwargs):
+        os.kill(os.getpid(), signal.SIGINT)
+        raise AssertionError("evaluation ignored interruption")
+
+    monkeypatch.setattr(sys, "argv", ["eval_press.py", "--task-feasibility"])
+    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", "unused.yaml")
+    monkeypatch.setitem(sys.modules, "isaaclab.app", SimpleNamespace(AppLauncher=launch))
+    monkeypatch.setattr(module, "load_config", lambda _path: object())
+    monkeypatch.setattr(module, "prepare_policy_inputs", lambda **_kwargs: object())
+    monkeypatch.setattr(module, "_run_feasibility", interrupt)
+    previous = signal.getsignal(signal.SIGINT)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            module.main()
+        assert closed == [True]
+        # Kit cleanup can exit before Python propagates the exception. The
+        # container harness must also see its explicit failure marker.
+        assert "ERROR: KeyboardInterrupt" in capsys.readouterr().err
+    finally:
+        signal.signal(signal.SIGINT, previous)
 
 
 def _goal():
@@ -481,6 +514,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
         lambda **_kwargs: SimpleNamespace(
             flight_parameters=_FLIGHT_PARAMETERS,
             hover_reset_samples="hover-reset-samples",
+            switch_asset="pinned-switch",
         ),
     )
     artifact_dir = tmp_path / "artifact"
@@ -543,6 +577,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: SimpleNamespace(
             flight_parameters=_FLIGHT_PARAMETERS,
             hover_reset_samples="hover-reset-samples",
+            switch_asset="pinned-switch",
         ),
     )
     monkeypatch.setattr(
@@ -555,7 +590,9 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
             config=_config(),
             artifact_dir=Path("artifact"),
             inputs=SimpleNamespace(
-                flight_parameters=_FLIGHT_PARAMETERS, hover_reset_samples="hover-reset-samples"
+                flight_parameters=_FLIGHT_PARAMETERS,
+                hover_reset_samples="hover-reset-samples",
+                switch_asset="pinned-switch",
             ),
         )
     assert close_calls == [True]
@@ -669,21 +706,46 @@ def test_press_feedback_preserves_wall_alignment_when_tilted_and_corrects_retrea
     observation[0, 16] = 1.0
     observation[0, :3] = -0.1 * normal
     action = policy(observation)
-    torch.testing.assert_close(
-        action[0, :3],
-        normal
-        * config.rl.press.contact.feasibility_approach_mps
-        / config.rl.action.max_body_velocity_mps,
-    )
+    assert float(action[0, :3] @ normal) < 0
+    wall_vertical = torch.linalg.cross(normal, torch.tensor([0.0, 1.0, 0.0]))
+    assert float(action[0, :3] @ wall_vertical) > 0
     observation[0, 21] = 0.001
     loaded_action = policy(observation)
-    wall_vertical = torch.linalg.cross(normal, torch.tensor([0.0, 1.0, 0.0]))
-    assert float(loaded_action[0, :3] @ wall_vertical) > 0
+    torch.testing.assert_close(loaded_action[0, :3] @ wall_vertical, action[0, :3] @ wall_vertical)
+    assert float(loaded_action[0, :3] @ normal) < 0
     observation[0, 25] = 1.0
     observation[0, :3] = 0.02 * normal
     action = policy(observation)
     assert float(action[0, :3] @ normal) > 0
     torch.testing.assert_close(action[0, :3], normal * (action[0, :3] @ normal))
+
+
+def test_press_feedback_cannot_build_pressure_while_pad_is_misaligned():
+    import torch
+
+    from robotics_experiments.config import load_config
+
+    module = _load_eval_press_module()
+    config = load_config(REPO_ROOT / "configs/train/stage/press_nominal_quad.yaml")
+    policy = module._ContactFeedback(  # noqa: SLF001 - diagnostic control contract
+        config=config, tool_offset_m=torch.tensor([0.36, 0.0, 0.01])
+    )
+    observation = torch.zeros((1, 35))
+    observation[:, 12] = 1
+    observation[:, 16] = 1
+    observation[:, 0] = -0.1
+    observation[:, 2] = 0.059
+    observation[:, 24] = 1
+    for _ in range(20):
+        action = policy(observation)
+        assert action[0, 0] < 0
+        assert action[0, 2] > 0
+    observation[:, 2] = 0
+    expected = (
+        config.rl.press.contact.feasibility_approach_mps
+        + config.rl.press.contact.feasibility_press_increment_mps
+    ) / config.rl.action.max_body_velocity_mps
+    assert policy(observation)[0, 0] == pytest.approx(expected)
 
 
 def test_hover_feasibility_reuses_production_evaluation_and_pinned_resets(monkeypatch, tmp_path):
@@ -703,8 +765,8 @@ def test_hover_feasibility_reuses_production_evaluation_and_pinned_resets(monkey
         flight_parameters_path=tmp_path / "flights",
         flight_parameters_digest="flight-digest",
         hover_reset_samples=samples,
+        switch_asset=SimpleNamespace(record=lambda: {"fingerprint": "switch-fingerprint"}),
     )
-    monkeypatch.setattr(module, "prepare_policy_inputs", lambda **_kwargs: inputs)
     monkeypatch.setattr(module, "press_policy_contract", lambda **_kwargs: _contract())
     calls = []
     closed = []
@@ -722,7 +784,9 @@ def test_hover_feasibility_reuses_production_evaluation_and_pinned_resets(monkey
     monkeypatch.setattr(workflow, "evaluate_press_approach_policy", evaluate)
     output = tmp_path / "feasibility"
     with pytest.raises(ValueError, match="recorded evaluation failure"):
-        module._run_feasibility(config=config, output_dir=output)  # noqa: SLF001 - CLI workflow test
+        module._run_feasibility(  # noqa: SLF001 - CLI workflow test
+            config=config, inputs=inputs, output_dir=output
+        )
     assert closed == [True]
     assert calls[0]["hover_reset_samples"] is samples
     assert calls[0]["training"] is False

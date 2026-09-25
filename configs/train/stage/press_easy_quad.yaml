@@ -8,6 +8,9 @@ rl:
   episode_length_s: 90.0
   press:
     task: press
+    contact:
+      # Let pad alignment settle while building the shared 2.6 N activation load.
+      feasibility_press_increment_mps: 0.0025
     acceptance:
       # Provisional milestone; tighten after the full curriculum is trainable.
       success_rate_min: 0.80

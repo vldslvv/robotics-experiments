@@ -10,6 +10,7 @@ INTEGRATION_TEST_TARGETS = \
     test-integration-drone-articulation \
     test-integration-press-hover-goto \
     test-integration-press-contact-chain \
+    test-integration-switch-mechanics \
     test-integration-px4-takeoff \
     test-integration-px4-navigation \
     test-integration-px4-takeoff-instability \
@@ -60,7 +61,7 @@ test-integration-all: test-integration-warm-isaac-cache
 	    bash "$(INTEGRATION_SUITE_RUNNER)"
 
 .PHONY: test-integration-isaac
-test-integration-isaac: generate-drone-usd
+test-integration-isaac: generate-assets
 	@TEST_TARGET='test-integration-isaac' \
 	    ISAAC_TEST_LOG='$(ISAAC_SIM_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_SIM_TEST)' \
@@ -68,7 +69,7 @@ test-integration-isaac: generate-drone-usd
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"
 
 .PHONY: test-integration-drone-articulation
-test-integration-drone-articulation: generate-drone-usd
+test-integration-drone-articulation: generate-assets
 	@TEST_TARGET='test-integration-drone-articulation' \
 	    ISAAC_TEST_LOG='$(ISAAC_DRONE_ARTICULATION_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_DRONE_ARTICULATION_TEST)' \
@@ -88,7 +89,7 @@ PX4_INTEGRATION_COMMON_ENV = \
 
 .PHONY: test-integration-px4-takeoff
 test-integration-px4-takeoff: HYDRA_CONFIG = configs/takeoff_quad.yaml
-test-integration-px4-takeoff: generate-drone-usd
+test-integration-px4-takeoff: generate-assets
 	@TEST_TARGET='test-integration-px4-takeoff' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_takeoff_stability.log' \
 	    HOST_PX4_LOG_BASENAME='test_px4_takeoff_stability_px4.log' \
@@ -108,7 +109,7 @@ test-integration-px4-takeoff: generate-drone-usd
 .PHONY: test-integration-px4-navigation
 test-integration-px4-navigation: HYDRA_CONFIG = configs/navigate_quad_hex.yaml
 test-integration-px4-navigation: SCENE = @config
-test-integration-px4-navigation: generate-drone-usd
+test-integration-px4-navigation: generate-assets
 	@TEST_TARGET='test-integration-px4-navigation' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_navigation_routine.log' \
 	    HOST_PX4_LOG_BASENAME='test_px4_navigation_routine_px4.log' \
@@ -121,7 +122,7 @@ test-integration-px4-navigation: generate-drone-usd
 
 .PHONY: test-integration-px4-takeoff-instability
 test-integration-px4-takeoff-instability: HYDRA_CONFIG = configs/takeoff_quad.yaml
-test-integration-px4-takeoff-instability: generate-drone-usd
+test-integration-px4-takeoff-instability: generate-assets
 	@TEST_TARGET='test-integration-px4-takeoff-instability' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_takeoff_instability_detection.log' \
 	    HOST_PX4_LOG_BASENAME='test_px4_takeoff_instability_px4.log' \
@@ -139,7 +140,7 @@ test-integration-px4-takeoff-instability: generate-drone-usd
 .PHONY: test-integration-px4-multi-drone-takeoff
 test-integration-px4-multi-drone-takeoff: HYDRA_CONFIG = configs/takeoff_quad_quad.yaml
 test-integration-px4-multi-drone-takeoff: SCENE = @config
-test-integration-px4-multi-drone-takeoff: generate-drone-usd
+test-integration-px4-multi-drone-takeoff: generate-assets
 	@TEST_TARGET='test-integration-px4-multi-drone-takeoff' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_multi_drone_takeoff.log' \
 	    HOST_PX4_LOG_BASENAME='test_px4_multi_drone_takeoff_px4.log' \

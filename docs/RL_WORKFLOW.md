@@ -38,9 +38,10 @@ if acceptance.passed:
 ```
 
 Preparation validates each producer artifact once, confirms the controller was
-qualified with that exact flight-parameter run and fingerprint, and pins both
-resolved paths and digests. The coordinator then creates the press acceptance
-criteria once from `rl.press.acceptance` and the measured hover limits. The
+qualified with that exact flight-parameter run and fingerprint, and pins the
+resolved paths and digests, including the generated switch definition. The
+coordinator then creates the press acceptance criteria once from
+`rl.press.acceptance` and the measured hover limits. The
 campaign report records those criteria before training starts.
 
 Workers receive the pinned paths and digests and confirm the files have not
@@ -333,7 +334,7 @@ initial lineage, ordered stage report references, `accepted`, `published`, compl
 updates and status. These two booleans distinguish acceptance from a publication
 error. Detailed measurements remain in stage and attempt reports.
 
-Training and attempt reports use strict schema 29. Old reports are not migrated.
+Training and attempt reports use strict schema 30. Old reports are not migrated.
 The stage records resolved configuration and pinned evidence once, prepared
 acceptance criteria, effective phases (including smoke reductions), attempt report
 references, progress, selected candidate identity/paths/digests/comparison metric,
@@ -471,8 +472,8 @@ the reserved test seeds.
 To check restoration, set `initial_learner` in a new curriculum to that smoke
 stage's `training_report.json` and run with `--procedural-smoke`. An unaccepted
 smoke learner is a valid compatible initializer. Neither check uses reserved test
-seeds or updates deployment labels. With existing assets use
-`make -o generate-drone-usd train-rl ...` to skip asset generation.
+seeds or updates deployment labels. Asset preparation reuses unchanged outputs
+without rewriting their bytes or modification times.
 
 Use the curriculum-scoped Trackio database under
 `.build/training/press-hover/<run-id>/monitoring`. Each stage/attempt is a unique
@@ -602,8 +603,8 @@ completed attempts, the active pointer, and the partial attempt report, marks
 the campaign interrupted, exits nonzero, and publishes nothing. Process resume
 remains unsupported.
 
-The report schema and ownership are described above. Metric-registry revision 20
-and comparison revision 39 include contact-task requirements. Task reset mixtures affect comparison;
+The report schema and ownership are described above. Metric-registry revision 21
+and comparison revision 40 include contact-task requirements. Task reset mixtures affect comparison;
 curriculum labels and ordering do not. Complete resolved configuration, runtime
 versions and pinned input lineage appear once in the stage's `provenance`.
 Workers verify this configuration and the pinned producer digests before training.
@@ -752,11 +753,9 @@ See `FLIGHT_TO_POLICY_IMPROVEMENTS.md` for exact inputs and results.
 
 ## Complete nominal contact curriculum
 
-The nominal stage is currently blocked: its 10 mm latch threshold puts the button
-behind the solid base collider, while deployment experiments use 5 mm. The
-2026-09-25 checks therefore stopped before PPO. See
-`phase_f/F4_curriculum_and_randomization.md` and
-`.build/press-curriculum-20260925/nominal-blocker.json` before using this curriculum.
+Prepare the complete curriculum with `make generate-assets`. Shared easy and
+nominal switch models, full-stroke geometry, physics-step activation and pinned
+asset evidence are defined in `ASSET_GENERATION.md`.
 
 `configs/train/press_curriculum_quad.yaml` starts from scratch in the `press`
 namespace and sequences hover, approach, gentle contact, easy press-and-retreat,
@@ -773,20 +772,20 @@ The contact task observes filtered pad/button forces separately from other pad
 and vehicle collisions. First-contact quality uses the preceding physics sample;
 its speed, alignment and attitude thresholds come from `rl.press.goal`. The real
 button joint drives the same confirmation/release latch as production, sampled
-at policy cadence. `button_threshold_scale` multiplies `switches.press_threshold`.
+at physics cadence, accumulating the shared model's confirmation duration.
 The lamp observation contains the resulting state. Every physics sample contributes
-to the compression maximum, bounded by the authored physical stroke. No actor
-observation fields or asset bytes change.
+to the compression maximum, bounded by the authored physical stroke. Actor observation fields remain unchanged. Generated switch evidence is pinned
+before worker startup and recorded in reports and supplemental policy metadata.
 
 Gentle contact and easy pressing start around the preceding approach goal using
 measured hover states. Nominal pressing restores the navigation/hover reset
 mixture so its actor completes the full task from handoff states. Gentle contact
 requires five consecutive stable contact samples and no toggle.
 Pressing requires exactly one off-to-on transition, release, return to the hover
-target and the existing 30-second continuous hold. The final stage uses geometry,
-stiffness and threshold scales of 1.0. Reward and raw physical progress are
+target and the existing 30-second continuous hold. The first four stages use the easy model; the final stage uses nominal.
+Both share identical force, travel and activation requirements. Reward and raw physical progress are
 separate; task labels do not choose either. The acceptance requirements are
-recorded explicitly in schema-29 reports. The complete checkpoint remains schema
+recorded explicitly in schema-30 reports. The complete checkpoint remains schema
 1. Old producer reports are not migrated.
 
 **Provisional Lab acceptance:** complete press-and-retreat success at least 80%,
@@ -799,15 +798,18 @@ be tightened in later qualification after the complete curriculum can be trained
 They do not establish domain-randomized or PX4 qualification. The PX4 adapter
 continues to reject contact/press task artifacts.
 
-`make -o generate-drone-usd eval-press HYDRA_CONFIG=<stage.yaml>
+`make eval-press HYDRA_CONFIG=<stage.yaml>
 EVAL_ARGS=--task-feasibility` drives diagnostic feedback through the actual task,
 termination rules and evaluator on validation seeds. The existing
 `--hover-feasibility` option remains available for hover diagnostics. Physical
 contact-chain checks alone bypass task termination and cannot establish learning
 feasibility. Procedural smoke and feasibility checks never advance policy labels.
 Contact feedback resets its pressure memory for each seed, applies pressure along
-the wall normal, and compensates the actual tool offset while the loaded drone
-tilts. Feasibility reports record that measured tool offset.
+the wall normal, and aligns the pad using its actual tool offset through approach
+and pressing, including tilt before first contact. Feasibility reports record
+that measured tool offset. Press-task pressure commands require pad alignment;
+losing alignment clears pressure buildup and backs away from a close switch
+while lateral correction continues.
 
 For supervised campaign operation, record a hypothesis and evidence for every
 revision. A failed curriculum remains terminal; a later invocation may explicitly

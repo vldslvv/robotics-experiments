@@ -40,6 +40,14 @@ def _evaluate_contact_policy(
         ),
         0,
     )
+    categories = (
+        "button_contact",
+        "housing_collision",
+        "wall_collision",
+        "other_pad_collision",
+        "body_collision",
+    )
+    category_totals = dict.fromkeys((*categories, "simultaneous_contact"), 0)
     rewards: dict[str, float] = {}
     reward_samples = 0
     closest_range = float("inf")
@@ -52,6 +60,8 @@ def _evaluate_contact_policy(
         if reset_policy is not None:
             reset_policy()
         active = torch.ones(episodes_per_seed, dtype=torch.bool, device=env.device)
+        category_seen = torch.zeros((episodes_per_seed, 5), dtype=torch.bool, device=env.device)
+        simultaneous_seen = torch.zeros(episodes_per_seed, dtype=torch.bool, device=env.device)
         best_progress = torch.zeros(episodes_per_seed, device=env.device)
         report(f"contact evaluation seed={seed} START episodes={episodes_per_seed}")
         for step in range(env.max_episode_length):
@@ -84,6 +94,8 @@ def _evaluate_contact_policy(
             reward_samples += int(active.sum())
             for name, value in result.rewards.items():
                 rewards[name] = rewards.get(name, 0.0) + float(value[active].sum())
+            category_seen |= result.contact_categories & active[:, None]
+            simultaneous_seen |= result.simultaneous_contact & active
             ended = active & (terminated | truncated)
             flight = env.press_approach_result
             for name, value in {
@@ -99,6 +111,9 @@ def _evaluate_contact_policy(
                 "multiple": state.toggle_count > 1,
             }.items():
                 totals[name] += int((ended & value).sum())
+            for index, name in enumerate(categories):
+                category_totals[name] += int((ended & category_seen[:, index]).sum())
+            category_totals["simultaneous_contact"] += int((ended & simultaneous_seen).sum())
             active &= ~ended
             if not bool(active.any()):
                 break
@@ -141,6 +156,7 @@ def _evaluate_contact_policy(
         "multiple_toggle_rate": totals["multiple"] / count,
         "peak_compression_m": peak_compression,
     }
+    metrics.update({f"{name}_rate": value / count for name, value in category_totals.items()})
     return PolicyEvaluation(
         iteration=iteration,
         checkpoint_path=checkpoint_path,

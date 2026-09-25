@@ -33,7 +33,9 @@ sampling and lamp heights. Reusing the same resolved experiment configuration
 reproduces the complete switch/lamp layout; changing the seed selects a new
 layout.
 
-Switch count, press confirmation steps, and spawn retry budget must be positive.
+Switch count and spawn retry budget must be positive. `switches.model` owns the
+shared geometry, mechanics and confirmation duration; all numeric model values
+are validated before use. See `ASSET_GENERATION.md` for profiles and preparation.
 Switch/lamp bounds must be non-empty three-value corners with each minimum no
 greater than its maximum. Invalid values fail during `load_config`, before any
 stage mutation.
@@ -54,8 +56,8 @@ reproducibility must still be verified with replicate captures.
 
 `driver.control_rate_hz` drives the fleet cyclic executive,
 `driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and
-`rl.policy_rate_hz` authors training and supplies the switch-latch fallback
-when no press artifact is deployed. Exported artifacts own evaluation and
+`rl.policy_rate_hz` authors training. Switch activation runs every physics step
+using `switches.model.confirmation_s`, independently of policy cadence. Exported artifacts own evaluation and
 deployment policy cadence. All rates must be finite and positive; authored or
 artifact policy cadence and setpoint rates cannot exceed the driver rate, and
 the driver rate cannot exceed `sim.physics_hz`. Defaults are 50, 50, and 20 Hz

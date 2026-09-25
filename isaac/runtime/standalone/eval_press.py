@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -30,6 +31,7 @@ from robotics_experiments.rl.press import (
 from robotics_experiments.rl.press._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.publication import _REPORT_SCHEMA_VERSION
 from robotics_experiments.rl.workflow import _load_pinned_policy_inputs
+from robotics_experiments.switches import SwitchAsset
 from robotics_experiments.workflows.isaac_lab._contact_evaluation import _evaluate_contact_policy
 from robotics_experiments.workflows.isaac_lab.training import _config_values
 
@@ -97,24 +99,25 @@ class _ContactFeedback(_HoverFeedback):
             self._compression_velocity = torch.full_like(
                 observation[:, 24], self._contact.feasibility_approach_mps
             )
-        self._contact_steps = torch.where(contact, self._contact_steps + 1, 0)
         speed = torch.full_like(observation[:, 24], self._contact.feasibility_approach_mps)
         normal = observation[:, 12:15]
+        alignment_error = observation[:, :3]
         if not self._contact_only:
             tangent = observation[:, 15:18]
             vertical = torch.linalg.cross(normal, tangent)
             tool = self._tool_offset_m.to(observation)
             rotated_tool = normal * tool[0] + tangent * tool[1] + vertical * tool[2]
-            # Keep the pad at its initial height and lateral position as the
-            # loaded vehicle tilts; the tool offset comes from the actual asset.
+            # Align the pad through approach and pressing, including vehicle
+            # tilt before first contact. The offset comes from the actual asset.
             action[:, :3] += (
                 self._evaluation.feasibility_position_gain_per_s
                 * (rotated_tool - tool)
-                * (contact & (observation[:, 25] < 0.5))[:, None]
+                * (observation[:, 25] < 0.5)[:, None]
                 / self._action.max_body_velocity_mps
             )
-        normal_error = (observation[:, :3] * normal).sum(dim=-1)
-        tangent_error = observation[:, :3] - normal_error[:, None] * normal
+            alignment_error = alignment_error + rotated_tool - tool
+        normal_error = (alignment_error * normal).sum(dim=-1)
+        tangent_error = alignment_error - normal_error[:, None] * normal
         aligned = (
             torch.linalg.vector_norm(tangent_error, dim=-1) <= self._goal.alignment_error_max_m
         ) & (
@@ -134,7 +137,12 @@ class _ContactFeedback(_HoverFeedback):
             ).clamp(-self._action.max_body_velocity_mps, self._action.max_body_velocity_mps)
             speed = torch.where(contact, self._compression_velocity, speed)
         else:
-            speed += self._contact_steps * self._contact.feasibility_press_increment_mps
+            self._contact_steps = torch.where(contact & aligned, self._contact_steps + 1, 0)
+            speed = torch.where(
+                aligned,
+                speed + self._contact_steps * self._contact.feasibility_press_increment_mps,
+                0.0,
+            )
         # Goal offset remains the retreat target throughout the episode.
         retreat = observation[:, 25] > 0.5
         approach_action = speed / self._action.max_body_velocity_mps
@@ -143,6 +151,10 @@ class _ContactFeedback(_HoverFeedback):
             -self._contact.feasibility_retreat_mps / self._action.max_body_velocity_mps,
             self._contact.feasibility_retreat_mps / self._action.max_body_velocity_mps,
         )
+        if not self._contact_only:
+            # A close, misaligned handoff needs clearance before the pad can
+            # move across the housing face. Holding normal velocity is not enough.
+            approach_action = torch.where(aligned, approach_action, retreat_action.clamp(max=0))
         # Replace wall-normal motion in the contact frame, preserving lateral
         # feedback when the vehicle pitches under button load.
         commanded_normal = torch.where(retreat, retreat_action, approach_action)
@@ -150,7 +162,7 @@ class _ContactFeedback(_HoverFeedback):
         return action.clamp(-1, 1)
 
 
-def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
+def _run_feasibility(*, config: ExperimentConfig, inputs: PolicyInputs, output_dir: Path) -> None:
     from robotics_experiments.workflows.isaac_lab import (
         evaluate_press_approach_policy,
         make_isaac_lab_env,
@@ -159,9 +171,9 @@ def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
 
     if config.rl.action.kind != "velocity":
         raise ValueError("task feasibility requires the velocity action interface")
-    inputs = prepare_policy_inputs(config=config, repo_root=_repo_root())
     contract = press_policy_contract(config=config, controller=inputs.controller)
     seeds = tuple(config.rl.press.evaluation.validation_seeds)
+    output_dir = _repo_root() / output_dir
     output_dir.mkdir(parents=True, exist_ok=False)
     record = {
         "schema_version": 1,
@@ -174,6 +186,7 @@ def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
         "episode_length_s": config.rl.episode_length_s,
         "controller_path": str(inputs.controller_path),
         "controller_digest": inputs.controller_digest,
+        "switch_asset": inputs.switch_asset.record(),
         "controller_run_id": inputs.controller.run_id,
         "flight_parameters_path": str(inputs.flight_parameters_path),
         "flight_parameters_digest": inputs.flight_parameters_digest,
@@ -200,6 +213,7 @@ def _run_feasibility(*, config: ExperimentConfig, output_dir: Path) -> None:
             policy_contract=contract,
             flight_parameters=inputs.flight_parameters,
             hover_reset_samples=inputs.hover_reset_samples,
+            switch_asset=inputs.switch_asset,
         )
         try:
             if config.rl.press.task in {"contact", "press"}:
@@ -307,6 +321,7 @@ def _run(
         policy_contract=contract,
         flight_parameters=metadata.flight_parameters,
         hover_reset_samples=inputs.hover_reset_samples,
+        switch_asset=inputs.switch_asset,
     )
     try:
         if (
@@ -431,6 +446,12 @@ def _producer_config(artifact_dir: Path) -> tuple[ExperimentConfig, PolicyInputs
     report = json.loads((artifact_dir / "training_report.json").read_text())
     evidence = report["provenance"]["inputs"]
     inputs = _load_pinned_policy_inputs(
+        config=config,
+        switch_asset=SwitchAsset(
+            path=Path(evidence["switch_asset"]["path"]),
+            fingerprint=evidence["switch_asset"]["fingerprint"],
+            usd_digest=evidence["switch_asset"]["usd_digest"],
+        ),
         controller_path=Path(evidence["controller"]["path"]),
         controller_digest=evidence["controller"]["sha256"],
         flight_parameters_path=Path(evidence["flight_parameters"]["path"]),
@@ -449,27 +470,36 @@ def main() -> None:
     parser.add_argument("--strict", action="store_true", help=argparse.SUPPRESS)
     args, _unknown = parser.parse_known_args()
 
+    config_path = Path(os.environ[_CONFIG_PATH_ENV])
+    feasibility = args.hover_feasibility or args.task_feasibility
+    if feasibility:
+        config = load_config(config_path)
+        inputs = prepare_policy_inputs(config=config, repo_root=_repo_root())
+    else:
+        artifact_dir = _resolve_artifact_dir(
+            explicit_artifact_dir=args.artifact_dir, config_path=config_path
+        )
+        config, inputs = _producer_config(artifact_dir)
+
     from isaaclab.app import AppLauncher
 
     app_launcher = AppLauncher(headless=True)
     simulation_app = app_launcher.app
+    # Kit installs its own handler; retain Python interruption and report cleanup.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
     try:
-        config_path = Path(os.environ[_CONFIG_PATH_ENV])
-        if args.hover_feasibility or args.task_feasibility:
+        if feasibility:
             run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
             _run_feasibility(
-                config=load_config(config_path),
+                config=config,
+                inputs=inputs,
                 output_dir=args.output_dir
                 or _repo_root() / ".build" / "hover-feasibility" / run_id,
             )
         else:
-            artifact_dir = _resolve_artifact_dir(
-                explicit_artifact_dir=args.artifact_dir, config_path=config_path
-            )
-            config, inputs = _producer_config(artifact_dir)
             _run(config=config, inputs=inputs, artifact_dir=artifact_dir)
-    except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
-        _report(f"ERROR: {exc}")
+    except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - Make failure sentinel
+        _report(f"ERROR: {str(exc) or type(exc).__name__}")
         raise
     finally:
         simulation_app.close()

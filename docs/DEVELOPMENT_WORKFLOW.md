@@ -127,3 +127,7 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
 - Avoid `define`/`eval` target templates when they require nested Make/shell
   escaping such as `$$($(1)_VAR)`; prefer explicit targets with ordinary
   recursive Make variables so command-line overrides stay dynamic.
+
+Asset preparation uses `make generate-assets HYDRA_CONFIG=<experiment-or-curriculum>`.
+See [asset generation](ASSET_GENERATION.md) for switch profiles,
+immutable outputs, locking and validation.

@@ -70,6 +70,7 @@ from robotics_experiments.rl.training.publication import (
     _REPORT_SCHEMA_VERSION,
     publish_policy_labels,
 )
+from robotics_experiments.switches import SwitchAsset, load_switch_asset
 from robotics_experiments.workflows.isaac_lab._contact_evaluation import _evaluate_contact_policy
 
 __all__ = [
@@ -202,6 +203,7 @@ def _experiment_provenance(
             "cuda": torch.version.cuda,
         },
         "inputs": {
+            "switch_asset": inputs.switch_asset.record(),
             "controller": {
                 "path": str(inputs.controller_path),
                 "run_id": inputs.controller.run_id,
@@ -228,6 +230,7 @@ def _build_env(
     controller_settings,
     flight_parameters: FlightParameters,
     hover_reset_samples: HoverResetSamples,
+    switch_asset: SwitchAsset,
     policy_contract=None,
 ):
     # AppLauncher must start before the Isaac Lab workflow import.
@@ -243,6 +246,7 @@ def _build_env(
         policy_contract=policy_contract,
         flight_parameters=flight_parameters,
         hover_reset_samples=hover_reset_samples,
+        switch_asset=switch_asset,
     )
 
 
@@ -256,6 +260,7 @@ def _artifact_metadata(
     flight_parameters: FlightParameters,
     flight_parameters_digest: str,
     hover_reset_samples: HoverResetSamples,
+    switch_asset: SwitchAsset,
 ) -> dict[str, Any]:
     metadata = rl.policy_metadata(
         action_cfg=config.rl.action,
@@ -273,6 +278,7 @@ def _artifact_metadata(
             else None
         ),
     )
+    metadata["switch_asset"] = switch_asset.record()
     metadata["hover_reset_distribution"] = {
         "source": "flight_parameters_policy_window",
         **hover_reset_samples.summary(flight_parameters=flight_parameters),
@@ -396,16 +402,18 @@ def _evaluation_worker_main(
     run_dir: str,
     flight_parameters_path: str,
     flight_parameters_digest: str,
+    switch_asset: SwitchAsset,
     task_queue,
     result_queue,
     workload_role: str,
 ) -> None:
+    config = load_config(config_path)
+    load_switch_asset(model=config.switches.model, expected=switch_asset)
     from isaaclab.app import AppLauncher
 
     app_launcher = AppLauncher(headless=True)
     simulation_app = app_launcher.app
     try:
-        config = load_config(config_path)
         metadata = rl.load_policy_metadata(artifact_dir=Path(run_dir))
         flight_parameters_bundle = load_flight_parameters_bundle(path=flight_parameters_path)
         if flight_parameters_bundle.flight_parameters_digest != flight_parameters_digest:
@@ -429,6 +437,7 @@ def _evaluation_worker_main(
             controller_settings=metadata.controller_settings,
             flight_parameters=metadata.flight_parameters,
             hover_reset_samples=hover_reset_samples,
+            switch_asset=switch_asset,
             policy_contract=metadata.contract,
         )
         telemetry = TelemetrySampler(
@@ -512,6 +521,7 @@ class _EvaluationWorker:
         run_dir: Path,
         flight_parameters_path: Path,
         flight_parameters_digest: str,
+        switch_asset: SwitchAsset,
         timeout_s: float,
         workload_role: str,
     ) -> None:
@@ -526,6 +536,7 @@ class _EvaluationWorker:
                 "run_dir": str(run_dir),
                 "flight_parameters_path": str(flight_parameters_path),
                 "flight_parameters_digest": flight_parameters_digest,
+                "switch_asset": switch_asset,
                 "task_queue": self._tasks,
                 "result_queue": self._results,
                 "workload_role": workload_role,
@@ -741,6 +752,7 @@ def _run_final_test(
     selection: _AttemptSelection,
     flight_parameters_path: Path,
     flight_parameters_digest: str,
+    switch_asset: SwitchAsset,
 ) -> tuple[PolicyEvaluation, dict[str, Any]]:
     """Run one fresh final test of the exact validation-selected actor."""
 
@@ -753,6 +765,7 @@ def _run_final_test(
         run_dir=selection.artifact_dir,
         flight_parameters_path=flight_parameters_path,
         flight_parameters_digest=flight_parameters_digest,
+        switch_asset=switch_asset,
         timeout_s=config.rl.training.evaluation_worker_timeout_s,
         workload_role="test",
     )
@@ -855,6 +868,8 @@ def _attempt_worker_command(
         str(inputs.flight_parameters_path),
         "--flight-parameters-artifact-digest",
         inputs.flight_parameters_digest,
+        "--switch-asset",
+        json.dumps(inputs.switch_asset.record()),
         "--monitoring-dir",
         str(monitoring_dir),
         "--update-offset",
@@ -1041,6 +1056,7 @@ def run_attempt(
             controller_settings=controller_artifact.selected_settings,
             flight_parameters=flight_parameters,
             hover_reset_samples=inputs.hover_reset_samples,
+            switch_asset=inputs.switch_asset,
         )
         runner: Any = None
         evaluate_candidate: Any = None
@@ -1055,6 +1071,7 @@ def run_attempt(
                 flight_parameters=flight_parameters,
                 flight_parameters_digest=flight_parameters_digest,
                 hover_reset_samples=inputs.hover_reset_samples,
+                switch_asset=inputs.switch_asset,
             )
             if metadata["policy_interface"] != rl.PolicyInterface.PRESS.value:
                 raise ValueError("campaign requires the press deterministic evaluator")
@@ -1164,6 +1181,7 @@ def run_attempt(
                         run_dir=attempt_dir,
                         flight_parameters_path=inputs.flight_parameters_path,
                         flight_parameters_digest=inputs.flight_parameters_digest,
+                        switch_asset=inputs.switch_asset,
                         timeout_s=training_config.evaluation_worker_timeout_s,
                         workload_role="validation",
                     )
@@ -1662,6 +1680,7 @@ def run_training(
                 selection=selected,
                 flight_parameters_path=inputs.flight_parameters_path,
                 flight_parameters_digest=inputs.flight_parameters_digest,
+                switch_asset=inputs.switch_asset,
             )
             acceptance = evaluate_press_acceptance(criteria=criteria, evaluation=evaluation)
             report["test_evaluation"] = {

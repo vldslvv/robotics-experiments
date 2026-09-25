@@ -97,3 +97,7 @@ updating relative `latest`/`best` links. No migration mode is supported.
 `training.py` owns attempt campaigns and fresh tests. Only attempt and evaluation
 workers create Isaac applications. Checkpoint storage and restoration are explicit
 in `rl/training/checkpoint.py`; see `docs/RL_WORKFLOW.md` for state and report fields.
+
+Asset preparation uses `make generate-assets HYDRA_CONFIG=<experiment-or-curriculum>`.
+See [asset generation](../../../docs/ASSET_GENERATION.md) for switch profiles,
+immutable outputs, locking and validation.

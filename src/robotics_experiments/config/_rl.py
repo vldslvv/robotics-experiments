@@ -269,9 +269,6 @@ class PressResetConfig(_FreezableConfig):
 
     mix: List[PressResetSourceConfig]
     physical_contact_enabled: bool
-    button_geometry_scale: float
-    button_stiffness_scale: float
-    button_threshold_scale: float
     switch_distance_from_env_origin_m: float
     switch_wall_offset_m: float
     switch_height_m: float
@@ -288,6 +285,7 @@ class PressApproachTerminationConfig(_FreezableConfig):
     max_lateral_error_m: float
     max_vertical_error_m: float
     contact_force_threshold_n: float
+    contact_data_capacity_per_body: int
 
 
 @dataclass

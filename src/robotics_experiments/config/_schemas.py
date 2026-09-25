@@ -5,7 +5,7 @@ from robotics_experiments.config._curriculum import CurriculumConfig
 from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._px4 import Px4BridgeConfig
 from robotics_experiments.config._rl import PressTaskConfig, RlConfig
-from robotics_experiments.config._scene import LightSwitchConfig
+from robotics_experiments.config._scene import LightSwitchConfig, SwitchModelConfig
 from robotics_experiments.config._simulation import SimSettings
 
 __all__: list[str] = []
@@ -27,6 +27,7 @@ def _register_schemas() -> None:
     # select them via ``experiment/<group>@<group>``.
     cs.store(group="experiment/sim", name="base_sim", node=SimSettings)
     cs.store(group="experiment/switches", name="base_switches", node=LightSwitchConfig)
+    cs.store(group="experiment/switches/model", name="base_model", node=SwitchModelConfig)
     cs.store(group="experiment/px4", name="base_px4", node=Px4BridgeConfig)
     cs.store(group="experiment/rl", name="base_rl", node=RlConfig)
     cs.store(group="experiment/rl/press", name="base_press_task", node=PressTaskConfig)

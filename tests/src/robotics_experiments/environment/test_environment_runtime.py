@@ -78,9 +78,11 @@ def test_articulation_init_retries_then_step_rebinds_switch_state(monkeypatch):
     attempts = iter((None, ["articulation"]))
     monkeypatch.setattr(module, "init_articulations", lambda **kwargs: next(attempts))
 
-    unchanged = module.step_switches_runtime(state=state)
-    armed = module.step_switches_runtime(state=unchanged)
-    stepped = module.step_switches_runtime(state=armed, on_toggle=lambda index, value: None)
+    unchanged = module.step_switches_runtime(dt_s=0.004, state=state)
+    armed = module.step_switches_runtime(dt_s=0.004, state=unchanged)
+    stepped = module.step_switches_runtime(
+        dt_s=0.004, state=armed, on_toggle=lambda index, value: None
+    )
 
     assert unchanged is state
     assert armed.phase is module.SwitchesRuntimePhase.RUNNING
@@ -95,7 +97,7 @@ def test_pause_resume_preserves_resources_and_teardown_clears_them(monkeypatch):
     state = module.play_switches_runtime(
         state=module.create_switches_runtime(config=object(), stage="stage")
     )
-    state = module.step_switches_runtime(state=state)
+    state = module.step_switches_runtime(dt_s=0.004, state=state)
 
     paused = module.pause_switches_runtime(state=state)
     resumed = module.play_switches_runtime(state=paused)

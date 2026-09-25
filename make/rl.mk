@@ -23,7 +23,7 @@ PRESS_NAVIGATION_MEASUREMENT_RUNNER = make/scripts/run_press_navigation_handoff_
 # freshly tested actor before the next stage starts.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-train-rl: generate-drone-usd
+train-rl: generate-assets
 	@set -e; \
 	    run_id='$(RL_RUN_ID)'; \
 	    if [ -z "$$run_id" ]; then \
@@ -43,7 +43,7 @@ train-rl: generate-drone-usd
 eval-press: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 eval-press: HYDRA_CONFIG = configs/train/press_approach_quad.yaml
 eval-press: ISAAC_TEST_EXTRA_ARGS = $(EVAL_ARGS)
-eval-press: generate-drone-usd
+eval-press: generate-assets
 	@TEST_TARGET='eval-press' \
 	    ISAAC_TEST_LOG='$(EVAL_PRESS_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(EVAL_PRESS_SCRIPT)' \
@@ -70,9 +70,19 @@ trackio-rl:
 
 .PHONY: test-integration-press-hover-goto
 test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-hover-goto: generate-drone-usd
+test-integration-press-hover-goto: generate-assets
 	@TEST_TARGET='test-integration-press-hover-goto' \
 	    ISAAC_TEST_LOG='$(ISAAC_PRESS_HOVER_GOTO_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
+	    $(ISAAC_INTEGRATION_COMMON_ENV) \
+	    bash "$(ISAAC_INTEGRATION_RUNNER)"
+
+.PHONY: test-integration-switch-mechanics
+test-integration-switch-mechanics: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-switch-mechanics: ISAAC_TEST_EXTRA_ARGS = --switch-mechanics
+test-integration-switch-mechanics: generate-assets
+	@TEST_TARGET='test-integration-switch-mechanics' \
+	    ISAAC_TEST_LOG='$(ISAAC_SWITCH_MECHANICS_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"
@@ -81,7 +91,7 @@ test-integration-press-hover-goto: generate-drone-usd
 test-integration-press-contact-chain: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-press-contact-chain: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
 test-integration-press-contact-chain: ISAAC_TEST_EXTRA_ARGS = --contact-chain --num-envs 1
-test-integration-press-contact-chain: generate-drone-usd
+test-integration-press-contact-chain: generate-assets
 	@TEST_TARGET='test-integration-press-contact-chain' \
 	    ISAAC_TEST_LOG='$(ISAAC_PRESS_CONTACT_CHAIN_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
@@ -91,7 +101,7 @@ test-integration-press-contact-chain: generate-drone-usd
 .PHONY: test-integration-press-policy
 test-integration-press-policy: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-press-policy: HYDRA_CONFIG = configs/policy_hover_quad.yaml
-test-integration-press-policy: generate-drone-usd
+test-integration-press-policy: generate-assets
 	@TEST_TARGET='test-integration-press-policy' \
 	    HOST_ISAAC_LOG_BASENAME='test_press_policy_hover.log' \
 	    HOST_PX4_LOG_BASENAME='test_press_policy_hover_px4.log' \
@@ -106,7 +116,7 @@ test-integration-press-policy: generate-drone-usd
 test-integration-press-approach-routine: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-press-approach-routine: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
 test-integration-press-approach-routine: SCENE = @config
-test-integration-press-approach-routine: generate-drone-usd
+test-integration-press-approach-routine: generate-assets
 	@TEST_TARGET='test-integration-press-approach-routine' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_press_approach_routine.log' \
 	    HOST_PX4_LOG_BASENAME='test_px4_press_approach_routine_px4.log' \
@@ -148,7 +158,7 @@ measure-press-navigation-handoff:
 test-integration-press-policy-transfer: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-press-policy-transfer: HYDRA_CONFIG = configs/policy_transfer_press_approach_quad.yaml
 test-integration-press-policy-transfer: SCENE = @config
-test-integration-press-policy-transfer: generate-drone-usd
+test-integration-press-policy-transfer: generate-assets
 	@TEST_TARGET='test-integration-press-policy-transfer' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_press_policy_transfer.log' \
 	    HOST_PX4_LOG_BASENAME='test_px4_press_policy_transfer_px4.log' \

@@ -166,3 +166,7 @@ and changing it also recreates a persistent PX4 container.
   manual runs and under `.build/docker/integration/<target>.<run-id>/` for
   integration tests; pair a ULog and bridge log by date directory and `HH_MM_SS`
   stem.
+
+Asset preparation uses `make generate-assets HYDRA_CONFIG=<experiment-or-curriculum>`.
+See [asset generation](ASSET_GENERATION.md) for switch profiles,
+immutable outputs, locking and validation.

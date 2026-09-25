@@ -14,7 +14,11 @@ import pytest
 import torch
 from rsl_rl.networks import EmpiricalNormalization
 
-from robotics_experiments.config import RlPlateauCriteriaConfig, RlTrainingPhaseConfig
+from robotics_experiments.config import (
+    RlPlateauCriteriaConfig,
+    RlTrainingPhaseConfig,
+    load_switch_model,
+)
 from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
 from robotics_experiments.rl.press import create_press_acceptance_criteria
@@ -25,6 +29,7 @@ from robotics_experiments.rl.training.checkpoint import (
     restore_checkpoint,
     save_checkpoint,
 )
+from robotics_experiments.switches import SwitchAsset
 from robotics_experiments.workflows.isaac_lab import curriculum
 from robotics_experiments.workflows.isaac_lab import training as train_rl
 from robotics_experiments.workflows.isaac_lab.training import _file_sha256
@@ -49,6 +54,11 @@ def _phase(
 def _inputs(tmp_path: Path):
     flight_parameters = load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters")
     return SimpleNamespace(
+        switch_asset=SwitchAsset(
+            path=tmp_path / "switch.usda",
+            fingerprint="switch-fingerprint",
+            usd_digest="switch-digest",
+        ),
         controller=SimpleNamespace(
             selected_settings=SimpleNamespace(hover_thrust_normalized=0.5),
             run_id="controller-run",
@@ -223,6 +233,7 @@ def test_experiment_provenance_records_resolved_configuration_and_inputs(
     assert list(recorded["resolved_config"]["vehicles"]) == list(config.vehicles)
     assert recorded["runtime"]["python"] == sys.version
     assert recorded["inputs"] == {
+        "switch_asset": inputs.switch_asset.record(),
         "controller": {
             "path": str(inputs.controller_path),
             "run_id": "controller-run",
@@ -577,7 +588,7 @@ def saved_learner(monkeypatch, tmp_path):
         "artifact_run_id": run_dir.name,
         "status": "validation_failed",
         "acceptance": None,
-        "schema_version": 29,
+        "schema_version": 30,
         "report_kind": "training",
         "progress": {"completed_updates": 100},
         "selected": {
@@ -633,6 +644,27 @@ def test_learner_compatibility_does_not_require_acceptance(saved_learner, status
     path.write_text(json.dumps(report))
     learner = module.pin_learner(report_path=path)
     module.validate_learner(learner=learner, config=config, inputs=inputs)
+
+
+def test_switch_profile_change_preserves_complete_learner_compatibility(*, saved_learner):
+    module, config, inputs, path, _runner = saved_learner
+    nominal = load_switch_model(REPO_ROOT / "configs/experiment/switches/model/nominal.yaml")
+    assert config.switches.model != nominal
+    config = replace(config, switches=replace(config.switches, model=nominal))
+    learner = module.pin_learner(report_path=path)
+    module.validate_learner(learner=learner, config=config, inputs=inputs)
+
+
+def test_attempt_worker_receives_exact_switch_asset(*, tmp_path):
+    inputs = _inputs(tmp_path)
+    command = train_rl._attempt_worker_command(  # noqa: SLF001
+        inputs=inputs,
+        attempt_index=0,
+        procedural_smoke=True,
+        monitoring_dir=tmp_path / "monitoring",
+        update_offset=0,
+    )
+    assert json.loads(command[command.index("--switch-asset") + 1]) == inputs.switch_asset.record()
 
 
 @pytest.mark.parametrize(
@@ -790,7 +822,7 @@ def test_training_campaign_selection_and_failures(monkeypatch, tmp_path, outcome
                 "phase_index": 0 if outcome == "refinement" else 2,
             }
             report = {
-                "schema_version": 29,
+                "schema_version": 30,
                 "report_kind": "attempt",
                 "artifact_run_id": run_dir.name,
                 "attempt_index": self.index,

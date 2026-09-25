@@ -16,12 +16,15 @@ _ALLOWED_DEPENDENCIES = {
     "alignment": frozenset({"config", "controller", "flight_parameters"}),
     "commanding": frozenset({"config", "px4_bridge"}),
     "config": frozenset(),
+    "switches": frozenset({"config"}),
     "controller": frozenset({"config", "px4_bridge"}),
     "drone": frozenset({"config"}),
-    "environment": frozenset({"config"}),
+    "environment": frozenset({"config", "switches"}),
     "flight_parameters": frozenset(),
     "px4_bridge": frozenset({"config"}),
-    "rl": frozenset({"commanding", "config", "controller", "flight_parameters", "px4_bridge"}),
+    "rl": frozenset(
+        {"commanding", "config", "controller", "flight_parameters", "px4_bridge", "switches"}
+    ),
     "runtime": frozenset(
         {"commanding", "config", "drone", "environment", "px4_bridge", "rl", "simulation"}
     ),
@@ -39,6 +42,7 @@ _ALLOWED_DEPENDENCIES = {
             "rl",
             "runtime",
             "simulation",
+            "switches",
         }
     ),
 }

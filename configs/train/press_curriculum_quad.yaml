@@ -1,6 +1,4 @@
 # @package _global_
-# Nominal pressing is blocked by the asset/latch mismatch documented in
-# docs/phase_f/F4_curriculum_and_randomization.md. Resolve it before training.
 defaults:
   - /base_curriculum
   - _self_

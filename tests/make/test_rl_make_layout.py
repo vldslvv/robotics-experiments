@@ -95,7 +95,7 @@ def test_alignment_capacity_benchmark_flag_reaches_container_runner() -> None:
             "make",
             "-n",
             "-o",
-            "generate-drone-usd",
+            "generate-assets",
             "alignment-benchmark-capacity",
             "ALIGNMENT_RUN_ID=test-run",
         ],
@@ -128,7 +128,7 @@ def test_navigation_handoff_measurement_reuses_the_production_routine() -> None:
 
     assert "ISAAC_PRESS_APPROACH_ROUTINE_TEST" in sample
     assert "configs/policy_press_approach_quad.yaml" in makefile
-    assert "generate-drone-usd" not in sample
+    assert "generate-assets" not in sample
     assert "PRESS_NAVIGATION_MEASUREMENT_OUTPUT" in sample
     assert '"${PRESS_NAVIGATION_MEASUREMENT_RUNS}" -lt 10' in runner
 
@@ -144,7 +144,7 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
     }
 
     result = subprocess.run(
-        ["make", "-n", "-o", "generate-drone-usd", "test-integration-press-hover-goto"],
+        ["make", "-n", "-o", "generate-assets", "test-integration-press-hover-goto"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -160,7 +160,7 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
             "make",
             "-n",
             "-o",
-            "generate-drone-usd",
+            "generate-assets",
             "test-integration-press-contact-chain",
         ],
         cwd=REPO_ROOT,
@@ -179,7 +179,7 @@ def test_training_uses_one_merged_container_invocation() -> None:
             "make",
             "-n",
             "-o",
-            "generate-drone-usd",
+            "generate-assets",
             "train-rl",
             "RL_RUN_ID=layout-test",
             "HYDRA_CONFIG=configs/train/press_approach_quad.yaml",

@@ -419,7 +419,7 @@ def _report(*, fingerprint: str, value: float) -> str:
     return json.dumps(
         {
             "comparison_fingerprint": fingerprint,
-            "schema_version": 29,
+            "schema_version": 30,
             "selected": {
                 "metric": {
                     "name": "evaluation_diagnostic_cost",

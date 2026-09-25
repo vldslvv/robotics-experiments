@@ -66,6 +66,7 @@ ISAAC_PX4_NAVIGATION_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_navig
 ISAAC_PRESS_HOVER_GOTO_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_press_hover_goto.py
 ISAAC_PRESS_HOVER_GOTO_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_hover_goto.log
 ISAAC_PRESS_CONTACT_CHAIN_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_contact_chain.log
+ISAAC_SWITCH_MECHANICS_TEST_LOG = $(dir $(ISAAC_PRESS_HOVER_GOTO_TEST_LOG))test_switch_mechanics.log
 ISAAC_PRESS_POLICY_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_policy_hover.log
 ISAAC_PRESS_APPROACH_ROUTINE_TEST = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_press_approach_routine.py
 ISAAC_PRESS_APPROACH_ROUTINE_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_press_approach_routine.log
