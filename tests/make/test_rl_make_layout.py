@@ -42,17 +42,13 @@ def test_trackio_uses_the_campaign_database_and_does_not_open_a_browser() -> Non
     assert "open_browser=False" in trackio
     assert "block_thread=True" in trackio
     assert "RL_TRACKIO_PORT ?= 7860" in makefile
-    assert "tensorboard-rl" not in makefile
-    assert "RL_TENSORBOARD" not in makefile
 
 
-def test_root_makefile_includes_rl_makefile_and_training_makefile_is_removed() -> None:
+def test_root_makefile_includes_rl_and_alignment_targets() -> None:
     root_makefile = (REPO_ROOT / "Makefile").read_text()
 
     assert "include make/rl.mk" in root_makefile
     assert "include make/alignment.mk" in root_makefile
-    assert "make/training.mk" not in root_makefile
-    assert not (REPO_ROOT / "make" / "training.mk").exists()
     assert "RL, Isaac Lab, and press workflow targets:" in root_makefile
     assert "Controller alignment targets:" in root_makefile
 
@@ -108,14 +104,6 @@ def test_alignment_capacity_benchmark_flag_reaches_container_runner() -> None:
     assert "ALIGNMENT_CAPACITY_BENCHMARK='1'" in result.stdout
     runner = (REPO_ROOT / "make/scripts/run_isaac_integration_test.sh").read_text()
     assert '-e "ALIGNMENT_CAPACITY_BENCHMARK=${ALIGNMENT_CAPACITY_BENCHMARK}"' in runner
-
-
-def test_legacy_temporal_targets_and_variables_are_removed() -> None:
-    text = "\n".join(
-        path.read_text() for path in (REPO_ROOT / "Makefile", *(REPO_ROOT / "make").glob("*.mk"))
-    )
-    assert "test-integration-press-temporal" not in text
-    assert "TEMPORAL_" not in text
 
 
 def test_navigation_handoff_measurement_reuses_the_production_routine() -> None:

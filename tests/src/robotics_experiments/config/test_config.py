@@ -4,6 +4,7 @@ from dataclasses import FrozenInstanceError, replace
 from typing import get_type_hints
 
 import pytest
+from hydra.errors import ConfigCompositionException
 from omegaconf import OmegaConf
 
 from robotics_experiments.config import load_config
@@ -376,8 +377,6 @@ def test_press_hover_training_configuration():
     assert navigation_noise.switch_range_max_m == pytest.approx(0.4989912414550766)
     assert navigation_noise.lateral_align_max_m == pytest.approx(0.03374635443902746)
     assert navigation_noise.relative_attitude_error_max_rad == pytest.approx(0.01633899543191001)
-    assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
-    assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
     assert config.rl.press.acceptance.success_rate_min == 0.95
     assert config.rl.press.acceptance.collision_rate_max == 0.0
     assert config.rl.press.evaluation.validation_seeds == (101, 202, 303)
@@ -590,24 +589,11 @@ def test_policy_transfer_config_uses_distinct_entry_targets():
     )
 
 
-@pytest.mark.parametrize(
-    "override",
-    [
-        {"rl": {"training": {"actor_hidden_dims": [64, 64]}}},
-        {"rl": {"press": {"reward": {"alive_weight": 1.0}}}},
-        {"rl": {"press": {"hover_task": {"reward_alive": 1.0}}}},
-        {"rl": {"press": {"reset": {"initial_linear_velocity_max_mps": 0.0}}}},
-    ],
-)
-def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
-    from hydra.errors import ConfigCompositionException
+def test_experiment_rejects_unknown_fields(tmp_path):
+    path = _write_experiment(tmp_path, "unknown_field", {})
+    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), {"unknown_field": True}), path)
 
-    from robotics_experiments.config import load_config
-
-    path = _write_experiment(tmp_path, "old_rl_path", {})
-    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
-
-    with pytest.raises(ConfigCompositionException):
+    with pytest.raises(ConfigCompositionException, match="unknown_field"):
         load_config(path)
 
 
@@ -925,8 +911,6 @@ def test_policy_routine_uses_label_and_target_enu_contract(tmp_path):
 
     assert policy_step["label"] == "hover"
     assert policy_step["target_enu"] == (0.0, 0.0, 2.5)
-    assert "name" not in policy_step
-    assert "target" not in policy_step
 
 
 def test_empty_fleet_is_valid(tmp_path):

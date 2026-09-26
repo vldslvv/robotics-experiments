@@ -202,8 +202,9 @@ def _realized_wrench(params, action, state):
     )
 
 
-def test_velocity_hover_action_uses_normalized_controller_collective():
-    params = _params("velocity")
+@pytest.mark.parametrize("kind", ["velocity", "ctbr"])
+def test_hover_action_uses_normalized_controller_collective(*, kind):
+    params = _params(kind)
     force_body, torque_body = _realized_wrench(params, hover_action(params), _level_rest_state())
 
     expected = float(
@@ -429,20 +430,6 @@ def test_normalized_velocity_anti_windup_blocks_vertical_saturation():
 
     assert controller.velocity_integral_enu[2] == pytest.approx(0.0)
     assert np.all((omega >= 0.0) & (omega <= _MAX_OMEGA))
-
-
-def test_ctbr_hover_action_uses_normalized_controller_collective():
-    params = _params("ctbr")
-    force_body, torque_body = _realized_wrench(params, hover_action(params), _level_rest_state())
-
-    expected = float(
-        np.sum(
-            params.geometry.rotor_constant
-            * np.square(params.geometry.input_scaling * params.hover_thrust_normalized)
-        )
-    )
-    assert force_body[2] == pytest.approx(expected, rel=1e-6)
-    assert np.allclose(torque_body, 0.0, atol=1e-9)
 
 
 def test_ctbr_effective_collective_scale_preserves_raw_command_boundary():

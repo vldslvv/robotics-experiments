@@ -69,6 +69,12 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   collaborator received, commands sent to a port, forces/dynamics applied to an
   articulation IO) over reading a unit's private state or asserting on a
   mock/interaction-log when a public observable exists.
+- Tests protect current behavior and contracts. Do not add or retain tests whose
+  only purpose is to assert that a retired identifier, file, or implementation
+  is absent. Keep rejection tests for current invalid-input contracts and
+  regression tests for behavior that still exists. Consolidate duplicate
+  coverage and parameterize equivalent scenarios with descriptive case IDs,
+  preserving distinct inputs, failure modes, and assertions.
 - External private-member access is lint-enforced off via Ruff `SLF001` (in
   `[tool.ruff.lint] select`). The existing `per-file-ignores` in
   `pyproject.toml` are grandfathered exceptions for production seams against

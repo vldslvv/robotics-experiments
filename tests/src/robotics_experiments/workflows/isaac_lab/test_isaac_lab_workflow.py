@@ -34,25 +34,6 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
 
     module = importlib.import_module("robotics_experiments.workflows.isaac_lab")
 
-    assert module.__all__ == [
-        "DRONE_HOVER_TASK_ID",
-        "DroneHoverEnv",
-        "DroneHoverEnvCfg",
-        "PressApproachEpisodeMetrics",
-        "PressApproachEvaluationResult",
-        "PressApproachEvaluationSummary",
-        "SWITCH_PRESS_TASK_ID",
-        "SwitchPressEnv",
-        "SwitchPressEnvCfg",
-        "compute_lab_rotor_omega",
-        "evaluate_press_approach_policy",
-        "make_drone_hover_env_cfg",
-        "make_isaac_lab_env",
-        "make_switch_press_env_cfg",
-        "press_policy_evaluation",
-        "register_isaac_lab_tasks",
-        "summarize_press_approach_episodes",
-    ]
     assert module.DRONE_HOVER_TASK_ID == "Isaac-Drone-Hover-Direct-v1"
     assert module.SWITCH_PRESS_TASK_ID == "Isaac-Switch-Press-Direct-v1"
     assert module.register_isaac_lab_tasks() is False

@@ -298,34 +298,32 @@ def test_build_vehicle_routine_rejects_unknown_kind():
         _build([{"kind": "orbit"}])
 
 
-def test_build_vehicle_routine_rejects_takeoff_without_climb():
-    with pytest.raises(ValueError, match="climb_m"):
-        _build([{"kind": "takeoff"}])
-
-
-def test_build_vehicle_routine_rejects_takeoff_without_min_climb():
-    with pytest.raises(ValueError, match="min_climb_m"):
-        _build([{"kind": "takeoff", "climb_m": 1.5}])
-
-
-def test_build_vehicle_routine_rejects_hover_without_hold():
-    with pytest.raises(ValueError, match="hold_s"):
-        _build([{"kind": "hover"}])
-
-
-def test_build_vehicle_routine_rejects_forward_without_distance():
-    with pytest.raises(ValueError, match="distance_m"):
-        _build([{"kind": "forward", "timeout_s": 20.0}])
-
-
-def test_build_vehicle_routine_rejects_forward_without_timeout():
-    with pytest.raises(ValueError, match="timeout_s"):
-        _build([{"kind": "forward", "distance_m": 1.0}])
-
-
-def test_build_vehicle_routine_rejects_land_without_timeout():
-    with pytest.raises(ValueError, match="timeout_s"):
-        _build([{"kind": "land"}])
+@pytest.mark.parametrize(
+    ("descriptor", "missing"),
+    [
+        ({"kind": "takeoff"}, "climb_m"),
+        ({"kind": "takeoff", "climb_m": 1.5}, "min_climb_m"),
+        ({"kind": "hover"}, "hold_s"),
+        ({"kind": "forward", "timeout_s": 20.0}, "distance_m"),
+        ({"kind": "forward", "distance_m": 1.0}, "timeout_s"),
+        ({"kind": "land"}, "timeout_s"),
+        ({"kind": "goto", "y": 0.0, "z": 1.0, "timeout_s": 10.0}, "'x'"),
+        ({"kind": "goto", "x": 1.0, "y": 0.0, "z": 1.0}, "timeout_s"),
+    ],
+    ids=[
+        "takeoff-climb",
+        "takeoff-min-climb",
+        "hover-hold",
+        "forward-distance",
+        "forward-timeout",
+        "land-timeout",
+        "goto-coordinate",
+        "goto-timeout",
+    ],
+)
+def test_build_vehicle_routine_rejects_missing_fields(*, descriptor, missing):
+    with pytest.raises(ValueError, match=missing):
+        _build([descriptor])
 
 
 # ---- goto (OFFBOARD navigation) --------------------------------------------
@@ -891,16 +889,6 @@ def test_decide_speed_authored_goto_preserves_hard_rejection_and_timeout():
     assert timed_out.kind is DecisionKind.FAIL
     assert timed_out.failure_kind is FailureKind.COMMAND
     assert "timed out" in timed_out.reason
-
-
-def test_build_vehicle_routine_rejects_goto_without_coordinate():
-    with pytest.raises(ValueError, match="'x'"):
-        _build([{"kind": "goto", "y": 0.0, "z": 1.0, "timeout_s": 10.0}])
-
-
-def test_build_vehicle_routine_rejects_goto_without_timeout():
-    with pytest.raises(ValueError, match="timeout_s"):
-        _build([{"kind": "goto", "x": 1.0, "y": 0.0, "z": 1.0}])
 
 
 def test_build_vehicle_routine_takeoff_yaw_param_is_nan():

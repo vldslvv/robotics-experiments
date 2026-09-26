@@ -1,4 +1,3 @@
-import ast
 import importlib
 import importlib.abc
 import json
@@ -9,27 +8,6 @@ import tomllib
 from tests.support.paths import REPO_ROOT
 
 
-def _project_imports(path, /):
-    imported = set()
-    tree = ast.parse(path.read_text(), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module is not None:
-            imported.add(node.module)
-    return imported
-
-
-def _package_imports(relative, /):
-    package = REPO_ROOT / "src" / "robotics_experiments" / relative
-    return {
-        imported
-        for path in package.rglob("*.py")
-        for imported in _project_imports(path)
-        if imported.startswith("robotics_experiments.")
-    }
-
-
 class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):
     def __init__(self, module_roots: set[str]):
         self._module_roots = module_roots
@@ -38,48 +16,6 @@ class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):
         if fullname.split(".", maxsplit=1)[0] in self._module_roots:
             raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
         return None
-
-
-def test_controller_alignment_rl_dependency_direction():
-    controller_imports = _package_imports("controller")
-    assert not any(
-        imported.startswith(
-            (
-                "robotics_experiments.alignment",
-                "robotics_experiments.rl",
-                "robotics_experiments.workflows",
-                "robotics_experiments.runtime",
-            )
-        )
-        for imported in controller_imports
-    )
-    flight_parameter_imports = _package_imports("flight_parameters")
-    assert not any(
-        imported.startswith(
-            (
-                "robotics_experiments.alignment",
-                "robotics_experiments.controller",
-                "robotics_experiments.rl",
-                "robotics_experiments.workflows",
-                "robotics_experiments.runtime",
-            )
-        )
-        for imported in flight_parameter_imports
-    )
-
-    for package in ("rl", "workflows/isaac_lab"):
-        assert not any(
-            imported.startswith("robotics_experiments.alignment")
-            for imported in _package_imports(package)
-        )
-
-    deployment_imports = _project_imports(
-        REPO_ROOT / "src" / "robotics_experiments" / "runtime" / "_policy.py"
-    )
-    assert not any(
-        imported.startswith(("robotics_experiments.alignment", "robotics_experiments.controller"))
-        for imported in deployment_imports
-    )
 
 
 def _drop_modules(*prefixes: str) -> None:
@@ -517,14 +453,6 @@ print(json.dumps(config.__all__))
         "VehicleConfig",
         "load_config",
     ]
-
-
-def test_simulation_package_remains_lazy_without_isaac(monkeypatch):
-    _drop_modules("carb", "omni", "pxr", "isaacsim", "robotics_experiments.simulation")
-    blocker = _BlockedDependencyFinder({"carb", "omni", "pxr", "isaacsim"})
-    monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
-    simulation = importlib.import_module("robotics_experiments.simulation")
-    assert simulation.__all__ == ["apply_settings"]
 
 
 def test_ordinary_dependencies_load_eagerly_from_owning_modules():

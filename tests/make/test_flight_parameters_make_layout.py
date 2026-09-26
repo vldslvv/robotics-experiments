@@ -66,8 +66,6 @@ def test_alignment_prepares_the_existing_reference_from_flight_parameters() -> N
     assert "alignment-prepare-reference:" in makefile
     assert "prepare_alignment_reference.py" in makefile
     assert "mkdir -p '$(ALIGNMENT_RUN_DIR)'" not in makefile
-    assert "alignment_capture_reference.py" not in makefile
-    assert "alignment-capture-reference:" not in makefile
 
 
 def test_alignment_input_failure_is_clean_and_creates_no_run(tmp_path: Path) -> None:

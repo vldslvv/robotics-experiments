@@ -1,13 +1,14 @@
 """Curriculum and experiment roots have separate strict schemas."""
 
 import json
+import shutil
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 from hydra.errors import ConfigCompositionException
 
-from robotics_experiments.config import load_config, load_curriculum_config
+from robotics_experiments.config import ExperimentConfig, load_config, load_curriculum_config
 from tests.support.paths import REPO_ROOT
 
 
@@ -72,27 +73,20 @@ def test_shipped_curricula_reference_complete_stage_experiments():
         curriculum = load_curriculum_config(path)
         for stage in curriculum.stages:
             experiment = load_config(REPO_ROOT / stage.config_path)
-            assert not hasattr(experiment.rl.training, "policy_name")
-            assert not hasattr(experiment.rl.training, "pipeline")
-            assert not hasattr(experiment.rl.inputs, "initial_checkpoint")
+            assert isinstance(experiment, ExperimentConfig)
 
 
-@pytest.mark.parametrize(
-    "obsolete",
-    [
-        {"training": {"policy_name": "nested"}},
-        {"training": {"pipeline": []}},
-        {"inputs": {"initial_checkpoint": None}},
-    ],
-)
-def test_stage_rejects_obsolete_or_competing_orchestration_fields(tmp_path, obsolete):
-    import shutil
-
+def test_stage_rejects_unknown_fields(tmp_path):
     shutil.copytree(REPO_ROOT / "configs", tmp_path / "configs")
     path = tmp_path / "configs/train/stage/invalid.yaml"
     path.write_text(
         "# @package _global_\n"
-        + json.dumps({"defaults": ["/train/stage/press_hover_quad", "_self_"], "rl": obsolete})
+        + json.dumps(
+            {
+                "defaults": ["/train/stage/press_hover_quad", "_self_"],
+                "rl": {"training": {"unknown_field": True}},
+            }
+        )
     )
-    with pytest.raises(ConfigCompositionException):
+    with pytest.raises(ConfigCompositionException, match="unknown_field"):
         load_config(path)

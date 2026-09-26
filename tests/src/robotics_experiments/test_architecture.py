@@ -91,6 +91,9 @@ def test_internal_package_imports_follow_dependency_direction() -> None:
         if path.parent == _PACKAGE_ROOT:
             continue
         source = path.relative_to(_PACKAGE_ROOT).parts[0]
+        allowed = _ALLOWED_DEPENDENCIES[source]
+        if path.is_relative_to(_PACKAGE_ROOT / "workflows" / "isaac_lab"):
+            allowed = allowed - {"alignment"}
         for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 continue
@@ -99,7 +102,7 @@ def test_internal_package_imports_follow_dependency_direction() -> None:
                     continue
                 if target in _ROOT_PRIVATE_MODULES:
                     continue
-                if target not in _ALLOWED_DEPENDENCIES[source]:
+                if target not in allowed:
                     relative_path = path.relative_to(REPO_ROOT)
                     violations.append(f"{relative_path}:{node.lineno}: {source} -> {target}")
 

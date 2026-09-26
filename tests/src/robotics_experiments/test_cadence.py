@@ -50,20 +50,6 @@ def test_cadence_rejects_time_regression() -> None:
         _advance_cadence(state=state, time_ns=99, rate_hz=50.0)
 
 
-def test_next_policy_decimation_alternates_thirteen_and_twelve() -> None:
-    state = _CadenceState(previous_time_ns=0)
-    intervals = []
-    for _ in range(6):
-        state, steps = _next_interval_steps(
-            state=state,
-            source_period_ns=4_000_000,
-            rate_hz=20.0,
-        )
-        intervals.append(steps)
-    assert intervals == [13, 12, 13, 12, 13, 12]
-    assert state.previous_time_ns == 300_000_000
-
-
 def test_variable_decimation_produces_twenty_policy_steps_per_second() -> None:
     state = _CadenceState(previous_time_ns=0)
     intervals = []
@@ -74,6 +60,8 @@ def test_variable_decimation_produces_twenty_policy_steps_per_second() -> None:
             rate_hz=20.0,
         )
         intervals.append(steps)
+        if len(intervals) == 6:
+            assert state.previous_time_ns == 300_000_000
 
     assert intervals == [13, 12] * 10
     assert sum(intervals) == 250

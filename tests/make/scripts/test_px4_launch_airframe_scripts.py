@@ -88,12 +88,9 @@ def test_flight_benchmark_propagates_logging_profile():
 
 def test_common_launcher_defaults_to_repo_generated_quad():
     common = _read("px4/docker/px4_sitl_common.sh")
-    assert 'export PX4_SIM_MODEL="none_iris"' not in common
     # Default to the X500 V2 slot in PX4's custom model range.
     assert 'export PX4_SIM_MODEL="${PX4_SIM_MODEL:-none_x500_v2}"' in common
     assert 'export PX4_SYS_AUTOSTART="${PX4_SYS_AUTOSTART:-22000}"' in common
-    assert "none_quad_x" not in common
-    assert ":-4001}" not in common
 
 
 def test_px4_docker_build_generates_airframes_from_configs():
@@ -103,8 +100,6 @@ def test_px4_docker_build_generates_airframes_from_configs():
     assert "generate_px4_airframes.py" in dockerfile
     assert "--cmake-list" in dockerfile
     assert "--manifest ${PX4_AIRFRAME_MANIFEST}" in dockerfile
-    assert "COPY px4/docker/airframes/22001_none_hexa_x" not in dockerfile
-    assert "22001_none_hexa_x/' CMakeLists.txt" not in dockerfile
 
 
 def test_px4_build_defaults_pin_release_commit():

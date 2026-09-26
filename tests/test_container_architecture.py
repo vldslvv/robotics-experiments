@@ -11,12 +11,9 @@ def _read(relative_path: str) -> str:
 
 def test_runtime_images_inherit_development_tools() -> None:
     dockerfile = _read("Dockerfile")
-    images = _read("make/images.mk")
 
     assert "FROM development-tools AS isaac-sim" in dockerfile
     assert "FROM development-tools AS ros-base" in dockerfile
-    assert "isaac-sim-dev" not in dockerfile + images
-    assert "ros-dev" not in dockerfile + images
     assert "| bash" not in dockerfile
 
 

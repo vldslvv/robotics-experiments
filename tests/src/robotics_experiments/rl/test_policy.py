@@ -14,7 +14,7 @@ import pytest
 import robotics_experiments.rl.hover as hover_module
 from robotics_experiments.commanding import PolicyInput
 from robotics_experiments.config import load_config
-from robotics_experiments.controller import ControllerArtifact, ControllerSettings
+from robotics_experiments.controller import ControllerArtifact
 from robotics_experiments.flight_parameters import (
     FlightParameters,
     load_flight_parameters,
@@ -48,6 +48,7 @@ from robotics_experiments.runtime._policy import (
 )
 from robotics_experiments.workflows._policy_preflight import _preflight_policy_artifacts
 from tests.support.commanding_fakes import make_routine_observation
+from tests.support.controller_fakes import _controller_settings
 from tests.support.paths import REPO_ROOT
 
 _HOVER_DEPLOY_CONFIG = load_config(
@@ -66,54 +67,6 @@ def _action_cfg(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
-
-
-def _controller_settings() -> ControllerSettings:
-    return ControllerSettings(
-        command_delay_s=0.2,
-        velocity_controller_rate_hz=125.0,
-        attitude_controller_rate_hz=187.5,
-        kp_vel=(2.0, 2.0, 3.0),
-        horizontal_velocity_error_gain_scale=1.0,
-        horizontal_velocity_error_gain_start_mps=0.15,
-        horizontal_velocity_error_gain_full_mps=0.30,
-        horizontal_velocity_error_gain_end_mps=0.80,
-        horizontal_velocity_braking_gain_scale=1.0,
-        horizontal_velocity_braking_gain_start_mps=0.05,
-        horizontal_velocity_braking_gain_full_mps=0.07,
-        horizontal_velocity_braking_gain_end_mps=0.10,
-        ki_vel=(0.4, 0.4, 2.0),
-        kd_vel=(1.5, 1.5, 1.5),
-        velocity_observation_scale=(1.0, 1.0, 1.0),
-        velocity_observation_hold_scale=(1.0, 1.0, 1.0),
-        velocity_observation_bias_mps=(0.0, 0.0, 0.0),
-        velocity_observation_bias_command_start_mps=0.0,
-        velocity_observation_bias_command_full_mps=0.01,
-        velocity_estimator_bias_decay_hz=0.0,
-        velocity_estimator_bias_hold_decay_hz=(0.0, 0.0, 0.0),
-        velocity_filter_hz=(10.0, 10.0, 10.0),
-        velocity_derivative_filter_hz=5.0,
-        velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
-        hover_thrust_normalized=0.57,
-        ctbr_effective_collective_scale=1.0,
-        kp_att=(6.0, 6.0, 2.0),
-        attitude_yaw_weight=0.4,
-        kp_rate=(1.2, 1.2, 0.4),
-        ki_rate=(0.2, 0.2, 0.1),
-        kd_rate=(0.003, 0.003, 0.0),
-        kff_rate=(0.0, 0.0, 0.0),
-        angular_velocity_filter_hz=0.0,
-        rate_derivative_filter_hz=30.0,
-        yaw_torque_filter_hz=2.0,
-        rate_integral_limit=(0.3, 0.3, 0.2),
-        max_tilt_cmd_deg=30.0,
-        min_collective_thrust_fraction=0.05,
-        max_collective_thrust_fraction=1.0,
-        horizontal_thrust_margin_fraction=0.3,
-        thruster_tau_inc_s=0.0,
-        thruster_tau_dec_s=0.0,
-        thruster_max_thrust_rate_nps=100000.0,
-    )
 
 
 def _flight_parameters() -> FlightParameters:
@@ -257,20 +210,22 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
         load_policy_metadata(artifact_dir=tmp_path)
 
 
-def test_policy_rejects_flight_parameters_not_qualified_by_controller(tmp_path: Path) -> None:
-    metadata = _metadata()
-    metadata["controller"]["artifact"]["flight_parameters_fingerprint"] = "other-flight-parameters"
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
-
-    with pytest.raises(ValueError, match="does not match its controller"):
-        load_policy_metadata(artifact_dir=tmp_path)
-
-
-def test_policy_rejects_flight_parameters_run_not_qualified_by_controller(
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("flight_parameters_fingerprint", "other-flight-parameters"),
+        ("flight_parameters_run_id", "another-run"),
+    ],
+    ids=["fingerprint", "run-id"],
+)
+def test_policy_rejects_flight_parameters_not_qualified_by_controller(
+    *,
     tmp_path: Path,
+    field: str,
+    value: str,
 ) -> None:
     metadata = _metadata()
-    metadata["controller"]["artifact"]["flight_parameters_run_id"] = "another-run"
+    metadata["controller"]["artifact"][field] = value
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
 
     with pytest.raises(ValueError, match="does not match its controller"):
@@ -326,29 +281,24 @@ def test_load_policy_carries_metadata_contract_and_accepts_batches(tmp_path: Pat
         loaded.inference(np.zeros((2, 17)))
 
 
-def test_metadata_rejects_every_legacy_artifact(tmp_path: Path) -> None:
-    hover = _metadata()
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(hover))
-    assert (
-        load_policy_metadata(artifact_dir=tmp_path).contract.policy_interface
-        is PolicyInterface.HOVER
-    )
+@pytest.mark.parametrize(
+    ("interface", "missing"),
+    [
+        (PolicyInterface.HOVER, "controller"),
+        (PolicyInterface.PRESS, "controller"),
+        (PolicyInterface.HOVER, "flight_parameters"),
+    ],
+    ids=["hover-controller", "press-controller", "hover-flight-parameters"],
+)
+def test_metadata_requires_provenance(*, tmp_path: Path, interface: PolicyInterface, missing: str):
+    metadata = _metadata(interface=interface)
+    path = tmp_path / METADATA_FILENAME
+    path.write_text(json.dumps(metadata))
+    assert load_policy_metadata(artifact_dir=tmp_path).contract.policy_interface is interface
 
-    legacy_hover = {key: value for key, value in hover.items() if key != "controller"}
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_hover))
-    with pytest.raises(ValueError, match="controller"):
-        load_policy_metadata(artifact_dir=tmp_path)
-
-    legacy_press = _metadata(interface=PolicyInterface.PRESS)
-    legacy_press.pop("controller")
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_press))
-    with pytest.raises(ValueError, match="controller"):
-        load_policy_metadata(artifact_dir=tmp_path)
-
-    legacy_envelope = _metadata()
-    legacy_envelope.pop("flight_parameters")
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_envelope))
-    with pytest.raises(ValueError, match="flight_parameters"):
+    del metadata[missing]
+    path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match=missing):
         load_policy_metadata(artifact_dir=tmp_path)
 
 
