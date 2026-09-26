@@ -147,6 +147,9 @@ and backlogs describe future work, not current implementation requirements.
 - Run `uv run pre-commit run --all-files` after implementation. Fix every reported
   issue, including pre-existing failures. Verify analyzer findings before
   deleting code; if correct code needs suppression, make it narrow and deliberate.
+- Always run pre-commit with network access. Hooks fetch dependencies and remote
+  schemas, including `json.schemastore.org`. In a network-restricted sandbox,
+  use network-enabled execution permissions from the first attempt.
 - Do not add lint/type ignores to `pyproject.toml`. Use the narrowest inline
   suppression with a brief reason when necessary. Do not make clear valid code
   indirect or verbose just to appease a checker that cannot express it.
