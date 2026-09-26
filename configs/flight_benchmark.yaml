@@ -1,5 +1,5 @@
 defaults:
-  - circle_land_quad_quad
+  - /routines/fleet_circle_land_quad_quad
   - _self_
 
 # Cold full-GUI startup can spend longer than the production demo's bridge

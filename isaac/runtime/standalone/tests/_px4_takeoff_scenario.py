@@ -393,7 +393,7 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
     if not active_routines:
         raise ValueError(
             f"{options.test_name}: no vehicle has a non-empty routine.steps; run this scenario "
-            "under a takeoff experiment (e.g. configs/takeoff_quad.yaml)"
+            "under a takeoff experiment (e.g. configs/routines/basic_takeoff_quad.yaml)"
         )
     ground_settle_s = max(routine.ground_settle_s for routine in active_routines)
 

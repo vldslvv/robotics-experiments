@@ -2,16 +2,16 @@ defaults:
   - base_routine
 
 # High-level flight routine flown in every workflow. `steps` is the single source
-# of truth and the on/off switch: an empty list (the default) means purely manual
-# operation -- no control driver is built and you fly each drone from its PX4
-# console. A non-empty `steps` (see the `takeoff` routine variant) makes the live
+# of truth: an empty list (the default) completes the driver lifecycle without
+# sending flight commands, leaving manual flight available from the PX4 console.
+# A non-empty `steps` (see the `takeoff` routine variant) makes the live
 # extension (`make run-all`), a regular standalone run, and a strict standalone
 # run all arm/take-off/verify the fleet over each drone's derived gcs_port; only
-# the reaction to a flight-envelope breach differs (strict raises, forgiving logs
-# and stops).
+# the reaction to a flight-envelope breach differs. Both perform landing
+# recovery; strict runs then raise, while the live runtime retains the failure.
 steps: []
 
-# Control-link and command-flow tunables (used only when steps is non-empty).
+# Control-link lifecycle and command-flow settings.
 gcs_heartbeat_period_s: 0.5
 command_ack_timeout_s: 10.0
 # Wall-clock bound for the driver's explicit Land attempt and the independent

@@ -1,0 +1,13 @@
+# @package _global_
+defaults:
+  - /routines/policy_transfer_press_approach_quad
+  - _self_
+
+rl:
+  episode_length_s: 40.0
+  press:
+    task: hover
+    reset:
+      mix:
+        - source: pinned_flight_parameters
+          weight: 1.0

@@ -1,7 +1,6 @@
+# @package _global_
 defaults:
-  - base
-  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
-  - experiment/vehicle@vehicles.x500_02: holybro_x500_v2
+  - /routines/fleet_takeoff_quad_quad
   - _self_
 
 # Runtime demonstration experiment: two PX4-backed drones take off, fly one
@@ -14,15 +13,13 @@ defaults:
 # point and drone 1 starts from the north point. Each loop climbs over the first
 # half-circle and descends over the second half-circle.
 #
-# Run with: make run-all HYDRA_CONFIG=configs/circle_land_quad_quad.yaml
+# Run with: make run-all HYDRA_CONFIG=configs/routines/fleet_circle_land_quad_quad.yaml
 
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 vehicles:
   x500_01:
-    id: 0
-    ros: {namespace: /x500_01}
-    spawn: {position_xy: [0.0, -2.0], prim_name: Drone0}
+    spawn: {position_xy: [0.0, -2.0]}
     routine:
       steps:
         - kind: arm
@@ -96,9 +93,7 @@ vehicles:
         - kind: land
           timeout_s: 30.0
   x500_02:
-    id: 1
-    ros: {namespace: /x500_02}
-    spawn: {position_xy: [0.0, 2.0], prim_name: Drone1}
+    spawn: {position_xy: [0.0, 2.0]}
     routine:
       steps:
         - kind: arm

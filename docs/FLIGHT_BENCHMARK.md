@@ -4,7 +4,7 @@
 runs the production GUI application, warehouse scene, live `experiment_runtime`
 extension, PX4 lockstep bridge, and the two-drone routine from
 `configs/flight_benchmark.yaml`. That config inherits
-`configs/circle_land_quad_quad.yaml` and only extends the cold-start bridge
+`configs/routines/fleet_circle_land_quad_quad.yaml` and only extends the cold-start bridge
 deadline; measurement starts after connection, so the captured workload is
 unchanged. The benchmark does not add or change a performance gate. A threshold
 may be proposed only after both version reports have been reviewed.
@@ -41,7 +41,7 @@ resolved experiment-config digest, PX4 revision, measurement level, and
 methodology match. Isaac image/version and source commit are expected to differ.
 
 The reproducible one-drone diagnostic uses the same measured workload as
-`configs/takeoff_quad.yaml`, with only the cold-start bridge deadline extended:
+`configs/routines/basic_takeoff_quad.yaml`, with only the cold-start bridge deadline extended:
 
 ```sh
 make benchmark-flight HYDRA_CONFIG=configs/flight_benchmark_takeoff_quad.yaml

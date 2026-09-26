@@ -1,7 +1,7 @@
+# @package _global_
 defaults:
-  - base
-  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
-  - override experiment/routine@vehicles.x500_01.routine: policy_press_approach
+  - /routines/basic_takeoff_quad
+  - override /experiment/routine@vehicles.x500_01.routine: policy_press_approach
   - override /experiment/switches/model@switches.model: easy
   - _self_
 
@@ -17,11 +17,8 @@ switches:
 
 vehicles:
   x500_01:
-    id: 0
-    ros: {namespace: /x500_01}
     spawn:
       position_xy: [0.0, 14.0]
-      yaw_rad: 0.0
 
 rl:
   episode_length_s: 45.0

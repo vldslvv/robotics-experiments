@@ -50,7 +50,9 @@ from robotics_experiments.workflows._policy_preflight import _preflight_policy_a
 from tests.support.commanding_fakes import make_routine_observation
 from tests.support.paths import REPO_ROOT
 
-_HOVER_DEPLOY_CONFIG = load_config(REPO_ROOT / "configs/policy_transfer_press_hover_quad.yaml")
+_HOVER_DEPLOY_CONFIG = load_config(
+    REPO_ROOT / "configs/routines/policy_transfer_press_hover_quad.yaml"
+)
 
 
 def _action_cfg(**overrides):
@@ -450,7 +452,7 @@ def test_policy_preflight_allows_independent_press_cadences(tmp_path: Path) -> N
 def test_press_deployment_config_has_no_action_scale_override() -> None:
     from robotics_experiments.config import load_config
 
-    config_path = REPO_ROOT / "configs/policy_press_approach_quad.yaml"
+    config_path = REPO_ROOT / "configs/routines/policy_press_approach_quad.yaml"
     config_text = config_path.read_text()
     config = load_config(config_path)
     policy_steps = [
@@ -527,7 +529,7 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
     )
     adapter = _press_approach_adapter(
         repo_root=REPO_ROOT,
-        config=load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml"),
+        config=load_config(REPO_ROOT / "configs/routines/policy_press_approach_quad.yaml"),
         loaded=loaded,
     )
     observation = make_routine_observation(sim_time_us=10)
@@ -581,7 +583,7 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
     )
     adapter = _press_approach_adapter(
         repo_root=REPO_ROOT,
-        config=load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml"),
+        config=load_config(REPO_ROOT / "configs/routines/policy_press_approach_quad.yaml"),
         loaded=loaded,
     )
     routine_observation = make_routine_observation(sim_time_us=123_000)

@@ -88,7 +88,7 @@ PX4_INTEGRATION_COMMON_ENV = \
     ROBOTICS_EXPERIMENT_CONFIG_PATH='$(HYDRA_CONFIG_HOST_PATH)'
 
 .PHONY: test-integration-px4-takeoff
-test-integration-px4-takeoff: HYDRA_CONFIG = configs/takeoff_quad.yaml
+test-integration-px4-takeoff: HYDRA_CONFIG = configs/routines/basic_takeoff_quad.yaml
 test-integration-px4-takeoff: generate-assets
 	@TEST_TARGET='test-integration-px4-takeoff' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_takeoff_stability.log' \
@@ -107,7 +107,7 @@ test-integration-px4-takeoff: generate-assets
 # path; passes only when BOTH drones hold their envelope and protect OFFBOARD
 # setpoint continuity across the goto -> hover transition.
 .PHONY: test-integration-px4-navigation
-test-integration-px4-navigation: HYDRA_CONFIG = configs/navigate_quad_hex.yaml
+test-integration-px4-navigation: HYDRA_CONFIG = configs/routines/fleet_navigate_quad_hex.yaml
 test-integration-px4-navigation: SCENE = @config
 test-integration-px4-navigation: generate-assets
 	@TEST_TARGET='test-integration-px4-navigation' \
@@ -121,7 +121,7 @@ test-integration-px4-navigation: generate-assets
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
 .PHONY: test-integration-px4-takeoff-instability
-test-integration-px4-takeoff-instability: HYDRA_CONFIG = configs/takeoff_quad.yaml
+test-integration-px4-takeoff-instability: HYDRA_CONFIG = configs/routines/basic_takeoff_quad.yaml
 test-integration-px4-takeoff-instability: generate-assets
 	@TEST_TARGET='test-integration-px4-takeoff-instability' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_takeoff_instability_detection.log' \
@@ -134,11 +134,11 @@ test-integration-px4-takeoff-instability: generate-assets
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
 # Multi-drone takeoff. Starts one PX4 SITL instance per PX4-enabled vehicle in
-# the takeoff_quad_quad experiment, uses its scene config via
+# the fleet_takeoff_quad_quad experiment, uses its scene config via
 # the @config sentinel, and requires every drone to hold its takeoff/hover
 # envelope.
 .PHONY: test-integration-px4-multi-drone-takeoff
-test-integration-px4-multi-drone-takeoff: HYDRA_CONFIG = configs/takeoff_quad_quad.yaml
+test-integration-px4-multi-drone-takeoff: HYDRA_CONFIG = configs/routines/fleet_takeoff_quad_quad.yaml
 test-integration-px4-multi-drone-takeoff: SCENE = @config
 test-integration-px4-multi-drone-takeoff: generate-assets
 	@TEST_TARGET='test-integration-px4-multi-drone-takeoff' \

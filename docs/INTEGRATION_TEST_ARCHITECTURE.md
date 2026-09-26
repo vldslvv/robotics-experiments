@@ -53,6 +53,7 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
 - `make test-integration-all` runs every target in `INTEGRATION_TEST_TARGETS`:
   `test-integration-isaac`, `test-integration-drone-articulation`,
   `test-integration-press-hover-goto`, `test-integration-press-contact-chain`,
+  `test-integration-switch-mechanics`,
   `test-integration-px4-takeoff`,
   `test-integration-px4-navigation`, `test-integration-px4-takeoff-instability`,
   and `test-integration-px4-multi-drone-takeoff`. It prints an aggregate
@@ -74,7 +75,7 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   geometry; and verifies the complete visible mount/boom/plunger/pad tool plus
   full initial pusher deployment. It then drives a slow press, requires real
   forward-pad contact and pusher/button displacement, advances the production
-  N-step latch, verifies exactly one lamp transition, and retreats within the
+  simulation-time latch, verifies exactly one lamp transition, and retreats within the
   stability envelope for the complete deployment hold. Its time budget combines
   the shared `rl.episode_length_s` duration with that configured
   hold; a test-local no-dones environment keeps these physical measurements
@@ -88,25 +89,18 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   receives the fitting-flight reset samples and explicit evaluation mode,
   matching the production constructor contract. It is part of
   `test-integration-all` and requires no PX4 container or trained policy.
-- `make test-integration-press-policy` runs the F2b trained-policy gate on the
-  Isaac Lab image. It needs the automatically published artifact from
-  `make train-rl`, so it is deliberately not part of
-  `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy artifact
-  contract and routine config. Policy metadata includes the active policy
-  rate and controller provenance; any artifact outside the strict v1 contract
-  must be retrained.
 - `make test-integration-press-approach-routine` runs the Stage 1 deployment
-  flight from `configs/policy_press_approach_quad.yaml`: takeoff, settle at a
-  safe staging point about 0.59 m from the switch at a requested 0.5 m/s, make
-  the short move to the unchanged 0.47 m handoff waypoint at 0.08 m/s, settle
+  flight from `configs/routines/policy_press_approach_quad.yaml`: takeoff, settle at a
+  safe staging waypoint 0.75 m from the switch at a requested 0.5 m/s, make
+  the short move to the 0.60 m handoff waypoint at 0.08 m/s, settle
   for two seconds, and enter the artifact-selected approach policy. It passes
   only after the unchanged handoff predicate latches, real artifact inference
   returns a valid action, and the resulting first policy setpoint is actually
   transmitted. It then ends the isolated invocation smoke test without judging
   later actor behavior, return navigation, landing, contact rate, or task
-  success. Like the hover artifact gate, it is excluded from
+  success. It is excluded from
   `test-integration-all` because it needs an independently accepted artifact
-  declaring `policy_interface: press-approach` and `curriculum_stage: approach`.
+  declaring `policy_interface: press` and `curriculum_stage: approach`.
   Accepted training advances `latest` after the immutable selected actor passes
   the disjoint final test. An operator-selected diagnostic `latest` may be flown
   by this target, but that execution is diagnostic and does not become policy
@@ -147,7 +141,7 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
 
   ```bash
   make test-integration-press-policy-transfer \
-    HYDRA_CONFIG=configs/policy_transfer_press_hover_quad.yaml
+    HYDRA_CONFIG=configs/routines/policy_transfer_press_hover_quad.yaml
   ```
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
@@ -156,13 +150,13 @@ relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
   test-local PX4 rotor mapping fault and passes only when the stability envelope
   detects the resulting instability.
 - `make test-integration-px4-multi-drone-takeoff` runs the multi-drone takeoff
-  scenario from `configs/takeoff_quad_quad.yaml` (the target sets
+  scenario from `configs/routines/fleet_takeoff_quad_quad.yaml` (the target sets
   `HYDRA_CONFIG` itself). It starts one PX4 SITL container per PX4-enabled
   vehicle, shares one network namespace, and passes only when every drone holds
   its takeoff/hover envelope. See "Multi-instance PX4" below.
 - `make test-integration-px4-navigation` runs the absolute-waypoint `goto`
   navigation routine as **one multi-drone scene**
-  (`configs/navigate_quad_hex.yaml`, scene via `@config`): a quad (id 0, x500)
+  (`configs/routines/fleet_navigate_quad_hex.yaml`, scene via `@config`): a quad (id 0, x500)
   and a hexacopter (id 1, `hexacopter_s550.usda`) fly the same routine
   **concurrently** in parallel lanes (the hex `goto` waypoints offset +4 in x by
   its spawn, so the absolute world-ENU waypoints never converge), each on its

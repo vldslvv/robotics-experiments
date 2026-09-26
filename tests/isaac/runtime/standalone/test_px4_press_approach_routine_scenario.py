@@ -128,7 +128,7 @@ def test_measurement_recovers_physical_contact_pose(monkeypatch, yaw):
     from robotics_experiments.rl import pack_pose_observation
 
     module = _load_scenario(monkeypatch)
-    config = load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml")
+    config = load_config(REPO_ROOT / "configs/routines/policy_press_approach_quad.yaml")
     target_range = config.rl.press.goal.velocity_reference.range_center_m
     goal = Rotation.from_euler("z", yaw, degrees=True)
     relative = Rotation.from_euler("xyz", [0.01, -0.02, 0.03])

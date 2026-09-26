@@ -89,7 +89,7 @@ test-integration-switch-mechanics: generate-assets
 
 .PHONY: test-integration-press-contact-chain
 test-integration-press-contact-chain: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-contact-chain: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
+test-integration-press-contact-chain: HYDRA_CONFIG = configs/routines/policy_press_approach_quad.yaml
 test-integration-press-contact-chain: ISAAC_TEST_EXTRA_ARGS = --contact-chain --num-envs 1
 test-integration-press-contact-chain: generate-assets
 	@TEST_TARGET='test-integration-press-contact-chain' \
@@ -98,23 +98,9 @@ test-integration-press-contact-chain: generate-assets
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"
 
-.PHONY: test-integration-press-policy
-test-integration-press-policy: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-policy: HYDRA_CONFIG = configs/policy_hover_quad.yaml
-test-integration-press-policy: generate-assets
-	@TEST_TARGET='test-integration-press-policy' \
-	    HOST_ISAAC_LOG_BASENAME='test_press_policy_hover.log' \
-	    HOST_PX4_LOG_BASENAME='test_press_policy_hover_px4.log' \
-	    ISAAC_TEST_LOG='$(ISAAC_PRESS_POLICY_TEST_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_TAKEOFF_TEST)' \
-	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-policy' \
-	    STRICT='1' \
-	    $(PX4_INTEGRATION_COMMON_ENV) \
-	    bash "$(PX4_INTEGRATION_RUNNER)"
-
 .PHONY: test-integration-press-approach-routine
 test-integration-press-approach-routine: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-approach-routine: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
+test-integration-press-approach-routine: HYDRA_CONFIG = configs/routines/policy_press_approach_quad.yaml
 test-integration-press-approach-routine: SCENE = @config
 test-integration-press-approach-routine: generate-assets
 	@TEST_TARGET='test-integration-press-approach-routine' \
@@ -129,7 +115,7 @@ test-integration-press-approach-routine: generate-assets
 
 .PHONY: test-integration-press-navigation-handoff-sample
 test-integration-press-navigation-handoff-sample: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-navigation-handoff-sample: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
+test-integration-press-navigation-handoff-sample: HYDRA_CONFIG = configs/routines/policy_press_approach_quad.yaml
 test-integration-press-navigation-handoff-sample: SCENE = @config
 test-integration-press-navigation-handoff-sample:
 	@TEST_TARGET='test-integration-press-navigation-handoff-sample' \
@@ -156,7 +142,7 @@ measure-press-navigation-handoff:
 # and never fits or publishes controller settings.
 .PHONY: test-integration-press-policy-transfer
 test-integration-press-policy-transfer: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-policy-transfer: HYDRA_CONFIG = configs/policy_transfer_press_approach_quad.yaml
+test-integration-press-policy-transfer: HYDRA_CONFIG = configs/routines/policy_transfer_press_approach_quad.yaml
 test-integration-press-policy-transfer: SCENE = @config
 test-integration-press-policy-transfer: generate-assets
 	@TEST_TARGET='test-integration-press-policy-transfer' \

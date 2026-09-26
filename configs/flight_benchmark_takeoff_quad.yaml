@@ -1,5 +1,5 @@
 defaults:
-  - takeoff_quad
+  - /routines/basic_takeoff_quad
   - _self_
 
 # Full-GUI startup can outlast the production demo's bridge deadline before

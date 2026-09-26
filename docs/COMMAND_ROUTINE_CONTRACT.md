@@ -418,8 +418,8 @@ predicate passes trivially) and the driver wall-clock backstops
 (`prearm_backstop_floor_s`, `prearm_backstop_multiplier`,
 `drive_budget_multiplier`), copied into that same `DriverParams` construction.
 `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
-`configs/takeoff_quad.yaml` demos it headless via
-`make run-all HYDRA_CONFIG=...`, `configs/navigate_quad_hex.yaml` demos an
+`configs/routines/basic_takeoff_quad.yaml` demos it headless via
+`make run-all HYDRA_CONFIG=...`, `configs/routines/fleet_navigate_quad_hex.yaml` demos an
 absolute-waypoint `goto` routine the same way, and
 the multi-drone takeoff config selects the same routine and only changes the
 fleet. The GCS link baseport stays

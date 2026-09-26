@@ -1,20 +1,18 @@
+# @package _global_
 defaults:
-  - base
-  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - /routines/basic_takeoff_quad
   - _self_
 
 # Runtime demonstration experiment: arm, take off, hold hover, move forward
-# along world +X/east, then land. It runs forgivingly: a breach logs and stops
-# the routine, leaving manual control available.
+# along world +X/east, then land. On failure, the live runtime logs the cause
+# and performs landing recovery before retaining the terminal failure.
 #
-# Run with: make run-all HYDRA_CONFIG=configs/forward_quad.yaml
+# Run with: make run-all HYDRA_CONFIG=configs/routines/basic_forward_quad.yaml
 
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 vehicles:
   x500_01:
-    id: 0
-    ros: {namespace: /x500_01}
     spawn: {position_xy: [0.0, -2.0], prim_name: Drone0}
     routine:
       steps:

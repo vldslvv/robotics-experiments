@@ -10,8 +10,10 @@ from robotics_experiments.config import load_config
 from tests.support.paths import REPO_ROOT
 
 _ROOT = REPO_ROOT / "configs"
-_EXPERIMENTS = sorted(path for path in _ROOT.glob("*.yaml") if path.name != "base.yaml") + sorted(
-    (_ROOT / "train/stage").glob("*.yaml")
+_EXPERIMENTS = (
+    sorted(path for path in _ROOT.glob("*.yaml") if path.name != "base.yaml")
+    + sorted((_ROOT / "routines").glob("*.yaml"))
+    + sorted((_ROOT / "train/stage").glob("*.yaml"))
 )
 
 
@@ -57,7 +59,7 @@ def test_load_config_is_isolated_and_immutable(monkeypatch):
 
     with initialize_config_dir(config_dir=str(_ROOT), version_base=None):
         foreign_hydra = GlobalHydra.instance().hydra
-        config = load_config(_ROOT / "takeoff_quad.yaml")
+        config = load_config(_ROOT / "routines/basic_takeoff_quad.yaml")
         assert GlobalHydra.instance().hydra is foreign_hydra
 
     vehicle = config.vehicles["x500_01"]
@@ -74,7 +76,7 @@ def test_load_config_is_isolated_and_immutable(monkeypatch):
 def test_load_config_caches_by_explicit_path():
     from robotics_experiments.config import load_config
 
-    path = _ROOT / "takeoff_quad.yaml"
+    path = _ROOT / "routines/basic_takeoff_quad.yaml"
     assert load_config(path) is load_config(path)
 
 
@@ -99,7 +101,7 @@ def test_every_shipped_experiment_composes(path):
 def test_default_experiment_has_only_global_root_config():
     from robotics_experiments.config import load_config
 
-    config = load_config(_ROOT / "takeoff_quad.yaml")
+    config = load_config(_ROOT / "routines/basic_takeoff_quad.yaml")
     assert config.switches.spawn_seed == 0
     assert config.rl.training.attempt_seeds == (42,)
     assert set(vars(config)) - {"_config_frozen"} == {
@@ -472,7 +474,7 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
     from robotics_experiments.rl.press import HandoffGate
 
     training = load_config(_ROOT / "train/stage/press_approach_quad.yaml")
-    deployment = load_config(_ROOT / "policy_press_approach_quad.yaml")
+    deployment = load_config(_ROOT / "routines/policy_press_approach_quad.yaml")
 
     assert HandoffGate.from_config(training.rl.press.handoff) == HandoffGate.from_config(
         deployment.rl.press.handoff
@@ -525,7 +527,7 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
 def test_press_navigation_noise_config_matches_accepted_measurement_summary():
     from robotics_experiments.config import load_config
 
-    config = load_config(_ROOT / "policy_press_approach_quad.yaml")
+    config = load_config(_ROOT / "routines/policy_press_approach_quad.yaml")
     noise = config.rl.press.navigation_noise
     summary = json.loads((REPO_ROOT / noise.source).read_text(encoding="utf-8"))
     observed = summary["observed"]
@@ -545,7 +547,7 @@ def test_press_navigation_noise_config_matches_accepted_measurement_summary():
 def test_policy_transfer_config_uses_distinct_entry_targets():
     from robotics_experiments.config import load_config
 
-    config = load_config(_ROOT / "policy_transfer_press_approach_quad.yaml")
+    config = load_config(_ROOT / "routines/policy_transfer_press_approach_quad.yaml")
     steps = config.vehicles["x500_01"].routine.steps
 
     assert config.scene == "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
@@ -566,9 +568,22 @@ def test_policy_transfer_config_uses_distinct_entry_targets():
         steps[index]["artifact"] == ".build/training/press-approach/latest" for index in (7, 12, 17)
     )
 
-    hover = load_config(_ROOT / "policy_transfer_press_hover_quad.yaml")
+    hover = load_config(_ROOT / "routines/policy_transfer_press_hover_quad.yaml")
     hover_steps = hover.vehicles["x500_01"].routine.steps
+    assert config.rl.press.task == "approach"
+    assert config.rl.episode_length_s == 45.0
+    assert tuple((item.source, item.weight) for item in config.rl.press.reset.mix) == (
+        ("measured_navigation_handoff", 0.8),
+        ("pinned_flight_parameters", 0.2),
+    )
     assert hover.rl.press.task == "hover"
+    assert hover.rl.episode_length_s == 40.0
+    assert tuple((item.source, item.weight) for item in hover.rl.press.reset.mix) == (
+        ("pinned_flight_parameters", 1.0),
+    )
+    assert [{key: value for key, value in step.items() if key != "artifact"} for step in steps] == [
+        {key: value for key, value in step.items() if key != "artifact"} for step in hover_steps
+    ]
     assert all(
         hover_steps[index]["artifact"] == ".build/training/press-hover/latest"
         for index in (7, 12, 17)
@@ -876,15 +891,40 @@ def test_vehicle_mapping_is_typed_and_routine_steps_are_not_any():
     assert "RoutineStepConfig" in str(get_type_hints(routine_type)["steps"])
 
 
-def test_policy_routine_uses_label_and_target_enu_contract():
+def test_policy_routine_uses_label_and_target_enu_contract(tmp_path):
     from robotics_experiments.config import load_config
 
-    config = load_config(_ROOT / "policy_hover_quad.yaml")
+    config = load_config(
+        _write_experiment(
+            tmp_path,
+            "policy",
+            {
+                "x500_01": _vehicle(
+                    0,
+                    "/x500_01",
+                    0.0,
+                    routine={
+                        "steps": [
+                            {
+                                "kind": "policy",
+                                "label": "hover",
+                                "artifact": "hover-policy",
+                                "target_enu": [0.0, 0.0, 2.5],
+                                "hold_s": 5.0,
+                                "timeout_s": 20.0,
+                            }
+                        ]
+                    },
+                )
+            },
+        )
+    )
     policy_step = next(
         step for step in config.vehicles["x500_01"].routine.steps if step["kind"] == "policy"
     )
 
     assert policy_step["label"] == "hover"
+    assert policy_step["target_enu"] == (0.0, 0.0, 2.5)
     assert "name" not in policy_step
     assert "target" not in policy_step
 
@@ -984,7 +1024,7 @@ def test_per_vehicle_routines_are_independent(tmp_path):
 def test_mixed_airframes_drive_bridge_and_px4_launch():
     from robotics_experiments.config import load_config
 
-    config = load_config("configs/navigate_quad_hex.yaml")
+    config = load_config("configs/routines/fleet_navigate_quad_hex.yaml")
     quad = config.vehicles["x500_01"]
     hexa = config.vehicles["s550_01"]
     assert hexa.spawn.usd_path.endswith("/hexacopter_s550.usda")

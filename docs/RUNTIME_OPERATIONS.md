@@ -134,7 +134,7 @@ top-level Hydra experiment config for both host-side PX4 counting and Isaac
 runtime config composition, for example:
 
 ```sh
-make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml
+make run-all HYDRA_CONFIG=configs/routines/fleet_takeoff_quad_quad.yaml
 ```
 
 Each enabled vehicle's `px4.failsafe` values are passed to PX4 as startup

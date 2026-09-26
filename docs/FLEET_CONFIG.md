@@ -14,10 +14,11 @@ failsafe behavior, or routine at that same node. There is no implicit default
 vehicle model.
 
 ```yaml
+# @package _global_
 defaults:
-  - base
-  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
-  - override experiment/routine@vehicles.x500_01.routine: takeoff
+  - /base
+  - /experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - override /experiment/routine@vehicles.x500_01.routine: takeoff
   - _self_
 
 vehicles:

@@ -147,7 +147,7 @@ builder.build_assets(config_path=Path(sys.argv[2]), repo_root=root)
                 "-c",
                 script,
                 str(tmp_path),
-                str(REPO_ROOT / "configs/takeoff_quad.yaml"),
+                str(REPO_ROOT / "configs/routines/basic_takeoff_quad.yaml"),
             ],
             cwd=REPO_ROOT,
             env=os.environ | {"PYTHONPATH": str(REPO_ROOT / "src")},

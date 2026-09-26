@@ -1,7 +1,7 @@
+# @package _global_
 defaults:
-  - base
-  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
-  - experiment/vehicle@vehicles.s550_01: hexacopter_s550
+  - /routines/basic_takeoff_quad
+  - /experiment/vehicle@vehicles.s550_01: hexacopter_s550
   - _self_
 
 # Dual-PX4 multi-drone absolute-waypoint navigation experiment. A quad (id 0,
@@ -18,14 +18,10 @@ defaults:
 #
 # Run with:
 #   make test-integration-px4-navigation
-#   make run-all HYDRA_CONFIG=configs/navigate_quad_hex.yaml
-
-scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+#   make run-all HYDRA_CONFIG=configs/routines/fleet_navigate_quad_hex.yaml
 
 vehicles:
   x500_01:
-    id: 0
-    ros: {namespace: /x500_01}
     spawn: {position_xy: [0.0, -2.0], prim_name: Drone0}
     routine:
       hover_settle_s: 3.0

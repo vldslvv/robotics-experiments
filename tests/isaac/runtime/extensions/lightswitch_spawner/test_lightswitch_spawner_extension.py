@@ -137,7 +137,9 @@ def _import_extension(monkeypatch, *, publisher_config=None, events=()):
     }
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", "configs/takeoff_quad.yaml")
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH", "configs/routines/basic_takeoff_quad.yaml"
+    )
     monkeypatch.syspath_prepend(str(REPO_ROOT / "isaac/runtime/extensions/lightswitch_spawner"))
     module = importlib.import_module("LightSwitch_python.extension")
     return module, update_events, rclpy

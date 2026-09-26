@@ -82,11 +82,12 @@ separate non-interactive PX4 launcher that suppresses prompt-only `pxh>` lines
 while preserving PX4 logs under `px4/logs`. Set `INTEGRATION_VERBOSE=1` when
 running a test target to print the full captured PX4 container log.
 
-Select a different top-level Hydra experiment config with `HYDRA_CONFIG`, for
-example:
+Select a flight from `configs/routines/` with `HYDRA_CONFIG`. Filenames use
+`basic_`, `fleet_`, or `policy_` prefixes; see the
+[configuration catalog](docs/EXPERIMENT_CONFIG.md#flight-configurations). For example:
 
 ```bash
-make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml
+make run-all HYDRA_CONFIG=configs/routines/fleet_takeoff_quad_quad.yaml
 ```
 
 Run the canonical CPU-only contributor gate:
@@ -111,8 +112,7 @@ make test-integration-all
 | `make test-integration-isaac`, `make test-integration-drone-articulation` | Isaac settings, stage, spawn, and articulation I/O | Docker, NVIDIA runtime |
 | `make test-integration-press-hover-goto` | Isaac Lab hover/goto and handoff gate | Isaac Lab image, NVIDIA runtime |
 | `make test-integration-px4-takeoff`, `make test-integration-px4-navigation`, instability and multi-drone variants | PX4 lockstep, routines, flight envelopes, and fleet isolation | Isaac/PX4 images, NVIDIA runtime |
-| `make test-integration-press-policy` | Trained policy artifact deployment | Training artifact plus Isaac Lab image |
-| `make test-integration-all` | Seven stable Isaac, RL, and PX4 integration targets | Built runtime images, NVIDIA runtime |
+| `make test-integration-all` | Nine Isaac, RL, switch-physics and PX4 integration targets | Built runtime images, NVIDIA runtime |
 | `make benchmark-commanding` | Isolated routine stepper and driver performance gate | Quiet comparable host, host Python environment |
 | `make benchmark-isaac-core` | Isaac core upgrade regression gate and contributor attribution | Quiet comparable host, built Isaac image, NVIDIA runtime |
 | `make benchmark-flight` | Diagnostic full-GUI warehouse/two-drone Isaac comparison | X11 GUI, comparable host, NVIDIA runtime, fresh Isaac/PX4 images |

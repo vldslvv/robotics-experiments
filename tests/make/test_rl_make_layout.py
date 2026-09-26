@@ -13,7 +13,6 @@ _MOVED_TARGETS = (
     "eval-press",
     "test-integration-press-hover-goto",
     "test-integration-press-contact-chain",
-    "test-integration-press-policy",
     "test-integration-press-policy-transfer",
     "test-integration-press-approach-routine",
     "test-integration-press-navigation-handoff-sample",
@@ -127,7 +126,7 @@ def test_navigation_handoff_measurement_reuses_the_production_routine() -> None:
     runner = (REPO_ROOT / "make/scripts/run_press_navigation_handoff_measurement.sh").read_text()
 
     assert "ISAAC_PRESS_APPROACH_ROUTINE_TEST" in sample
-    assert "configs/policy_press_approach_quad.yaml" in makefile
+    assert "configs/routines/policy_press_approach_quad.yaml" in makefile
     assert "generate-assets" not in sample
     assert "PRESS_NAVIGATION_MEASUREMENT_OUTPUT" in sample
     assert '"${PRESS_NAVIGATION_MEASUREMENT_RUNS}" -lt 10' in runner
@@ -170,7 +169,7 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
         text=True,
     )
     assert contact_result.returncode == 0, contact_result.stderr
-    assert "configs/policy_press_approach_quad.yaml" in contact_result.stdout
+    assert "configs/routines/policy_press_approach_quad.yaml" in contact_result.stdout
 
 
 def test_training_uses_one_merged_container_invocation() -> None:

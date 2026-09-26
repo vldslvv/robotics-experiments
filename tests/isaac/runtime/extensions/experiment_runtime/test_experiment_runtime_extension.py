@@ -129,7 +129,9 @@ class _FakeOrchestrator:
 
 
 def _install_fake_modules(monkeypatch, usd_context, timeline, app):
-    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", "configs/takeoff_quad.yaml")
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH", "configs/routines/basic_takeoff_quad.yaml"
+    )
     carb = types.ModuleType("carb")
     carb.log_info = lambda *a, **k: None
     carb.log_warn = lambda *a, **k: None

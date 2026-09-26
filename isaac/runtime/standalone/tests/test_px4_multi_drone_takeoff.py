@@ -1,7 +1,7 @@
 """Standalone Isaac/PX4 dual-drone takeoff scenario.
 
 This test runs the multi-vehicle takeoff loop against N independent PX4 SITL
-instances: it composes the ``takeoff_quad_quad`` Hydra
+instances: it composes the ``fleet_takeoff_quad_quad`` Hydra
 experiment (two drones, distinct spawn positions, id 0/1 -> derived simulator
 ports 4560/4561 and GCS links 14550/14551), spawns every vehicle, starts one
 production PX4 bridge host per drone, commands arm and takeoff over each drone's

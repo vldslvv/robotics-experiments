@@ -1,10 +1,50 @@
 # Experiment configuration
 
-Every top-level YAML sibling of `configs/base.yaml` is a runnable experiment.
+Flight experiments live in the flat `configs/routines/` directory.
 `load_config(path)` composes and process-caches one explicitly, returning an
 immutable `ExperimentConfig`. It never reads the environment. Runtime roots read
 the required `ROBOTICS_EXPERIMENT_CONFIG_PATH` variable once and pass the
 resolved configuration to downstream consumers.
+
+## Flight configurations
+
+Filename prefixes describe purpose: `basic_` selects a single-drone scripted
+flight, `fleet_` selects a multi-drone scripted flight, and `policy_` selects a
+flight executing a learned policy. All filenames below are relative to
+`configs/routines/`.
+
+| Configuration | Flight |
+| --- | --- |
+| `basic_takeoff_quad.yaml` | One X500 takes off and holds stable hover for three seconds; ends airborne. |
+| `basic_forward_quad.yaml` | One X500 takes off, hovers, travels five metres along world +X, and lands. |
+| `fleet_takeoff_quad_quad.yaml` | Two X500s take off and hover independently, starting four metres apart. |
+| `fleet_navigate_quad_hex.yaml` | An X500 and S550 fly parallel guided and OFFBOARD waypoint legs, then land. |
+| `fleet_circle_land_quad_quad.yaml` | Two X500s fly twelve-waypoint circles with altitude separation, then land. |
+| `policy_press_approach_quad.yaml` | Navigate to the warehouse switch, execute the approach actor, return and land. |
+| `policy_transfer_press_hover_quad.yaml` | Execute the press-hover actor from three entry ranges; ends after the final policy hold. |
+| `policy_transfer_press_approach_quad.yaml` | Fly the same three-range transfer route using the approach actor. |
+
+The single-X500 takeoff config supplies shared vehicle setup for forward,
+navigation, dual-takeoff and press flights. The circle config inherits the
+dual-X500 fleet. The production approach config supplies the warehouse and
+switch setup to approach-transfer, which hover-transfer specializes with its
+hover task, episode duration and reset mixture. Both transfer configs select
+one shared route; its artifact path uses the explicit `rl.press.task` value.
+Flight steps, timeouts and acceptance requirements remain task-owned.
+
+Nested experiment files declare `# @package _global_` and use absolute Hydra
+defaults such as `/base` and `/routines/basic_takeoff_quad`. The configuration
+root remains `configs/`; do not add a second `base.yaml` below it. Airframe
+lookup and repository-relative artifact paths are independent of the selected
+experiment's directory. Shared per-vehicle routine groups remain under
+`configs/experiment/routine/`.
+
+Specialized experiment entrypoints stay at the config root:
+`flight_parameters_x500_hover.yaml` measures hover,
+`alignment_px4_x500_velocity.yaml` captures controller responses, and
+`flight_benchmark.yaml` / `flight_benchmark_takeoff_quad.yaml` wrap the circle
+and single-drone flights with longer cold-start bridge deadlines. Training
+curricula and stage experiments remain under `configs/train/`.
 
 ## Root structure
 
@@ -22,7 +62,7 @@ See `docs/FLEET_CONFIG.md` for the authoring pattern.
 Experiments are selected with `HYDRA_CONFIG`, for example:
 
 ```bash
-make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml
+make run-all HYDRA_CONFIG=configs/routines/fleet_takeoff_quad_quad.yaml
 ```
 
 The standalone `--scene` option overrides the configured scene; `@`-prefixed

@@ -67,6 +67,10 @@ Read area docs on demand when a task touches that area:
   and repeatable instability or sim-to-real debugging.
 
 ## Comments and documentation
+- Do not create or expand documentation for analysis, explanations, or
+  verification runs unless explicitly requested. Keep necessary documentation
+  edits limited to behavior or workflow changes implemented in the task;
+  avoid duplicating information or adding notes that only increase context size.
 - Comments and docs should describe current behavior, invariants, contracts, and
   intent. Do not leave historical comments about how code used to be implemented
   before.
@@ -74,6 +78,11 @@ Read area docs on demand when a task touches that area:
 ## Repository layout
 Place new code in the directory matching its purpose; each entry below is both
 the current contents and the intended home for that kind of code.
+- `configs/routines/` -> Runnable flight experiments in one flat directory:
+  `basic_` for single-drone scripted flights, `fleet_` for multi-drone scripted
+  flights, and `policy_` for flights executing learned policies. Shared per-vehicle
+  routines remain in `configs/experiment/routine/`; measurement, alignment and
+  benchmark entrypoints remain outside `configs/routines/`.
 - `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
 - `src/robotics_experiments/switches/` -> Host-safe switch asset identity and
   vectorized simulation-time activation shared by runtime and RL.
@@ -410,7 +419,7 @@ the current contents and the intended home for that kind of code.
   `make test-integration-all`, `make test-integration-press-hover-goto`,
   `make test-integration-alignment-target`,
   `make test-integration-press-policy-transfer`,
-  `make test-integration-press-policy`, `make test-integration-px4-takeoff`,
+  `make test-integration-px4-takeoff`,
   `make test-integration-px4-navigation`,
   `make test-integration-px4-takeoff-instability`, or
   `make test-integration-px4-multi-drone-takeoff`.

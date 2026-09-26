@@ -98,7 +98,7 @@ are excluded from upstream allocator attribution.
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py <flight.ulg> \
-  --config configs/policy_press_approach_quad.yaml \
+  --config configs/routines/policy_press_approach_quad.yaml \
   --controller-artifact .build/alignment/x500-px4-v1/latest \
   --window 28.3,30.7 --json /tmp/controller-state-replay.json
 ```

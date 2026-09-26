@@ -61,7 +61,6 @@ help:
 		'  make eval-press            Independently evaluate the selected press artifact' \
 		'  make test-integration-press-hover-goto Run the in-Lab hover/goto gate' \
 		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \
-		'  make test-integration-press-policy Run the trained hover-policy PX4 gate' \
 		'  make test-integration-press-policy-transfer Run warehouse press transfer acceptance' \
 		'  make test-integration-press-approach-routine Verify waypoint-to-actor invocation' \
 		'  make measure-press-navigation-handoff Measure production waypoint entry noise' \
