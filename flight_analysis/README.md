@@ -274,41 +274,15 @@ for i, timestamp in enumerate(topic["timestamp"]):
     print(timestamp, topic["command"][i], topic["result"][i])
 ```
 
-## Worked Example: Takeoff Instability
+## Diagnosing instability
 
-The unstable takeoff was debugged with the latest paired ULog and bridge log.
-The key observations were:
-
-- The old flyaway mode was gone: actuator lockstep stayed healthy after startup,
-  with `actuator_lag_us` settling around one 250 Hz sensor period.
-- PX4 accepted arm and takeoff. The ULog showed command `400` and command `22`
-  acknowledgements with `result=0`.
-- During lift, PX4 began commanding large asymmetric motor outputs. The bridge
-  applied those outputs faithfully; this made a stale actuator backlog unlikely.
-- The vehicle stayed nearly level until rotation began, then attitude control
-  diverged quickly.
-
-The root implementation bug was the gyro frame. Isaac articulation angular
-velocity was treated as if it were already body-frame FLU data. Isaac reports it
-in the world frame, while PX4 HIL gyro input is body-frame FRD. The fix rotates
-world ENU angular velocity into body FLU in the Isaac adapter, then lets the
-MAVLink adapter do the final FLU to FRD conversion.
-
-Related robustness fixes:
-
-- actuator polling does not block before PX4 has emitted the first actuator
-  packet
-- after the first actuator packet, queued actuator messages are drained and the
-  newest packet is applied
-- the first actuator timestamp lag is accepted as a startup baseline, but later
-  materially stale actuator timestamps disconnect and zero commands
-- tilt cutoff zeros rotor forces after excessive tilt so an inverted/crashed
-  vehicle does not keep applying thrust into the ground
-
-When a future flight is unstable, first decide which side commanded the bad
-motion. If the ULog actuator topics and bridge `commands` agree, inspect PX4
-setpoints and sensor frames. If they disagree, inspect bridge actuator freshness,
-rotor ordering, and thrust application.
+Compare ULog actuator topics with bridge commands first. If they agree, inspect
+PX4 setpoints, sensor frames, and physical contact; if they differ, inspect
+actuator freshness, rotor order, and thrust application. Isaac's world-ENU angular
+velocity must be rotated to body FLU before conversion to PX4 body FRD. Separate
+startup/host-load timeouts from sustained lockstep failure and real flight
+instability. [ADR 0003](../docs/adr/0003-px4-takeoff-instability-mitigation.md)
+records the contact-release and failure-classification decisions.
 
 ## Routine-stage filtering
 

@@ -1,9 +1,13 @@
 # ADR 0013: In-Lab RL action level (velocity default + ctbr) and OFFBOARD deploy
 
-- Status: Accepted
+- Status: Accepted for action-level choice; controller ownership and frame
+  details below are superseded by [0016](0016-measured-flight-evidence-and-controller-qualification.md)
+  and [0018](0018-training-deployment-observation-and-actuation-parity.md)
 - Date: 2026-07-01
 - Related: ADR 0006 (command/routine contract layer), ADR 0002 (feature layering)
-- Source: `docs/phase_f/F1_in_lab_flight.md` (the F1 plan; Step 6 deferred decision)
+- Historical source: Git revision `a97389e0325dd54b3190752db3faf2f189509c33`,
+  path `docs/phase_f/F1_in_lab_flight.md` (Step 6)
+- Current contract: [RL workflow](../RL_WORKFLOW.md)
 
 ## Context
 

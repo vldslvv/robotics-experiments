@@ -3,7 +3,7 @@
 - Status: Accepted (living convention)
 - Date: 2026-05-20
 - Related: ADR 0004 (layering enforcement), ADR 0006 (commanding layer)
-- Full design: `docs/FEATURE_DESIGN.md`
+- Current convention: [development workflow](../DEVELOPMENT_WORKFLOW.md#isaac-facing-feature-design)
 
 ## Context
 

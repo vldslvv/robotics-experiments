@@ -118,6 +118,32 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
   does not collapse manual column spacing.
 
+## Isaac-facing feature design
+
+Core packages own reusable behavior and validation; Kit extensions own event
+wiring; standalone workflows own simulator launch and integration assertions.
+The [runtime contract](../src/robotics_experiments/runtime/ORCHESTRATOR_CONTRACT.md)
+owns cross-component composition. Use `experiment_runtime` as the thin-shell
+pattern, with one frozen state rebound through lifecycle transitions.
+
+Startup, shutdown, and callbacks subscribe/unsubscribe, decode events, update
+current resource handles, and delegate complete lifecycle actions. Those actions
+own the related prims, bridge hosts, ROS nodes, callbacks, publishers, and
+subscriptions that start/stop together. Keep local Kit context objects local
+unless their lifetime must be retained; store direct feature state such as the
+current stage. Do not move flight or scene logic into event callbacks.
+
+Extensions depend on `robotics_experiments_core` instead of changing `sys.path`.
+Use a small local config adapter where needed, importing through
+`robotics_experiments.config`; config loading is explicit and cached. Ordinary
+project imports remain eager under `AGENTS.md`'s import rules. For example,
+`simulation.apply_settings(*, stage, settings)` receives explicit settings and
+delegates Isaac mutation to its private backend; it does not load defaults.
+
+Extract shared logic only for meaningful reuse or ownership, not to wrap a small
+adapter. Invalid config raises; recoverable fallbacks warn; extension setup
+failures remain visible and clean up their resources.
+
 ## Makefile maintenance
 
 - Keep Make recipes thin. If Makefile logic grows into a complex Bash script

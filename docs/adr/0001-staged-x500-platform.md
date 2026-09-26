@@ -4,8 +4,9 @@
 - Date: 2026-05-17
 - Related: ADR 0010 (the quad asset's PX4 airframe)
 - Full design: `docs/LIGHT_SWITCH_MULTIROTOR_ROADMAP.md`
-- Historical sources: `docs/archive/QUADCOPTER_PLAN_REVISED.md`,
-  `docs/archive/HOLYBRO_X8_STAGED_BOM_v2.md`
+- Hardware source: [staged BOM](../archive/HOLYBRO_X8_STAGED_BOM_v2.md)
+- Historical mission plan: Git revision `a97389e0325dd54b3190752db3faf2f189509c33`,
+  path `docs/archive/QUADCOPTER_PLAN_REVISED.md`
   (calculators: `docs/thrust_to_weight.py`, `docs/evaluate_motors_revised.py`)
 
 ## Context

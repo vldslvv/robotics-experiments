@@ -1,10 +1,13 @@
 # ADR 0014: Press observation contract + pose-provider seam
 
-- Status: Accepted
+- Status: Accepted for provider/handoff separation and versioning; actor-layout
+  details below are superseded by [0018](0018-training-deployment-observation-and-actuation-parity.md)
 - Date: 2026-07-05
 - Related: ADR 0013 (in-Lab RL action level), ADR 0006 (command/routine contract)
-- Source: `docs/phase_f/F2_observation_and_handoff.md`,
+- Historical sources: Git revision `a97389e0325dd54b3190752db3faf2f189509c33`,
+  paths `docs/phase_f/F2_observation_and_handoff.md` and
   `docs/phase_f/F2b_task_to_policy_pipeline.md`
+- Current contract: [RL workflow](../RL_WORKFLOW.md)
 
 ## Context
 

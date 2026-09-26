@@ -1,45 +1,19 @@
-# Holybro X500 V2 Staged Build — Quad to X8 Coaxial BOM (v2)
+# Holybro X500 V2 staged hardware BOM
 
-> Historical source document. The canonical merged roadmap is
-> `docs/LIGHT_SWITCH_MULTIROTOR_ROADMAP.md`; this BOM remains the authoritative
-> hardware source behind that roadmap.
+Historical procurement and X8 planning reference. Component estimates, prices,
+and performance claims below describe the original BOM, not current vendor
+quotes or verified flight capability. The implemented component values and
+vendor corrections in `configs/airframes/holybro_x500_v2.yaml` take precedence.
+Numbered sections remain stable because that config cites them as sources.
 
-> The staged-platform decision is recorded as ADR 0001 (`docs/adr/`); this doc is
-> the full BOM and propulsion analysis behind it.
-
-## Overview
-
-This document specifies a two-stage drone build on the Holybro X500 V2 frame, engineered for indoor autonomous operation with a switch-pressing contact task. The build starts as a conventional X4 quadcopter (Stage 1) and upgrades to an X8 coaxial octocopter (Stage 2) by adding four additional motors, ESCs, and propellers to the undersides of the existing four arms.
-
-**Why staged.** Stage 1 delivers a fully flyable platform for Phases 1–5 of the development roadmap (hover, navigation, switch/lamp environment, RL press policy training, system integration). Stage 2 adds motor redundancy and contact-task stability when real-world testing reveals specific needs — not as speculative over-provisioning. This defers ~$430 in hardware cost and avoids locking in an untested topology before the software stack is mature.
-
-**Frame decision.** The Holybro X500 V2 is the only 500mm-class frame with official dual-configuration support in the PX4/ArduPilot ecosystem. Carbon fiber arms rated for dual motor loads, bolt-on arm attachment (arms can be swapped independently), standard 30.5×30.5mm and 20×20mm flight controller mount patterns, and published weight/thrust data across both configurations make this the lowest-risk path.
-
-**Propulsion decision (v2 revision).** The original v1 spec used T-Motor MN3110 KV700 motors with 12×4.5″ polymer props. Detailed thrust analysis (see `thrust_to_weight.py` calculator) revealed the MN3110's catalog max thrust of 1.2kg is achieved on 15″ props at 6S — on a 12″ prop at 4S, real per-motor thrust is closer to 1,150g rather than the 1,500g the v1 spec assumed. This pushed Stage 2 max-config T:W down to 2.99:1 (just barely above the 2.5:1 contact-task floor) and Stage 1 quad T:W down to 2.36:1 (below floor).
-
-The v2 spec switches to **T-Motor MN4006 EVO KV380** with **T-Motor P134.4 (13×4.4″) carbon fiber props**. The MN4006 family uses an 18N24P stator optimized for hover efficiency (the "Antigravity" series is T-Motor's hover-endurance line), saves 32g per motor versus the MN3110 (256g across 8 motors), and produces ~1,565g per motor on 13×4.4 at 4S. The 13×4.4 prop fits the X500 V2's 354mm adjacent motor spacing with ~24mm tip clearance. The motor is operating well below its design envelope (the EVO is rated for 14.4–16″ props and recommended for 6S), which is a deliberate margin choice for this build — the unused capacity manifests as low hover throttle (~49%), low operating temperature, and long bearing life.
-
-**Target performance (v2).**
-
-| Metric | Stage 1 (quad) | Stage 2 mid (X8) | Stage 2 max (X8 + 3D LiDAR) |
-|--------|----------------|------------------|------------------------------|
-| All-up weight | ~2,251g | ~2,713g | ~3,024g |
-| Max thrust | ~6,260g | ~11,268g (after coaxial loss) | ~11,268g |
-| Thrust-to-weight | **2.78:1** | **4.15:1** | **3.73:1** |
-| Hover throttle | ~60% | ~49% | ~52% |
-| Expected hover time | ~14–16 min | ~12–15 min | ~10–13 min |
-| Motor redundancy | None (single failure = crash) | 2-motor loss survivable | 2-motor loss survivable |
-| Prop guards | 4 partial-arc bumpers | 8 partial-arc bumpers | 8 partial-arc bumpers |
-
-Stage 2 mid and max both exceed the 2.5:1 contact-task threshold with comfortable margin. Stage 1 quad is **adequate but not generous** — it sits at 2.78:1, above the floor but with tight headroom for payload growth or aggressive contact transients. This is acknowledged as a known constraint of the staged-build approach (see §1.10 Stage 1 Limitations Note); it's not a failure of the platform but rather a property of running 8 motors' worth of base mass on 4 motors during Stage 1.
-
-Prop guards are included in both stages to protect against wall-strike damage during navigation development — the dominant failure mode on indoor research platforms. Guards add 88g on Stage 1 (4 bumpers) and 176g on Stage 2 (4 upper + 4 lower).
-
----
+[ADR 0001](../adr/0001-staged-x500-platform.md) records the staged-platform
+choice; the [roadmap](../LIGHT_SWITCH_MULTIROTOR_ROADMAP.md) owns project status.
+Calculators are `docs/thrust_to_weight.py` and `docs/evaluate_motors_revised.py`.
 
 ## Stage 1 — Quadcopter Build
 
-The Stage 1 build is a complete, standalone quadcopter capable of executing the full mission: takeoff, autonomous navigation, switch localization, RL-policy-driven contact maneuver, retreat, and landing. All Stage 1 components are retained in Stage 2 — nothing is replaced or discarded during the upgrade.
+The planned Stage 1 quad retains its base components during the X8 upgrade.
+Mission qualification is tracked separately in the roadmap.
 
 ### 1.1 Frame & Structure
 
@@ -61,10 +35,6 @@ The Stage 1 build is a complete, standalone quadcopter capable of executing the 
 | Motor mounting hardware | M3 screws, lock washers | 10g | $5 | Included with motors |
 
 **Per-motor thrust (4S 14.8V, static, 100% throttle).** Approximately 1,565g on 13×4.4 CF, drawing ~17.5A. This is below the motor's 22A continuous rating (80% headroom) and well below its 380W power ceiling (~252W on this prop). The motor is genuinely under-loaded on a 12–13″ prop — its design point is 14.4″–16″ props on 4–6S where it would deliver up to 1,600–2,000g per motor. The 13×4.4 sizing is dictated by X500 V2 frame geometry (354mm adjacent motor spacing limits prop diameter to 13.5″ max with safety clearance), not by motor capability.
-
-**Why MN4006 EVO over MN4006 base.** The EVO variant adds upgraded EZO bearings (60–80h tested flight time), +8% peak thrust per T-Motor's spec sheet, and improved heat dissipation. The premium is ~$13/motor. For a research project where reliability over many test cycles matters, the EVO's bearing upgrade alone justifies the cost — bearing failure is the dominant motor failure mode on multirotor platforms and the EVO's 60–80h MTBF is meaningfully longer than the base variant's. If price is a hard constraint, the base MN4006 KV380 is acceptable (saves $104 total at 8 motors) and gives 4.07:1 max-config T:W vs the EVO's 4.15.
-
-**Why MN4006 over MN3110 (v1 spec).** Three issues compounded with the v1 MN3110 KV700: (1) per-motor mass is 99g vs the MN4006's 68g — saves 248g across 8 motors; (2) MN3110's 12N14P stator runs at higher commutation frequency than the MN4006's 18N24P at the same RPM, producing more vibration that degrades sensor data quality (a critical concern per plan v4 §8 risks); (3) MN3110 catalog max of 1.2kg is on 15″ props at 6S — on a 12″ prop at 4S the real thrust ceiling is ~1,150g, leaving Stage 2 max-config T:W at only 2.99:1 (just above floor). The MN4006 EVO solves all three problems.
 
 Propeller direction: 2× CW props, 2× CCW props for Stage 1. **Buy upfront for Stage 2 too**: 5 pairs total (10 blades) covers Stage 1, Stage 2, and 2 spares. Single-batch purchasing improves dynamic balance across the airframe.
 
@@ -229,7 +199,6 @@ The prop guards add 88g and reduce T:W by ~0.11 points (without guards: 2.89). T
 | Wiring + misc | $63 |
 | **Stage 1 total** | **~$2,103** |
 
-(Note: Stage 1 cost increased from v1's $2,019 by $84 — the MN4006 EVO upgrade adds $144 in motors but the prop spec change saves modestly on prop pricing. Net delta is +$84 for substantially better motors that yield 4.15:1 max-config T:W in Stage 2 vs the v1 spec's 2.99:1.)
 
 ---
 
@@ -323,7 +292,6 @@ For a contact-manipulation task where prop strikes, over-current events, or ther
 | Stage 2 upgrade (with lower guards) | $478 |
 | **Combined total** | **$2,581** |
 
-Cost delta from v1 BOM: **+$168** total ($84 in Stage 1, $84 in Stage 2). This buys: +1.16 max-config T:W (from 2.99 to 4.15), 256g lighter motor mass across 8 motors, lower vibration signature (18N24P stator vs 12N14P), longer motor lifespan (EVO bearings, 60–80h MTBF), and operating temperatures 10–15°C cooler at hover.
 
 ---
 
@@ -425,28 +393,3 @@ Order components in the following sequence to minimize blocking on long-lead ite
 **First flight order.** Do not attempt X8 first flight until Stage 1 has accumulated at least 30 minutes of stable hover time. The PID tuning knowledge from Stage 1 transfers partially but not completely — start Stage 2 in manual stabilize mode, not autonomous navigation, and gradually re-enable autonomy as each subsystem is verified.
 
 **MN4006 EVO bearing replacement schedule.** T-Motor cites 60–80h flight time MTBF on EVO bearings. For a research project averaging 15-minute flights, that's roughly 240–320 flights before recommended bearing replacement. Track total powered-on time (PX4 logs this) and budget bearing replacement (T-Motor sells bearing kits for ~$15) at 50h cumulative motor runtime as preventive maintenance.
-
----
-
-## Appendix D — v2 Changelog vs v1
-
-The v2 BOM updates the propulsion system based on detailed thrust-to-weight analysis using the project's `thrust_to_weight.py` calculator. Key changes:
-
-| Item | v1 spec | v2 spec | Impact |
-|------|---------|---------|--------|
-| Motor | T-Motor MN3110 KV700 | **T-Motor MN4006 EVO KV380** | Lighter (-32g/motor), better hover efficiency, improved bearing MTBF |
-| Propeller | T-Motor T1245 (12×4.5″ polymer) | **T-Motor P134.4 (13×4.4″ CF)** | More thrust, better balance, sized for X500 V2 frame geometry |
-| Per-motor thrust @ 4S 14.8V | ~1,150g (real, was overstated as 1,500g) | ~1,565g | +36% per-motor thrust |
-| Stage 1 quad T:W | 2.36:1 (overstated as 3.13) | **2.78:1** | Above 2.5 floor (was actually below) |
-| Stage 2 mid X8 T:W | 3.37:1 (overstated as 4.33) | **4.15:1** | EXCELLENT margin |
-| Stage 2 max X8 T:W | 2.99:1 (overstated as 3.85) | **3.73:1** | Strong margin even with max payload |
-| Hover throttle (Stage 2 mid) | ~58% | **~49%** | Sweet-spot operating regime |
-| Stage 1 cost | $2,019 | $2,103 | +$84 |
-| Stage 2 cost | $394 | $478 | +$84 |
-| Total project cost | $2,413 | $2,581 | +$168 for substantial T:W and reliability gains |
-
-**ESCs unchanged.** The HGLRC BS30A continues to work with the MN4006 EVO at 17.5A peak draw (vs 22A peak for MN3110), giving more headroom than before. No ESC upgrade needed.
-
-**Power system unchanged.** PM07 + Tattu 4S 5000mAh remain correct. Hover current actually drops from the v1 estimate due to MN4006's higher hover efficiency.
-
-**Prop guards re-sized.** Outboard reach increases by ~13mm to accommodate the larger 13″ prop radius (165mm vs 152mm). Same nylon PA12, same partial-arc design.

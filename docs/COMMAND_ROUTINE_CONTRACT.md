@@ -289,6 +289,10 @@ send/recv legs.
 
 ## Where the executor lives: functional fleet state, two thin shells
 
+The [runtime contract](../src/robotics_experiments/runtime/ORCHESTRATOR_CONTRACT.md)
+owns ordered setup, teardown, and resource lifetimes. The command-facing behavior
+of its shells is described here.
+
 The frozen `DriverContext` plus progress-only `RoutineDriverState` is the single
 executor composition, and the host-agnostic `FleetState` lifecycle is the
 single place that builds one composition per flying drone. Stateless functions own the pipeline (open scene -> apply
@@ -378,12 +382,7 @@ Every bridge-enabled drone gets one `DriverContext` and one
 `{kind: land, timeout_s}`)
 drive the authored commands; empty steps traverse the same phase machine,
 complete as `SUCCEEDED` without commands, and retain terminal GCS servicing.
-The pure `build_vehicle_routine(*, steps, target_latitude_deg,
-target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
-takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
-goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,
-goto_offboard_prime_ticks, offboard_setpoint_rate_hz,
-goto_min_heading_dist_m, policy_factory)` maps the
+The pure `build_vehicle_routine` maps the
 descriptors plus a
 per-drone takeoff target into a `VehicleRoutine` (unknown `kind`, any step missing a required
 field, or a `policy` step without an injected factory, raises `ValueError`); it
@@ -423,14 +422,12 @@ predicate passes trivially) and the driver wall-clock backstops
 absolute-waypoint `goto` routine the same way, and
 the multi-drone takeoff config selects the same routine and only changes the
 fleet. The GCS link baseport stays
-in the `px4` group (`px4.gcs_baseport`); the per-drone `gcs_port` is derived from
+in the `bridge` group (`bridge.gcs_baseport`); the per-drone `gcs_port` is derived from
 it.
 
-> Hover modeling note: the historical windowed *range* gates (min/max climb and
-> horizontal range over a sampling window) are now expressed as **sustained
-> instantaneous-rate** bounds (`hover_max_abs_vertical_speed_m_s` /
-> `hover_max_abs_horizontal_speed_m_s`) held continuously for the hover step's
-> `hold_s` -- the "hover stable for N seconds" model.
+Hover completion requires the instantaneous vertical and horizontal speed bounds
+(`hover_max_abs_vertical_speed_m_s` / `hover_max_abs_horizontal_speed_m_s`) to
+hold continuously for the step's `hold_s`.
 
 **Still deferred:** cross-drone synchronization (today every drone's
 context/state pair runs independently; a barrier/fleet-sync layer can be

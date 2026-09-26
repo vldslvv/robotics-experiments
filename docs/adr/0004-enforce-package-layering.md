@@ -38,6 +38,15 @@ Make the core package import cleanly without Isaac, and enforce it:
   Gymnasium `Isaac-...-Direct-v0` naming and a minimal `DirectRLEnv` skeleton --
   so future RL work has a defined home off the core path.
 
+## Enforcement and configuration ownership
+
+The package-dependency test discovers packages and requires explicit allowed
+edges; import checks separately enforce the Isaac-only lazy boundary. Config
+composition receives an explicit path and freezes the resolved graph before
+returning it, preventing cached callers from changing another consumer's inputs.
+The checkout-only packaging and canonical host/CI checks are maintained in the
+[development workflow](../DEVELOPMENT_WORKFLOW.md).
+
 ## Consequences
 
 - `python -c "import robotics_experiments"` works outside Isaac; the layering is

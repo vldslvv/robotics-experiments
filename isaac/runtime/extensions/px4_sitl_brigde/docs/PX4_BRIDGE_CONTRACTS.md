@@ -286,85 +286,18 @@ all `RotorDynamics` arrays read-only. This prevents aliases from mutating a
 frozen snapshot after construction without adding allocations to arrays already
 owned by the thrust and cutoff paths.
 
-```python
-# State objects (pure data; no Isaac / MAVLink / Pegasus deps)
-# Per-tick data flow: VehicleState -> ActuatorCommands -> RotorDynamics
-@dataclass(frozen=True)
-class VehicleState:        # Isaac -> bridge each tick
-    position_enu; orientation_flu_enu_wxyz; linear_velocity_enu
-    angular_velocity_flu; sim_time_us
+The supported exports and signatures live in
+[`px4_bridge/__init__.py`](../../../../../src/robotics_experiments/px4_bridge/__init__.py).
+`create_px4_bridge`, `start_px4_bridge`, `send_sensors`, `recv_and_apply`, and
+`stop_px4_bridge` return frozen successor state; `tick_px4_bridge` composes the
+two tick legs. `apply_dynamics` is the sole physics sink.
 
-@dataclass(frozen=True)
-class ActuatorCommands:    # flight stack -> bridge each tick (port output, thrust-model input)
-    controls               # length num_rotors; PX4 actuator references, interpretation owned by thrust model
+Lockstep counters, timestamp/heartbeat pacing, bootstrap, freshness, and disconnect
+progress stay inside the mutable MAVLink adapter. Extracting another transition
+model without a protocol or testability need adds per-tick cost and ownership
+complexity. Consumers use immutable status snapshots or the documented narrow
+probe. Any extraction must preserve these contracts and measured throughput.
 
-@dataclass(frozen=True)
-class RotorDynamics:       # thrust model -> Isaac each tick
-    forces_n; body_torque_n_m; body_drag_n
-    rotor_omega_rad_s      # per-rotor angular velocity (rad/s); additive, cosmetic-only (drives visual spin), never re-enters physics or lockstep
-
-@dataclass(frozen=True)
-class BridgeStatus:        # read-only runtime snapshot for consumers
-    is_connected; is_armed; first_heartbeat_received
-    sensor_send_count; actuator_receive_count
-    last_sensor_send_us; last_actuator_receive_us; actuator_lag_us
-    last_disconnect_reason
-
-# Settings object for the lockstep exchange
-@dataclass(frozen=True)
-class LockstepSettings:
-    lockstep_timeout_s; first_heartbeat_timeout_s; bootstrap_prime_ticks
-    first_actuator_timeout_s; max_sustained_actuator_lag_s
-    heartbeat_rate_hz; physics_rate_hz
-
-# The PX4 flight-stack port: a mutable lockstep resource seam.
-class Px4MavlinkPort:
-    num_rotors: int
-    def start(self) -> None: ...
-    def stop(self) -> None: ...
-    def is_connected(self) -> bool: ...
-    def read_status(self) -> BridgeStatus: ...
-    def send(self, state: VehicleState) -> ActuatorCommands | None: ...  # sensors -> PX4, no block; None => poll owed
-    def poll(self) -> ActuatorCommands: ...  # block, recv <- PX4 (only after send returned None)
-    def exchange(self, state: VehicleState) -> ActuatorCommands: ...  # send-then-poll; single-vehicle convenience
-
-# Public annotation type plus its supported construction boundary. Coefficient
-# arrays stay private; the factory validates their shapes, copies caller inputs,
-# and marks the copies read-only before constructing the frozen model.
-@dataclass(frozen=True)
-class PegasusQuadraticThrustModel(RotorThrustModel):
-    num_rotors: int
-
-def create_pegasus_thrust_model(...) -> PegasusQuadraticThrustModel: ...
-
-# The Isaac seam behavior: read state in, apply a full rotor-model result out.
-# Implemented by IsaacArticulationIO; the local structural protocol is private.
-class _ArticulationIO(Protocol):
-    def is_initialized(self) -> bool: ...
-    def read_state(self, sim_time_us: int) -> VehicleState: ...    # read <- Isaac
-    def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...  # send -> Isaac (physics sink)
-    def update_rotor_spin(self, rotor_omega_rad_s, dt) -> None: ...  # cosmetic-only visual rotor spin; never touches forces/lockstep
-    # plus initialize / shutdown
-
-# Frozen bridge progress; functions return its successor.
-@dataclass(frozen=True)
-class Px4BridgeState:
-    port: Px4MavlinkPort
-    thrust_model: RotorThrustModel
-    articulation_io: _ArticulationIO
-    max_tilt_angle_deg: float
-    tick_count: int
-    dynamics_debug_interval: int
-    tilt_cutoff_count: int
-    pending: _PendingTick | None
-
-def create_px4_bridge(...) -> Px4BridgeState: ...
-def start_px4_bridge(*, state: Px4BridgeState) -> Px4BridgeState: ...
-def send_sensors(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px4BridgeState: ...
-def recv_and_apply(*, state: Px4BridgeState) -> Px4BridgeState: ...
-def tick_px4_bridge(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px4BridgeState: ...
-def stop_px4_bridge(*, state: Px4BridgeState) -> Px4BridgeState: ...
-```
 
 Sampled `PX4 bridge dynamics` diagnostics record
 `last_actuator_receive_us` as `last_actuator_us` and the corresponding

@@ -11,6 +11,12 @@
   beyond the current quad/hex navigation integration coverage.
 - Periodically validate the fresh-checkout sequence documented in the root
   README on a clean host and empty Docker cache.
+- Compare Isaac upgrades using the existing core benchmark and matched hardware;
+  retain bridge/physics attribution and comparable baseline/candidate images.
+- Verify the battery SKU, pusher spring/guide/pad/mount, generated prop-guard
+  geometry, and mass accounting against physical hardware. Correlate controller
+  dynamics with bench or flight evidence before claiming hardware fidelity.
+- Complete the [harness prerequisites](safety_harness.md) before real contact.
 
 ## Airframes and physical variation
 
