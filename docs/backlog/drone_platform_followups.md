@@ -35,7 +35,7 @@ implementation.
 ## Flight-parameter distribution qualification proposal
 
 This is a design for review, not active qualification criteria or authorization
-to increase flight counts. The current capture schedules, seed lists and
+to increase flight counts. The current capture schedules, flight counts and
 statistical gates remain unchanged.
 
 ### Population and sampling
@@ -120,7 +120,8 @@ producer risk.
 
 A sizing scenario of two 300-response cohorts means 600 response flights, before
 repeated-seed diagnostics, hover collection or fresh confirmation. The completed
-pipeline will accept longer explicit seed lists; there is no new count scalar.
+pipeline accepts larger per-set flight counts with seeds assigned from
+`starting_seed`.
 Estimate cost using measured throughput and compressed sizes, including temporary
 storage and failed attempts. The earlier four-worker response pilot suggests
 about 31 hours for 300 response flights; that is a planning estimate, not a

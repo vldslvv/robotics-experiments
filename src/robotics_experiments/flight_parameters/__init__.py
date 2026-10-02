@@ -11,7 +11,10 @@ from robotics_experiments.flight_parameters._artifact import (
     validate_flight_parameters_bundle,
     write_flight_parameters,
 )
-from robotics_experiments.flight_parameters._config import load_flight_parameters_config
+from robotics_experiments.flight_parameters._config import (
+    flight_trials,
+    load_flight_parameters_config,
+)
 from robotics_experiments.flight_parameters._derive import (
     derive_flight_parameters,
     evaluate_hover_pose,
@@ -54,6 +57,7 @@ __all__ = [
     "finalize_flight_parameters_bundle",
     "flight_parameters_from_payload",
     "flight_trace_from_payload",
+    "flight_trials",
     "load_flight_parameters_config",
     "load_flight_parameters",
     "load_flight_parameters_bundle",

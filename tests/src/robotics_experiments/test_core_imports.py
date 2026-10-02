@@ -88,6 +88,7 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "finalize_flight_parameters_bundle",
             "flight_parameters_from_payload",
             "flight_trace_from_payload",
+            "flight_trials",
             "load_flight_parameters_config",
             "load_flight_parameters",
             "load_flight_parameters_bundle",

@@ -19,7 +19,7 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.flight_parameters import load_flight_parameters_config
+from robotics_experiments.flight_parameters import flight_trials, load_flight_parameters_config
 from robotics_experiments.px4_bridge import VehicleState
 from robotics_experiments.px4_bridge.frames import rotate_vector_wxyz
 
@@ -63,7 +63,7 @@ def _run(*, context: SceneTestContext) -> None:
     run_id = os.environ[_RUN_ID_ENV]
     trial_index = int(os.environ[_TRIAL_INDEX_ENV])
     trial_dir = Path(os.environ[_TRIAL_DIR_ENV])
-    trials = tuple((group.name, seed) for group in config.sets for seed in group.hover_seeds)
+    trials = flight_trials(config=config, kind="hover")
     if not 1 <= trial_index <= len(trials):
         raise ValueError("hover trial index is outside configured flight sets")
     set_name, seed = trials[trial_index - 1]

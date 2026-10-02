@@ -78,6 +78,21 @@ def _fingerprint(value: object, /) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def flight_trials(*, config: FlightParametersConfig, kind: str) -> tuple[tuple[str, int], ...]:
+    """Assign seeds in hover-then-response, fit-validation-acceptance order."""
+    if kind not in {"hover", "response"}:
+        raise ValueError(f"unsupported flight kind: {kind!r}")
+    offset = sum(group.hover_count for group in config.sets) if kind == "response" else 0
+    membership = (
+        group.name
+        for group in config.sets
+        for _ in range(group.hover_count if kind == "hover" else group.response_count)
+    )
+    return tuple(
+        (name, config.starting_seed + offset + index) for index, name in enumerate(membership)
+    )
+
+
 def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig:
     """Load the exact supported flight-config-v1 YAML contract."""
 
@@ -96,6 +111,7 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
             "state_source",
             "experiment_config",
             "vehicle",
+            "starting_seed",
             "sets",
             "hover",
             "response",
@@ -117,23 +133,18 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
     sets_payload = _object(payload["sets"], "sets")
     _exact(sets_payload, {"fit", "validation", "acceptance"}, "sets")
     flight_sets = []
-    used_seeds: set[int] = set()
     for name in ("fit", "validation", "acceptance"):
         item = _object(sets_payload[name], f"sets.{name}")
-        _exact(item, {"hover_seeds", "response_seeds"}, f"sets.{name}")
-        seeds_by_kind = {}
-        for kind in ("hover_seeds", "response_seeds"):
-            values = item[kind]
-            if not isinstance(values, list) or not values:
-                raise ValueError(f"sets.{name}.{kind} must be a non-empty seed list")
-            for seed in values:
-                if type(seed) is not int or not 0 <= seed < 2**32:
-                    raise ValueError(f"sets.{name}.{kind} seeds must be integers in [0, 2**32)")
-                if seed in used_seeds:
-                    raise ValueError("flight sets must use distinct seeds for every flight")
-                used_seeds.add(seed)
-            seeds_by_kind[kind] = tuple(values)
-        flight_sets.append(FlightSetConfig(name=name, **seeds_by_kind))
+        _exact(item, {"hover_count", "response_count"}, f"sets.{name}")
+        flight_sets.append(
+            FlightSetConfig(
+                name=name,
+                hover_count=_positive_integer(item["hover_count"], f"sets.{name}.hover_count"),
+                response_count=_positive_integer(
+                    item["response_count"], f"sets.{name}.response_count"
+                ),
+            )
+        )
     sets = tuple(flight_sets)
     scenario_payload = _object(payload["hover"], "flight parameters hover")
     _exact(
@@ -216,6 +227,7 @@ def load_flight_parameters_config(path: str | Path, /) -> FlightParametersConfig
         state_source="simulator-ground-truth",
         experiment_config=_string(payload["experiment_config"], "experiment_config"),
         vehicle=_string(payload["vehicle"], "vehicle"),
+        starting_seed=payload["starting_seed"],
         sets=sets,
         hover=hover,
         response=response,

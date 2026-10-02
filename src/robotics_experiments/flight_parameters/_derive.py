@@ -11,6 +11,7 @@ from robotics_experiments.flight_parameters._artifact import (
     _artifact_fingerprint,
     _evidence_fingerprint,
 )
+from robotics_experiments.flight_parameters._config import flight_trials
 from robotics_experiments.flight_parameters._math import (
     _relative_attitude_errors,
 )
@@ -148,7 +149,7 @@ def _validate_traces(
     *, config: FlightParametersConfig, run_id: str, traces: tuple[FlightTrace, ...]
 ) -> None:
     hover = config.hover
-    expected = tuple((group.name, seed) for group in config.sets for seed in group.hover_seeds)
+    expected = flight_trials(config=config, kind="hover")
     if len(traces) != len(expected):
         raise ValueError(f"hover campaign requires {len(expected)} traces, got {len(traces)}")
     if tuple((trace.set_name, trace.seed) for trace in traces) != expected:
@@ -211,9 +212,7 @@ def derive_flight_parameters(
     if type(source_dirty) is not bool:
         raise ValueError("source_dirty must be boolean")
     _validate_traces(config=config, run_id=run_id, traces=traces)
-    expected_response = tuple(
-        (group.name, seed) for group in config.sets for seed in group.response_seeds
-    )
+    expected_response = flight_trials(config=config, kind="response")
     if tuple((trace.set_name, trace.seed) for trace in response_traces) != expected_response:
         raise ValueError("response traces must match configured flight sets and seeds")
     if tuple(trace.repetition for trace in response_traces) != tuple(

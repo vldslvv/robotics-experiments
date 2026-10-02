@@ -46,8 +46,8 @@ class FlightSetConfig:
     """Independent complete flights assigned before capture."""
 
     name: str
-    hover_seeds: tuple[int, ...]
-    response_seeds: tuple[int, ...]
+    hover_count: int
+    response_count: int
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,7 @@ class FlightParametersConfig:
     state_source: str
     experiment_config: str
     vehicle: str
+    starting_seed: int
     sets: tuple[FlightSetConfig, ...]
     hover: HoverConfig
     response: ResponseConfig

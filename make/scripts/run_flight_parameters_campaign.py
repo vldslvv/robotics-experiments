@@ -30,6 +30,7 @@ from robotics_experiments.flight_parameters import (
     derive_flight_parameters,
     finalize_flight_parameters_bundle,
     flight_evidence_sha256,
+    flight_trials,
     load_flight_parameters,
     load_flight_parameters_config,
     load_flight_trace,
@@ -124,9 +125,7 @@ def _processing(path: Path, /) -> _Processing:
 def _flights(config: FlightParametersConfig, /) -> tuple[_Flight, ...]:
     result: list[_Flight] = []
     for kind, prefix in (("hover", "evidence/trial"), ("response", "response/repetition")):
-        entries = tuple(
-            (group.name, seed) for group in config.sets for seed in getattr(group, f"{kind}_seeds")
-        )
+        entries = flight_trials(config=config, kind=kind)
         result.extend(
             _Flight(kind, index, name, seed, f"{prefix}-{index:03d}")
             for index, (name, seed) in enumerate(entries, start=1)

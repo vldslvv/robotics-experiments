@@ -24,6 +24,7 @@ from robotics_experiments.flight_parameters import (
     finalize_flight_parameters_bundle,
     flight_parameters_from_payload,
     flight_trace_from_payload,
+    flight_trials,
     load_flight_parameters,
     load_flight_parameters_config,
     publish_flight_parameters,
@@ -49,16 +50,17 @@ source_backend: px4-sitl
 state_source: simulator-ground-truth
 experiment_config: configs/flight_parameters_x500_hover.yaml
 vehicle: x500_01
+starting_seed: 1
 sets:
   fit:
-    hover_seeds: {list(range(1, repetitions + 1))}
-    response_seeds: [100]
+    hover_count: {repetitions}
+    response_count: 1
   validation:
-    hover_seeds: [201]
-    response_seeds: [200]
+    hover_count: 1
+    response_count: 1
   acceptance:
-    hover_seeds: [301]
-    response_seeds: [300]
+    hover_count: 1
+    response_count: 1
 hover:
   kind: hover
   mode_transition_timeout_s: 3.0
@@ -85,7 +87,7 @@ execution:
 
 def _trace(*, config, index: int, x: float, yaw: float = 0.0) -> FlightTrace:
     attitude = (math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0))
-    trials = tuple((group.name, seed) for group in config.sets for seed in group.hover_seeds)
+    trials = flight_trials(config=config, kind="hover")
     set_name, seed = trials[index - 1]
     return FlightTrace(
         artifact_kind="robotics-experiments-flight-parameters-trace",
@@ -116,11 +118,12 @@ def _trace(*, config, index: int, x: float, yaw: float = 0.0) -> FlightTrace:
     )
 
 
-def _response_trace(repetition: int = 1, /) -> ResponseTraceEvidence:
+def _response_trace(*, config, repetition: int = 1) -> ResponseTraceEvidence:
+    set_name, seed = flight_trials(config=config, kind="response")[repetition - 1]
     return ResponseTraceEvidence(
         repetition=repetition,
-        set_name=("fit", "validation", "acceptance")[repetition - 1],
-        seed=100 * repetition,
+        set_name=set_name,
+        seed=seed,
         profile_count=1,
         reference_path=f"response/repetition-{repetition:03d}/flight_parameters_response.json",
         reference_sha256="b" * 64,
@@ -232,7 +235,9 @@ def _flight_parameters(tmp_path: Path):
         config=config,
         run_id="run-1",
         traces=traces,
-        response_traces=tuple(_response_trace(index) for index in (1, 2, 3)),
+        response_traces=tuple(
+            _response_trace(config=config, repetition=index) for index in (1, 2, 3)
+        ),
         source_commit="abc123",
         source_dirty=False,
         created_at_utc="2026-08-21T12:00:00Z",
@@ -264,8 +269,18 @@ def test_production_hover_campaign_uses_independent_thirty_second_trials() -> No
     config = load_flight_parameters_config(REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml")
 
     assert tuple(group.name for group in config.sets) == ("fit", "validation", "acceptance")
-    assert tuple(len(group.hover_seeds) for group in config.sets) == (30, 10, 10)
-    assert tuple(len(group.response_seeds) for group in config.sets) == (1, 1, 1)
+    assert tuple(group.hover_count for group in config.sets) == (30, 10, 10)
+    assert tuple(group.response_count for group in config.sets) == (1, 1, 1)
+    assert config.starting_seed == 1001
+    assert flight_trials(config=config, kind="hover") == tuple(
+        (name, 1001 + index)
+        for index, name in enumerate(["fit"] * 30 + ["validation"] * 10 + ["acceptance"] * 10)
+    )
+    assert flight_trials(config=config, kind="response") == (
+        ("fit", 1051),
+        ("validation", 1052),
+        ("acceptance", 1053),
+    )
     assert config.hover.mode_transition_timeout_s == 15.0
     assert config.hover.mode_report_max_age_s == 2.5
     assert config.hover.settle_s == 6.0
@@ -415,7 +430,9 @@ def test_derivation_rejects_incomplete_campaign(tmp_path: Path) -> None:
             config=config,
             run_id="run-1",
             traces=(_trace(config=config, index=1, x=0.0),),
-            response_traces=tuple(_response_trace(index) for index in (1, 2, 3)),
+            response_traces=tuple(
+                _response_trace(config=config, repetition=index) for index in (1, 2, 3)
+            ),
             source_commit="abc123",
             source_dirty=False,
             created_at_utc="2026-08-21T12:00:00Z",
@@ -442,10 +459,8 @@ def test_bundle_manifest_and_atomic_latest(tmp_path: Path, compressed: bool) -> 
     run_dir = root / "run-1"
     traces = []
     response_traces = []
-    for index, group in enumerate(config.sets, start=1):
-        raw = replace(
-            _raw(config), trial_index=index, set_name=group.name, seed=group.hover_seeds[0]
-        )
+    for index, (set_name, seed) in enumerate(flight_trials(config=config, kind="hover"), start=1):
+        raw = replace(_raw(config), trial_index=index, set_name=set_name, seed=seed)
         evidence = run_dir / "evidence" / f"trial-{index:03d}"
         evidence.mkdir(parents=True)
         raw_path = evidence / "raw_trace.json"
@@ -467,7 +482,7 @@ def test_bundle_manifest_and_atomic_latest(tmp_path: Path, compressed: bool) -> 
             json.dumps(asdict(trace), allow_nan=False), encoding="utf-8"
         )
         traces.append(trace)
-        response = _response_trace(index)
+        response = _response_trace(config=config, repetition=index)
         response_reference = run_dir / response.reference_path
         response_reference.parent.mkdir(parents=True)
         response_ulog = run_dir / response.ulog_path
@@ -476,8 +491,8 @@ def test_bundle_manifest_and_atomic_latest(tmp_path: Path, compressed: bool) -> 
             json.dumps(
                 {
                     "schema_version": 1,
-                    "set_name": group.name,
-                    "seed": group.response_seeds[0],
+                    "set_name": response.set_name,
+                    "seed": response.seed,
                     "traces": [{}],
                 }
             )
@@ -572,13 +587,63 @@ def test_motion_samples_reject_invalid_values(tmp_path: Path, field, invalid, ra
         loader(payload)
 
 
-@pytest.mark.parametrize("replacement", ["[]", "[1]", "[true]", "[-1]", "[4294967296]"])
-def test_config_rejects_empty_reused_or_invalid_flight_seeds(tmp_path: Path, replacement) -> None:
+@pytest.mark.parametrize("field", ["hover_count", "response_count"])
+@pytest.mark.parametrize("replacement", ["-1", "true", "1.5", "'1'"])
+def test_config_rejects_invalid_flight_count(tmp_path: Path, field, replacement) -> None:
     _config(tmp_path)
     path = tmp_path / "flight.yaml"
-    path.write_text(path.read_text().replace("hover_seeds: [201]", f"hover_seeds: {replacement}"))
-    with pytest.raises(ValueError, match="seed"):
+    path.write_text(path.read_text().replace(f"{field}: 1", f"{field}: {replacement}", 1))
+    with pytest.raises(ValueError, match=field):
         load_flight_parameters_config(path)
+
+
+@pytest.mark.parametrize("field", ["hover_count", "response_count"])
+def test_config_rejects_zero_flight_count(tmp_path: Path, field) -> None:
+    _config(tmp_path)
+    path = tmp_path / "flight.yaml"
+    path.write_text(path.read_text().replace(f"{field}: 1", f"{field}: 0", 1))
+    with pytest.raises(ValueError, match=field):
+        load_flight_parameters_config(path)
+
+
+@pytest.mark.parametrize("starting_seed", [0, 1001])
+def test_flight_seeds_follow_global_order(tmp_path: Path, starting_seed) -> None:
+    _config(tmp_path)
+    path = tmp_path / "flight.yaml"
+    path.write_text(path.read_text().replace("starting_seed: 1", f"starting_seed: {starting_seed}"))
+    config = load_flight_parameters_config(path)
+    trials = flight_trials(config=config, kind="hover") + flight_trials(
+        config=config, kind="response"
+    )
+    assert tuple(name for name, _ in trials) == (
+        "fit",
+        "fit",
+        "validation",
+        "acceptance",
+        "fit",
+        "validation",
+        "acceptance",
+    )
+    assert tuple(seed for _, seed in trials) == tuple(range(starting_seed, starting_seed + 7))
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [("starting_seed: 1", "starting_seed: 2"), ("response_count: 1", "response_count: 10")],
+)
+def test_seed_and_count_changes_are_fingerprinted(tmp_path: Path, before, after) -> None:
+    config = _config(tmp_path)
+    path = tmp_path / "flight.yaml"
+    assert load_flight_parameters_config(path).config_fingerprint == config.config_fingerprint
+    path.write_text(path.read_text().replace(before, after, 1))
+    updated = load_flight_parameters_config(path)
+    assert updated.config_fingerprint != config.config_fingerprint
+    if before.startswith("response_count"):
+        assert flight_trials(config=updated, kind="response") == (
+            *(("fit", seed) for seed in range(5, 15)),
+            ("validation", 15),
+            ("acceptance", 16),
+        )
 
 
 def test_held_out_hover_flights_do_not_expand_reference_limits(tmp_path: Path) -> None:
@@ -602,7 +667,7 @@ def test_held_out_hover_flights_do_not_expand_reference_limits(tmp_path: Path) -
 def test_derivation_rejects_wrong_set_assignment(tmp_path: Path, kind) -> None:
     config = _config(tmp_path)
     traces = tuple(_trace(config=config, index=index, x=0.0) for index in (1, 2, 3, 4))
-    responses = tuple(_response_trace(index) for index in (1, 2, 3))
+    responses = tuple(_response_trace(config=config, repetition=index) for index in (1, 2, 3))
     if kind == "hover":
         traces = (replace(traces[0], set_name="acceptance"), *traces[1:])
     else:
@@ -627,14 +692,7 @@ def _stability_run(
     config = replace(
         config,
         hover=replace(config.hover, measure_s=30.0, sample_rate_hz=20.0),
-        sets=tuple(
-            replace(
-                group,
-                hover_seeds=tuple(seed + seed_offset for seed in group.hover_seeds),
-                response_seeds=tuple(seed + seed_offset for seed in group.response_seeds),
-            )
-            for group in config.sets
-        ),
+        starting_seed=config.starting_seed + seed_offset,
     )
     run_dir = root / run_id
     traces = []
@@ -668,15 +726,15 @@ def _stability_run(
         (evidence / "bridge.log").write_text(bridge_line)
         traces.append(trace)
     responses = []
-    for index, group in enumerate(config.sets, start=1):
-        record = replace(_response_trace(index), set_name=group.name, seed=group.response_seeds[0])
+    for index in range(1, 4):
+        record = _response_trace(config=config, repetition=index)
         reference = run_dir / record.reference_path
         reference.parent.mkdir(parents=True)
         reference.write_text(
             json.dumps(
                 {
-                    "set_name": group.name,
-                    "seed": group.response_seeds[0],
+                    "set_name": record.set_name,
+                    "seed": record.seed,
                     "controller_state_method": "px4-ulog-controller-boundary-v2",
                     "traces": [
                         {
@@ -902,6 +960,7 @@ def test_compression_preserves_stability_values_and_exact_trace_comparison(tmp_p
         "capture",
         "low-space",
         "source-change",
+        "seed-change",
         "corruption",
         "parallel",
     ],
@@ -956,11 +1015,7 @@ def test_campaign_checkpoints_flights_and_preserves_failed_evidence(
                     else "FLIGHT_PARAMETERS_RESPONSE_REPETITION"
                 ]
             )
-            group, seed = tuple(
-                (group.name, seed)
-                for group in config.sets
-                for seed in getattr(group, f"{kind}_seeds")
-            )[index - 1]
+            group, seed = flight_trials(config=config, kind=kind)[index - 1]
             directory = Path(
                 values["FLIGHT_PARAMETERS_TRIAL_DIR" if hover else "FLIGHT_PARAMETERS_RESPONSE_DIR"]
             )
@@ -1013,7 +1068,12 @@ def test_campaign_checkpoints_flights_and_preserves_failed_evidence(
                     raise OSError("injected capture failure")
         else:
             assert command[0] == "uv" and "--augment-reference" in command
-            if inject[0] and interruption in {"processing", "source-change", "corruption"}:
+            if inject[0] and interruption in {
+                "processing",
+                "source-change",
+                "seed-change",
+                "corruption",
+            }:
                 inject[0] = False
                 raise OSError("injected processing failure")
             path = Path(command[command.index("--augment-reference") + 1])
@@ -1089,6 +1149,15 @@ def test_campaign_checkpoints_flights_and_preserves_failed_evidence(
             with pytest.raises(ValueError, match="existing campaign record differs"):
                 main()
             assert captured == before
+    if interruption == "seed-change":
+        path = tmp_path / "flight.yaml"
+        original_config = path.read_text()
+        path.write_text(original_config.replace("starting_seed: 1", "starting_seed: 2"))
+        before = list(captured)
+        with pytest.raises(ValueError, match="existing campaign record differs"):
+            main()
+        assert captured == before
+        path.write_text(original_config)
     if interruption == "corruption":
         archive = run_dir / "evidence/trial-001/flight.ulg.gz"
         original = archive.read_bytes()
@@ -1105,6 +1174,8 @@ def test_campaign_checkpoints_flights_and_preserves_failed_evidence(
     assert len(tuple(run_dir.glob("response/*/complete.json"))) == 3
     assert len(captured) == (8 if interruption == "capture" else 7)
     assert len(set(captured)) == 7
+    inputs = json.loads((run_dir / "capture_inputs.json").read_text())
+    assert tuple(flight["seed"] for flight in inputs["flights"]) == tuple(range(1, 8))
     assert not tuple(run_dir.glob("evidence/*/*.ulg"))
     assert not tuple(run_dir.glob("response/*/*.ulg"))
     campaign = json.loads((run_dir / "campaign.json").read_text())

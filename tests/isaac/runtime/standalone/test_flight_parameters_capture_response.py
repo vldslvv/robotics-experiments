@@ -204,7 +204,7 @@ def test_capture_reports_preconditioning_timeout(monkeypatch: pytest.MonkeyPatch
     )
 
 
-@pytest.mark.parametrize(("repetition", "seed"), [(1, 1101), (2, 2101), (3, 3101)])
+@pytest.mark.parametrize(("repetition", "seed"), [(1, 1051), (2, 1052), (3, 1053)])
 def test_capture_uses_configured_flight_seed_before_starting_scenario(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -340,7 +340,7 @@ def test_capture_checks_ctbr_roll_pitch_and_yaw_response_signs(
 
 @pytest.mark.parametrize(
     ("trial", "set_name", "seed"),
-    [(1, "fit", 1001), (31, "validation", 2001), (41, "acceptance", 3001)],
+    [(1, "fit", 1001), (31, "validation", 1031), (41, "acceptance", 1041)],
 )
 def test_hover_records_the_same_snapshot_and_world_velocities_in_every_set(
     monkeypatch,

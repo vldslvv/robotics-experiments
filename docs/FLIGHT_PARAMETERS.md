@@ -23,9 +23,24 @@ are:
 
 The production config is `configs/flight/holybro_x500_v2_hover.yaml`. Its
 `sets.fit`, `sets.validation`, and `sets.acceptance` sections each contain
-explicit `hover_seeds` and `response_seeds` lists. Each seed starts one complete
-flight in fresh Isaac and PX4 processes. All lists must be non-empty and seeds
-must be distinct across the campaign. List lengths own the counts:
+positive integer `hover_count` and `response_count` values. `starting_seed` owns
+the first seed. Each flight starts fresh Isaac and PX4 processes. The default
+configuration is:
+
+```yaml
+starting_seed: 1001
+sets:
+  fit: {hover_count: 30, response_count: 1}
+  validation: {hover_count: 10, response_count: 1}
+  acceptance: {hover_count: 10, response_count: 1}
+```
+
+Seeds follow `starting_seed + flight_index`, with a zero-based global index.
+All hover flights precede all response flights; each kind uses fit, validation,
+then acceptance order. The default hover seeds are 1001 through 1050, followed
+by response seeds 1051 through 1053. Assignments happen before dispatch and stay
+the same on retry or resume, regardless of worker completion order. Changing
+counts can shift later seeds and requires a new campaign.
 
 | Set | Hover flights | Complete controller-response flights |
 | --- | ---: | ---: |
@@ -73,7 +88,8 @@ authored flight-definition format is maintained.
 
 The runner pins actual source-file hashes, including uncommitted capture code,
 container image IDs, host package versions, configuration and resolved flight
-identities in `capture_inputs.json`. It checks those inputs before each batch
+identities in `capture_inputs.json`. The configuration fingerprint includes
+`starting_seed` and every flight count. It checks those inputs before each batch
 and after collection. Source/runtime changes require a new capture campaign;
 completed evidence is never silently combined with a changed method.
 

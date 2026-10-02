@@ -26,7 +26,7 @@ from robotics_experiments.commanding import (
     VelocitySetpoint,
 )
 from robotics_experiments.config import ExperimentConfig
-from robotics_experiments.flight_parameters import load_flight_parameters_config
+from robotics_experiments.flight_parameters import flight_trials, load_flight_parameters_config
 from robotics_experiments.px4_bridge import (
     body_velocity_flu_from_state,
     world_enu_to_body_flu,
@@ -487,7 +487,7 @@ def _write_capture(
 def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir: Path) -> None:
     config = load_flight_parameters_config(os.environ["FLIGHT_PARAMETERS_CONFIG"])
     repetition = int(os.environ["FLIGHT_PARAMETERS_RESPONSE_REPETITION"])
-    trials = tuple((group.name, seed) for group in config.sets for seed in group.response_seeds)
+    trials = flight_trials(config=config, kind="response")
     if not 1 <= repetition <= len(trials):
         raise ValueError("response repetition is outside configured flight sets")
     set_name, seed = trials[repetition - 1]
