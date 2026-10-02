@@ -93,7 +93,7 @@ def _yaw_definition():
     )
 
 
-def test_capture_waits_for_minimum_and_stable_hold_then_converts_yaw(
+def test_capture_waits_for_deadline_and_stable_hold_then_converts_yaw(
     monkeypatch: pytest.MonkeyPatch,
 ):
     module = _load_script(monkeypatch)
@@ -108,16 +108,19 @@ def test_capture_waits_for_minimum_and_stable_hold_then_converts_yaw(
 
     first = adapter.advance(policy_input=_input(sim_time_us=0), state=adapter.initial_state)
     minimum = adapter.advance(policy_input=_input(sim_time_us=3_000_000), state=first.state)
-    active = adapter.advance(policy_input=_input(sim_time_us=3_500_000), state=minimum.state)
+    settled = adapter.advance(policy_input=_input(sim_time_us=3_500_000), state=minimum.state)
+    deadline_us = round(config.alignment.capture.timeout_s * 1_000_000)
+    active = adapter.advance(policy_input=_input(sim_time_us=deadline_us), state=settled.state)
 
     assert first.setpoint.yaw_rate_radps == 0.0
     assert minimum.setpoint.yaw_rate_radps == 0.0
+    assert settled.setpoint.yaw_rate_radps == 0.0
     assert active.setpoint.yaw_rate_radps == pytest.approx(-0.2)
     assert active.state.samples[0].command_yaw_rate_radps == pytest.approx(0.2)
-    assert active.state.initials[0].sim_time_us == 3_500_000
+    assert active.state.initials[0].sim_time_us == deadline_us
 
 
-def test_capture_stability_hold_restarts_after_motion(monkeypatch: pytest.MonkeyPatch):
+def test_capture_rejects_motion_within_final_stability_hold(monkeypatch: pytest.MonkeyPatch):
     module = _load_script(monkeypatch)
     config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
     adapter = module._policy_factory(  # noqa: SLF001 - focused capture transition test
@@ -130,15 +133,20 @@ def test_capture_stability_hold_restarts_after_motion(monkeypatch: pytest.Monkey
 
     state = adapter.advance(policy_input=_input(sim_time_us=0), state=adapter.initial_state).state
     state = adapter.advance(policy_input=_input(sim_time_us=3_000_000), state=state).state
+    deadline_us = round(config.alignment.capture.timeout_s * 1_000_000)
     state = adapter.advance(
-        policy_input=_input(sim_time_us=3_250_000, linear_velocity=(0.03, 0.0, 0.0)),
+        policy_input=_input(sim_time_us=deadline_us - 250_000, linear_velocity=(0.03, 0.0, 0.0)),
         state=state,
     ).state
-    restarted = adapter.advance(policy_input=_input(sim_time_us=3_500_000), state=state)
-    active = adapter.advance(policy_input=_input(sim_time_us=4_000_000), state=restarted.state)
+    restarted = adapter.advance(policy_input=_input(sim_time_us=deadline_us - 200_000), state=state)
+    failed = adapter.advance(policy_input=_input(sim_time_us=deadline_us), state=restarted.state)
 
     assert restarted.setpoint.yaw_rate_radps == 0.0
-    assert active.setpoint.yaw_rate_radps == pytest.approx(-0.2)
+    assert failed.failure_reason == (
+        "alignment profile 'yaw' did not stabilize within "
+        f"{config.alignment.capture.timeout_s:.1f}s"
+    )
+    assert not failed.state.samples
 
 
 def test_capture_recenters_to_reference_between_profiles(monkeypatch: pytest.MonkeyPatch):
@@ -183,11 +191,17 @@ def test_capture_reports_preconditioning_timeout(monkeypatch: pytest.MonkeyPatch
 
     state = adapter.advance(policy_input=_input(sim_time_us=0), state=adapter.initial_state).state
     failed = adapter.advance(
-        policy_input=_input(sim_time_us=12_100_000, linear_velocity=(0.03, 0.0, 0.0)),
+        policy_input=_input(
+            sim_time_us=round((config.alignment.capture.timeout_s + 0.1) * 1_000_000),
+            linear_velocity=(0.03, 0.0, 0.0),
+        ),
         state=state,
     )
 
-    assert failed.failure_reason == "alignment profile 'yaw' did not stabilize within 12.0s"
+    assert failed.failure_reason == (
+        "alignment profile 'yaw' did not stabilize within "
+        f"{config.alignment.capture.timeout_s:.1f}s"
+    )
 
 
 @pytest.mark.parametrize(("repetition", "seed"), [(1, 1101), (2, 2101), (3, 3101)])

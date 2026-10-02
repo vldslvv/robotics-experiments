@@ -179,15 +179,7 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
             if phase_started_us < 0:
                 phase_started_us = now_us
             elapsed_us = now_us - phase_started_us
-            if elapsed_us > round(capture.timeout_s * 1_000_000):
-                return PolicyResult(
-                    state=state,
-                    setpoint=neutral,
-                    failure_reason=(
-                        f"alignment profile {profiles[profile_index].name!r} did not "
-                        f"stabilize within {capture.timeout_s:.1f}s"
-                    ),
-                )
+            deadline_reached = elapsed_us >= round(capture.timeout_s * 1_000_000)
             minimum_elapsed = elapsed_us >= round(capture.minimum_neutral_s * 1_000_000)
             if minimum_elapsed and _is_stable(policy_input=policy_input, config=config):
                 if stable_started_us < 0:
@@ -197,7 +189,16 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
             stable_elapsed = stable_started_us >= 0 and (
                 now_us - stable_started_us >= round(capture.stable_hold_s * 1_000_000)
             )
-            if not stable_elapsed:
+            if deadline_reached and not stable_elapsed:
+                return PolicyResult(
+                    state=state,
+                    setpoint=neutral,
+                    failure_reason=(
+                        f"alignment profile {profiles[profile_index].name!r} did not "
+                        f"stabilize within {capture.timeout_s:.1f}s"
+                    ),
+                )
+            if not deadline_reached:
                 return PolicyResult(
                     state=_ProbeState(
                         profile_index=profile_index,

@@ -194,6 +194,11 @@ mkdir_colon_dirs "${ISAAC_HOST_CACHE_DIRS}"
 echo "Integration artifacts: ${run_root}"
 
 ISAAC_DOCKER_VOLUMES="${ISAAC_DOCKER_VOLUMES//\$\{ISAAC_RUN_ROOT\}/${ISAAC_RUN_ROOT}}"
+FLIGHT_PARAMETERS_LOG_VOLUMES=()
+if [ -n "${FLIGHT_PARAMETERS_TRIAL_DIR}" ] || [ -n "${FLIGHT_PARAMETERS_RESPONSE_DIR}" ]; then
+    # Preserve the authored bridge path while isolating concurrent flight logs.
+    FLIGHT_PARAMETERS_LOG_VOLUMES=(-v "${PX4_LOGS}:${ISAAC_PROJECT_DIR}/px4/logs")
+fi
 
 # Container names and the primary container (whose network namespace Isaac and
 # every additional PX4 instance share).
@@ -301,6 +306,16 @@ cleanup() {
         docker rm -f "${container}" >/dev/null 2>&1 || true
     done
     integration_timing "remove_px4_containers" "${stage_start_ms}"
+
+    if [ -n "${FLIGHT_PARAMETERS_TRIAL_DIR}" ] || [ -n "${FLIGHT_PARAMETERS_RESPONSE_DIR}" ]; then
+        # Container writers run as root; the host owns subsequent processing
+        # and removal of verified copies in these private output directories.
+        docker run --rm --network none --user 0:0 \
+            -v "${PX4_LOGS}:/flight-logs" \
+            -v "${FLIGHT_PARAMETERS_RESPONSE_DIR:-${FLIGHT_PARAMETERS_TRIAL_DIR}}:/flight-evidence" \
+            --entrypoint chown "${PX4_IMAGE}" \
+            -R "$(id -u):$(id -g)" /flight-logs /flight-evidence
+    fi
 
     if [ -n "${FLIGHT_PARAMETERS_RESPONSE_DIR}" ]; then
         mapfile -t flight_parameter_response_ulogs < <(find "${PX4_LOGS}" -type f -name '*.ulg' -print)
@@ -435,6 +450,7 @@ if docker run --rm \
     -e "STRICT=${STRICT:-}" \
     -e "TEST_TARGET=${TEST_TARGET}" \
     ${ISAAC_DOCKER_VOLUMES} \
+    "${FLIGHT_PARAMETERS_LOG_VOLUMES[@]}" \
     --entrypoint /bin/bash \
     "${ISAAC_IMAGE}" \
     "${ISAAC_PROJECT_DIR}/make/scripts/run_isaac_test_in_container.sh"; then

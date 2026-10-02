@@ -54,13 +54,16 @@ def main() -> None:
     if args.target is None or args.reference is None or args.run_id is None:
         parser.error("fitting requires --target, --reference, and --run-id")
     os.environ["ROBOTICS_ALIGNMENT_RUN_DIR"] = str(args.run_dir)
+    flight_parameters_artifact = str((args.run_dir / "flight_parameters").resolve(strict=True))
     target = replace(
         load_controller_definition(args.target),
         image=_diagnostic_image(args.run_dir / "target_candidates.json"),
+        flight_parameters_artifact=flight_parameters_artifact,
     )
     reference = replace(
         load_controller_definition(args.reference),
         image=_diagnostic_image(args.run_dir / "reference.json"),
+        flight_parameters_artifact=flight_parameters_artifact,
     )
     result = align(target, reference)
     result = replace(

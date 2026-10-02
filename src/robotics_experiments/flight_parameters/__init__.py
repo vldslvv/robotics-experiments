@@ -17,6 +17,11 @@ from robotics_experiments.flight_parameters._derive import (
     evaluate_hover_pose,
     summarize_signal,
 )
+from robotics_experiments.flight_parameters._evidence import (
+    compress_flight_evidence,
+    flight_evidence_sha256,
+    open_flight_evidence,
+)
 from robotics_experiments.flight_parameters._models import (
     FlightParameters,
     FlightParametersBundle,
@@ -26,8 +31,17 @@ from robotics_experiments.flight_parameters._models import (
     ResponseTraceEvidence,
     SignalStatistics,
 )
+from robotics_experiments.flight_parameters._stability import (
+    StabilityReport,
+    analyze_flight_parameters_stability,
+)
 
 __all__ = [
+    "compress_flight_evidence",
+    "flight_evidence_sha256",
+    "open_flight_evidence",
+    "StabilityReport",
+    "analyze_flight_parameters_stability",
     "FlightParametersConfig",
     "FlightParameters",
     "FlightParametersBundle",

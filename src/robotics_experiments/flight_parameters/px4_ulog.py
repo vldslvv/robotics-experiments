@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -12,6 +11,8 @@ from pyulog import ULog
 
 from robotics_experiments.flight_parameters import (
     FlightParametersConfig,
+    flight_evidence_sha256,
+    open_flight_evidence,
 )
 from robotics_experiments.flight_parameters._artifact import (
     hover_verification_from_payload,
@@ -25,14 +26,6 @@ from robotics_experiments.flight_parameters.px4_evidence import (
 __all__ = ["verify_px4_hover_trial"]
 
 
-def _sha256(path: Path, /) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _dataset(ulog: ULog, name: str, /) -> dict[str, np.ndarray]:
     matches = [item.data for item in ulog.data_list if item.name == name and item.multi_id == 0]
     if len(matches) != 1:
@@ -41,7 +34,8 @@ def _dataset(ulog: ULog, name: str, /) -> dict[str, np.ndarray]:
 
 
 def _load_px4_hover_log(path: Path, /) -> ParsedPx4HoverLog:
-    ulog = ULog(str(path))
+    with open_flight_evidence(path) as stream:
+        ulog = ULog(stream)
     version = str(ulog.msg_info_dict.get("ver_sw", ""))
     if not version:
         raise ValueError("PX4 ULog does not identify its software version")
@@ -68,8 +62,8 @@ def verify_px4_hover_trial(
         config=config,
         raw=raw,
         log=_load_px4_hover_log(ulog_path),
-        raw_trace_sha256=_sha256(raw_trace_path),
-        ulog_sha256=_sha256(ulog_path),
+        raw_trace_sha256=flight_evidence_sha256(raw_trace_path),
+        ulog_sha256=flight_evidence_sha256(ulog_path),
     )
     verification_path = trial_dir / "hover_verification.json"
     trace_path = trial_dir / "trace.json"

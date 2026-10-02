@@ -11,6 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from robotics_experiments.flight_parameters._evidence import (
+    flight_evidence_sha256,
+    resolve_flight_evidence,
+)
 from robotics_experiments.flight_parameters._models import (
     FlightParameters,
     FlightParametersBundle,
@@ -707,7 +711,10 @@ def write_flight_parameters(*, flight_parameters: FlightParameters, run_dir: Pat
 
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "flight_parameters.json"
-    with path.open("x", encoding="utf-8") as stream:
+    if path.exists():
+        raise FileExistsError(path)
+    pending = path.with_name(path.name + ".pending")
+    with pending.open("w", encoding="utf-8") as stream:
         json.dump(
             asdict(flight_parameters),
             stream,
@@ -716,7 +723,8 @@ def write_flight_parameters(*, flight_parameters: FlightParameters, run_dir: Pat
             sort_keys=True,
         )
         stream.write("\n")
-    load_flight_parameters(path)
+    load_flight_parameters(pending)
+    pending.replace(path)
     return path
 
 
@@ -727,7 +735,8 @@ def finalize_flight_parameters_bundle(run_dir: Path, /) -> Path:
     manifest_path = run_dir / "manifest.json"
     if manifest_path.exists():
         raise FileExistsError(f"flight parameters manifest already exists: {manifest_path}")
-    payloads = sorted(path for path in run_dir.rglob("*") if path.is_file())
+    pending = manifest_path.with_name("manifest.json.pending")
+    payloads = sorted(path for path in run_dir.rglob("*") if path.is_file() and path != pending)
     if not payloads or not (run_dir / "flight_parameters.json").is_file():
         raise ValueError("flight parameters bundle has no artifact payload")
     manifest = {
@@ -746,19 +755,16 @@ def finalize_flight_parameters_bundle(run_dir: Path, /) -> Path:
             for path in payloads
         ],
     }
-    with manifest_path.open("x", encoding="utf-8") as stream:
+    with pending.open("w", encoding="utf-8") as stream:
         json.dump(manifest, stream, allow_nan=False, separators=(",", ":"), sort_keys=True)
         stream.write("\n")
-    validate_flight_parameters_bundle(run_dir)
+    _validate_bundle(bundle=run_dir, manifest_path=pending)
+    pending.replace(manifest_path)
     return manifest_path
 
 
-def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
-    """Validate artifact identity plus exact manifest coverage and hashes."""
-
-    bundle = Path(run_dir)
+def _validate_bundle(*, bundle: Path, manifest_path: Path) -> None:
     flight_parameters = load_flight_parameters(bundle)
-    manifest_path = bundle / "manifest.json"
     try:
         manifest = _object(json.loads(manifest_path.read_text(encoding="utf-8")), "manifest")
     except (OSError, json.JSONDecodeError) as exc:
@@ -801,8 +807,8 @@ def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
     for trial_index in range(1, flight_parameters.hover_trial_count + 1):
         trial = bundle / "evidence" / f"trial-{trial_index:03d}"
         raw_path = trial / "raw_trace.json"
-        ulog_path = trial / "flight.ulg"
-        bridge_path = trial / "bridge.log"
+        ulog_path = resolve_flight_evidence(trial / "flight.ulg")
+        bridge_path = resolve_flight_evidence(trial / "bridge.log")
         verification_path = trial / "hover_verification.json"
         trace_path = trial / "trace.json"
         if not all(
@@ -827,7 +833,7 @@ def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
             raise ValueError(f"flight parameters trial {trial_index} evidence identity mismatch")
         if verification.raw_trace_sha256 != _sha256(raw_path):
             raise ValueError(f"flight parameters trial {trial_index} raw trace digest mismatch")
-        if verification.ulog_sha256 != _sha256(ulog_path):
+        if verification.ulog_sha256 != flight_evidence_sha256(ulog_path):
             raise ValueError(f"flight parameters trial {trial_index} ULog digest mismatch")
         if trace.verification_fingerprint != verification.verification_fingerprint:
             raise ValueError(f"flight parameters trial {trial_index} verification link mismatch")
@@ -846,7 +852,7 @@ def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
             (trace.bridge_log_path, trace.bridge_log_sha256),
         ):
             path = bundle / relative
-            if not path.is_file() or _sha256(path) != expected_digest:
+            if not path.is_file() or flight_evidence_sha256(path) != expected_digest:
                 raise ValueError(
                     f"flight parameters response repetition {trace.repetition} hash mismatch "
                     f"for {relative}"
@@ -864,6 +870,13 @@ def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
         tuple(verification_fingerprints) + tuple(response_fingerprints)
     ):
         raise ValueError("flight parameters evidence fingerprint mismatch")
+
+
+def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
+    """Validate artifact identity plus exact manifest coverage and hashes."""
+
+    bundle = Path(run_dir)
+    _validate_bundle(bundle=bundle, manifest_path=bundle / "manifest.json")
 
 
 def load_flight_parameters_bundle(*, path: str | Path) -> FlightParametersBundle:

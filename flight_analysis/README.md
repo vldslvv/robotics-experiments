@@ -46,6 +46,9 @@ logged normalized PX4 torque setpoint against reconstructed physical body
 torque, reporting the per-axis N-m conversion scale, intercept, and fit RMSE.
 The arbitrary-window replay is diagnostic. The complete actuator audit and
 per-profile controller replay are required by controller-alignment publication.
+The replay/audit tool accepts plain or gzip ULogs and bridge logs, including
+compressed producer files reached through the existing alignment symlinks.
+It streams decompression without creating uncompressed evidence copies.
 
 Alignment trace schema 1 records every profile's absolute PX4 simulation start
 time, exact command cadence, physical and PX4-estimated initial velocity, and

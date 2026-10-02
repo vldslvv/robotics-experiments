@@ -35,6 +35,7 @@ from robotics_experiments.drone._airframe import (
     compute_body_mass_properties,
     load_builder_config,
 )
+from robotics_experiments.flight_parameters import open_flight_evidence
 from robotics_experiments.px4_bridge import GRAVITY_M_S2
 
 __all__ = ["main"]
@@ -480,6 +481,22 @@ def _controller_setpoint_delay_scan(
     return results
 
 
+def _allocator_collective_at_motor_samples(
+    *,
+    motor_controls: np.ndarray,
+    normalized_mix: np.ndarray,
+    logged_collective: np.ndarray,
+    logged_sample_matches: np.ndarray,
+) -> np.ndarray:
+    """Recover missing thrust publications from their unsaturated motor output."""
+    unsaturated = np.all(
+        (motor_controls > _MOTOR_SATURATION_EPS) & (motor_controls < 1.0 - _MOTOR_SATURATION_EPS),
+        axis=1,
+    )
+    recovered = -(motor_controls @ np.linalg.pinv(normalized_mix).T)[:, 3]
+    return np.where(logged_sample_matches | ~unsaturated, logged_collective, recovered)
+
+
 def _controller_handoff_indices(
     *,
     replay_indices: np.ndarray,
@@ -601,14 +618,16 @@ def _bridge_actuator_samples(
     forces: list[list[float]] = []
     join_errors: list[int] = []
     body_torques: list[list[float]] = []
-    for line in path.read_text().splitlines():
-        dynamics_match = _BRIDGE_DYNAMICS_PATTERN.search(line)
-        if dynamics_match is not None:
-            actuator_times.append(int(dynamics_match.group("actuator_time_us")))
-            rotor_speeds.append(list(ast.literal_eval(dynamics_match.group("rotor_speed"))))
-            forces.append(list(ast.literal_eval(dynamics_match.group("forces"))))
-            join_errors.append(int(dynamics_match.group("join_error_us")))
-            body_torques.append(list(ast.literal_eval(dynamics_match.group("body_torque"))))
+    with open_flight_evidence(path) as stream:
+        for encoded in stream:
+            line = encoded.decode("utf-8")
+            dynamics_match = _BRIDGE_DYNAMICS_PATTERN.search(line)
+            if dynamics_match is not None:
+                actuator_times.append(int(dynamics_match.group("actuator_time_us")))
+                rotor_speeds.append(list(ast.literal_eval(dynamics_match.group("rotor_speed"))))
+                forces.append(list(ast.literal_eval(dynamics_match.group("forces"))))
+                join_errors.append(int(dynamics_match.group("join_error_us")))
+                body_torques.append(list(ast.literal_eval(dynamics_match.group("body_torque"))))
     if not actuator_times:
         raise ValueError(f"bridge log {path} has incomplete actuator diagnostics")
     return (
@@ -633,28 +652,30 @@ def _bridge_state_samples(
     attitudes: list[list[float]] = []
     velocities: list[list[float]] = []
     angular_velocities: list[list[float]] = []
-    for line in path.read_text().splitlines():
-        state_match = _BRIDGE_STATE_PATTERN.search(line)
-        if state_match is None:
-            continue
-        sample_time = int(state_match.group("sim_time_us"))
-        position = list(ast.literal_eval(state_match.group("position")))
-        attitude = list(ast.literal_eval(state_match.group("attitude")))
-        velocity = list(ast.literal_eval(state_match.group("velocity")))
-        angular_velocity = list(ast.literal_eval(state_match.group("angular_velocity")))
-        if times and sample_time == times[-1]:
-            positions[-1] = position
-            attitudes[-1] = attitude
-            velocities[-1] = velocity
-            angular_velocities[-1] = angular_velocity
-            continue
-        if times and sample_time < times[-1]:
-            raise ValueError(f"bridge log {path} physical-state timestamps regress")
-        times.append(sample_time)
-        positions.append(position)
-        attitudes.append(attitude)
-        velocities.append(velocity)
-        angular_velocities.append(angular_velocity)
+    with open_flight_evidence(path) as stream:
+        for encoded in stream:
+            line = encoded.decode("utf-8")
+            state_match = _BRIDGE_STATE_PATTERN.search(line)
+            if state_match is None:
+                continue
+            sample_time = int(state_match.group("sim_time_us"))
+            position = list(ast.literal_eval(state_match.group("position")))
+            attitude = list(ast.literal_eval(state_match.group("attitude")))
+            velocity = list(ast.literal_eval(state_match.group("velocity")))
+            angular_velocity = list(ast.literal_eval(state_match.group("angular_velocity")))
+            if times and sample_time == times[-1]:
+                positions[-1] = position
+                attitudes[-1] = attitude
+                velocities[-1] = velocity
+                angular_velocities[-1] = angular_velocity
+                continue
+            if times and sample_time < times[-1]:
+                raise ValueError(f"bridge log {path} physical-state timestamps regress")
+            times.append(sample_time)
+            positions.append(position)
+            attitudes.append(attitude)
+            velocities.append(velocity)
+            angular_velocities.append(angular_velocity)
     if not times:
         raise ValueError(f"bridge log {path} has incomplete physical-state diagnostics")
     time_array = np.asarray(times, dtype=np.int64)
@@ -682,10 +703,61 @@ def _profile_topic(
     }
 
 
+def _velocity_controller_derivative(*, ulog, local_position: dict) -> np.ndarray:
+    """Reconstruct mc_pos_control's filtered velocity derivative, not EKF acceleration."""
+    names = ("MPC_VEL_LP", "MPC_VEL_NF_FRQ", "MPC_VELD_LP")
+    try:
+        velocity_lp, notch_hz, derivative_hz = (
+            float(ulog.initial_parameters[name]) for name in names
+        )
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("ULog is missing the PX4 velocity-controller filter parameters") from exc
+    if not all(
+        math.isfinite(value) and value >= 0.0 for value in (velocity_lp, notch_hz, derivative_hz)
+    ):
+        raise ValueError(
+            "PX4 velocity-controller filter frequencies must be finite and non-negative"
+        )
+    if velocity_lp != 0.0 or notch_hz != 0.0:
+        raise ValueError(
+            "controller-boundary capture requires disabled MPC_VEL_LP and MPC_VEL_NF_FRQ"
+        )
+    if any(name in names for _timestamp, name, _value in ulog.changed_parameters):
+        raise ValueError("controller-boundary capture requires constant velocity filter parameters")
+
+    timestamps = np.asarray(local_position["timestamp_sample"], dtype=np.int64)
+    if len(timestamps) < 2 or np.any(np.diff(timestamps) <= 0):
+        raise ValueError("velocity-controller reconstruction requires increasing sample timestamps")
+    velocity = np.column_stack([local_position[name] for name in ("vx", "vy", "vz")])
+    valid = np.column_stack(
+        [local_position[name] for name in ("v_xy_valid", "v_xy_valid", "v_z_valid")]
+    ).astype(bool) & np.isfinite(velocity)
+    valid[:, :2] = np.all(valid[:, :2], axis=1)[:, None]
+    derivative = np.empty_like(velocity, dtype=np.float64)
+    previous_velocity = np.zeros(3)
+    filtered_derivative = np.zeros(3)
+    # These are the pinned PX4 module's dt clamps, not experiment tunables.
+    intervals = np.clip(
+        np.diff(timestamps, prepend=timestamps[0] - (timestamps[1] - timestamps[0])) * 1e-6,
+        0.002,
+        0.04,
+    )
+    for index, dt in enumerate(intervals):
+        alpha = 1.0 if derivative_hz == 0.0 else dt / (dt + 1.0 / (2.0 * math.pi * derivative_hz))
+        acceleration = (velocity[index] - previous_velocity) / dt
+        filtered_derivative = np.where(
+            valid[index], filtered_derivative + alpha * (acceleration - filtered_derivative), 0.0
+        )
+        previous_velocity = np.where(valid[index], velocity[index], 0.0)
+        derivative[index] = np.where(valid[index], filtered_derivative, np.nan)
+    return derivative
+
+
 def _controller_boundary(
     *,
     local_setpoint: dict,
     local_position: dict,
+    velocity_derivative_ned: np.ndarray,
     attitude_setpoint: dict,
     rates_setpoint: dict,
     torque_setpoint: dict,
@@ -723,10 +795,11 @@ def _controller_boundary(
         topic=local_setpoint,
         fields=("vx", "vy", "vz"),
     )
-    linear_acceleration_ned = interpolated_vector(
-        topic=local_position,
-        fields=("ax", "ay", "az"),
-    )
+    linear_acceleration_ned = _linear_interpolate(
+        source_t=_topic_time_us(topic=local_position).astype(np.float64),
+        values=velocity_derivative_ned,
+        query_t=np.array([timestamp_us], dtype=np.float64),
+    )[0]
     angular_acceleration_frd = interpolated_vector(
         topic=angular_velocity,
         fields=(
@@ -819,6 +892,9 @@ def _augment_reference_controller_state(
 
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
+    velocity_derivative_ned = _velocity_controller_derivative(
+        ulog=ulog, local_position=local_position
+    )
     attitude_setpoint = _dataset(ulog=ulog, name="vehicle_attitude_setpoint")
     rates_setpoint = _dataset(ulog=ulog, name="vehicle_rates_setpoint")
     torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
@@ -832,6 +908,7 @@ def _augment_reference_controller_state(
         controller_vectors, source_age_us = _controller_boundary(
             local_setpoint=local_setpoint,
             local_position=local_position,
+            velocity_derivative_ned=velocity_derivative_ned,
             attitude_setpoint=attitude_setpoint,
             rates_setpoint=rates_setpoint,
             torque_setpoint=torque_setpoint,
@@ -857,12 +934,13 @@ def _augment_reference_controller_state(
                 "source_age_us": raw_profile["initial_controller_state_source_age_us"],
             }
         )
+    reference["controller_state_method"] = "px4-ulog-controller-boundary-v2"
     temporary_path = reference_path.with_suffix(".json.tmp")
     temporary_path.write_text(json.dumps(reference, indent=2, allow_nan=False) + "\n")
     temporary_path.replace(reference_path)
     return {
         "schema_version": 1,
-        "method": "px4-ulog-controller-boundary-v1",
+        "method": reference["controller_state_method"],
         "reference": str(reference_path),
         "profiles": profile_reports,
     }
@@ -1355,6 +1433,9 @@ def _report(
     controller_vectors, controller_source_age_us = _controller_boundary(
         local_setpoint=local_setpoint,
         local_position=local_position,
+        velocity_derivative_ned=_velocity_controller_derivative(
+            ulog=ulog, local_position=local_position
+        ),
         attitude_setpoint=attitude_setpoint,
         rates_setpoint=rates_setpoint,
         torque_setpoint=torque_setpoint,
@@ -1512,6 +1593,21 @@ def _report(
             ]
         ),
         axis=1,
+    )
+    # A missing topic publication must not make a fresh motor output appear stale.
+    # Unsaturated allocation is invertible at the exact motor timestamp.
+    thrust_sample_collective = _allocator_collective_at_motor_samples(
+        motor_controls=np.column_stack(
+            [
+                np.asarray(motor[f"control[{index}]"], dtype=np.float64)[motor_index]
+                for index in range(rotor_count)
+            ]
+        ),
+        normalized_mix=params.normalized_allocation_mix,
+        logged_collective=thrust_sample_collective,
+        logged_sample_matches=(
+            thrust_setpoint["timestamp"][thrust_sample_index] == motor["timestamp"][motor_index]
+        ),
     )
     rates_sample_index = _hold_indices(
         source_t=relative_time(rates_setpoint),
@@ -2103,6 +2199,8 @@ def main() -> None:
     ulog_path = args.ulog if args.ulog is not None else args.ulog_positional
     if ulog_path is None:
         parser.error("one ULog path is required")
+    with open_flight_evidence(ulog_path) as stream:
+        replay_ulog = ULog(stream)
     if args.augment_reference is not None:
         if (
             args.audit_reference is not None
@@ -2111,7 +2209,7 @@ def main() -> None:
         ):
             parser.error("--augment-reference cannot be combined with audit or profile options")
         report = _augment_reference_controller_state(
-            ulog=ULog(str(ulog_path)),
+            ulog=replay_ulog,
             reference_path=args.augment_reference,
         )
     elif args.profile_reference is not None:
@@ -2121,7 +2219,7 @@ def main() -> None:
                 "and cannot use --window"
             )
         report = _profile_replay_report(
-            ulog=ULog(str(ulog_path)),
+            ulog=replay_ulog,
             config_path=args.config,
             controller_artifact_path=args.controller_artifact,
             reference_path=args.profile_reference,
@@ -2131,7 +2229,7 @@ def main() -> None:
         if args.audit_reference is None or args.bridge_log is None:
             parser.error("--audit-reference and --bridge-log must be provided together")
         report = _actuator_boundary_report(
-            ulog=ULog(str(ulog_path)),
+            ulog=replay_ulog,
             config_path=args.config,
             reference_path=args.audit_reference,
             bridge_log_path=args.bridge_log,
@@ -2140,7 +2238,6 @@ def main() -> None:
         if args.controller_artifact is None or args.window is None:
             parser.error("--controller-artifact and --window are required for controller replay")
         start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
-        replay_ulog = ULog(str(ulog_path))
         report = _report(
             ulog=replay_ulog,
             config_path=args.config,

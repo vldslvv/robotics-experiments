@@ -1,5 +1,6 @@
 """Frame and sampling tests for the PX4/Isaac controller replay."""
 
+import gzip
 import json
 import math
 from pathlib import Path
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 
 from flight_analysis.tools.controller_state_replay import (
+    _allocator_collective_at_motor_samples,
     _augment_reference_controller_state,
     _bridge_actuator_samples,
     _bridge_state_samples,
@@ -30,6 +32,7 @@ from flight_analysis.tools.controller_state_replay import (
     _px4_vertical_velocity_state,
     _rate_input_metrics,
     _replay_time_grid,
+    _velocity_controller_derivative,
     _vertical_acceleration_setpoint_enu,
     _vertical_setpoint_delay_scan,
 )
@@ -190,6 +193,28 @@ def test_controller_setpoint_delay_scan_finds_one_tick_handoff() -> None:
     assert result[1]["body_rate_setpoint_rmse_radps"] == [0.0, 0.0, 0.0]
 
 
+def test_allocator_collective_recovers_missing_unsaturated_publications() -> None:
+    mix = np.array(
+        [
+            [-1.0, 1.0, 1.0, -1.0],
+            [1.0, -1.0, 1.0, -1.0],
+            [1.0, 1.0, -1.0, -1.0],
+            [-1.0, -1.0, -1.0, -1.0],
+        ]
+    )
+    controls = np.tile(mix @ np.array([0.01, 0.02, -0.03, -0.57]), (3, 1))
+    controls[2, 0] = 1.0
+
+    collective = _allocator_collective_at_motor_samples(
+        motor_controls=controls,
+        normalized_mix=mix,
+        logged_collective=np.array([0.56, 0.56, 0.56]),
+        logged_sample_matches=np.array([False, True, False]),
+    )
+
+    np.testing.assert_allclose(collective, [0.57, 0.56, 0.56])
+
+
 def test_controller_handoff_join_reproduces_independent_work_queue_order() -> None:
     joined, attitude_delay, allocator_delay = _controller_handoff_indices(
         replay_indices=np.array([2, 3, 4, 5]),
@@ -330,7 +355,8 @@ def test_rate_input_metrics_keep_velocity_and_derivative_errors_separate():
     }
 
 
-def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path):
+@pytest.mark.parametrize("compressed", [False, True])
+def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path, compressed: bool):
     log = tmp_path / "bridge.log"
     log.write_text(
         "PX4 bridge dynamics: tick=26 sim_time_us=104000 "
@@ -340,6 +366,12 @@ def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path):
         "body_torque_n_m=[0.0, 0.0, 0.01]\n"
     )
 
+    if compressed:
+        # Consumers may retain their existing logical filename via a symlink.
+        packed = log.with_suffix(".log.gz")
+        packed.write_bytes(gzip.compress(log.read_bytes()))
+        log.unlink()
+        log.symlink_to(packed.name)
     time_us, rotor_speed, forces, join_and_torque = _bridge_actuator_samples(path=log)
 
     assert time_us.tolist() == [100000]
@@ -348,7 +380,8 @@ def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path):
     assert join_and_torque.tolist() == [[4000.0, 0.0, 0.0, 0.01]]
 
 
-def test_bridge_state_samples_preserve_physics_tick_inputs(tmp_path: Path):
+@pytest.mark.parametrize("compressed", [False, True])
+def test_bridge_state_samples_preserve_physics_tick_inputs(tmp_path: Path, compressed: bool):
     log = tmp_path / "bridge.log"
     log.write_text(
         "PX4 bridge dynamics: tick=26 sim_time_us=104000 "
@@ -361,6 +394,12 @@ def test_bridge_state_samples_preserve_physics_tick_inputs(tmp_path: Path):
         "angular_velocity_body_flu=[0.01, 0.02, 0.03]\n"
     )
 
+    if compressed:
+        # Consumers may retain their existing logical filename via a symlink.
+        packed = log.with_suffix(".log.gz")
+        packed.write_bytes(gzip.compress(log.read_bytes()))
+        log.unlink()
+        log.symlink_to(packed.name)
     time_us, position, attitude, velocity, angular_velocity = _bridge_state_samples(path=log)
 
     assert time_us.tolist() == [104000]
@@ -473,6 +512,30 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
     ]
 
 
+@pytest.mark.parametrize("cutoff_hz", [0.0, 5.0])
+def test_velocity_controller_derivative_filters_velocity_and_resets_invalid_axes(cutoff_hz):
+    ulog = SimpleNamespace(
+        initial_parameters={"MPC_VEL_LP": 0.0, "MPC_VEL_NF_FRQ": 0.0, "MPC_VELD_LP": cutoff_hz},
+        changed_parameters=[],
+    )
+    local = {
+        "timestamp_sample": np.arange(6) * 8_000,
+        "vx": np.array([0.0, 0.008, 0.016, 0.024, np.nan, 0.0]),
+        "vy": np.arange(6) * 0.016,
+        "vz": np.arange(6) * 0.024,
+        "v_xy_valid": np.ones(6, dtype=bool),
+        "v_z_valid": np.ones(6, dtype=bool),
+    }
+
+    actual = _velocity_controller_derivative(ulog=ulog, local_position=local)
+
+    alpha = 1.0 if cutoff_hz == 0.0 else 0.008 / (0.008 + 1.0 / (2.0 * math.pi * cutoff_hz))
+    assert actual[3] == pytest.approx(np.array([1.0, 2.0, 3.0]) * (1.0 - (1.0 - alpha) ** 3))
+    assert np.all(np.isnan(actual[4, :2]))
+    assert actual[5, 0] == 0.0
+    assert actual[5, 2] == pytest.approx(3.0 * (1.0 - (1.0 - alpha) ** 5))
+
+
 def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     reference = tmp_path / "reference.json"
     reference.write_text(
@@ -494,6 +557,8 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
         return SimpleNamespace(name=name, data=data)
 
     ulog = SimpleNamespace(
+        initial_parameters={"MPC_VEL_LP": 0.0, "MPC_VEL_NF_FRQ": 0.0, "MPC_VELD_LP": 5.0},
+        changed_parameters=[],
         data_list=[
             dataset(
                 "vehicle_local_position_setpoint",
@@ -511,6 +576,9 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                 "vehicle_local_position",
                 {
                     "timestamp": np.array([100_000, 108_000]),
+                    "timestamp_sample": np.array([100_000, 108_000]),
+                    "v_xy_valid": np.ones(2, dtype=bool),
+                    "v_z_valid": np.ones(2, dtype=bool),
                     "ax": np.array([2.0, 4.0]),
                     "ay": np.array([4.0, 8.0]),
                     "az": np.array([6.0, 12.0]),
@@ -578,7 +646,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                     "hover_thrust": np.array([0.57, 0.574]),
                 },
             ),
-        ]
+        ],
     )
 
     report = _augment_reference_controller_state(  # noqa: SLF001 - focused diagnostic test
@@ -588,7 +656,9 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     payload = json.loads(reference.read_text())
     trace = payload["traces"][0]
 
-    assert report["method"] == "px4-ulog-controller-boundary-v1"
+    assert (
+        report["method"] == payload["controller_state_method"] == "px4-ulog-controller-boundary-v2"
+    )
     assert payload["schema_version"] == 1
     assert trace["initial_controller_state_valid"]
     assert trace["initial_estimated_linear_velocity_enu_mps"] == pytest.approx([0.3, 0.2, -0.4])
@@ -597,7 +667,14 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
         [0.2, -0.3, -0.4]
     )
     assert trace["initial_acceleration_setpoint_enu_mps2"] == pytest.approx([2.0, 1.0, -3.0])
-    assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
+    alpha = 0.008 / (0.008 + 1.0 / (2.0 * math.pi * 5.0))
+    first_derivative = alpha * np.array([0.2, 0.1, -0.3]) / 0.008
+    second_derivative = first_derivative + alpha * (
+        np.array([0.2, 0.2, -0.2]) / 0.008 - first_derivative
+    )
+    assert trace["initial_linear_acceleration_enu_mps2"] == pytest.approx(
+        (first_derivative + second_derivative) / 2.0
+    )
     assert trace["initial_angular_acceleration_body_flu_radps2"] == [
         2.0,
         -3.0,

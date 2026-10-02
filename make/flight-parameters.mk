@@ -4,6 +4,9 @@
 
 FLIGHT_CONFIG ?= configs/flight/holybro_x500_v2_hover.yaml
 FLIGHT_PARAMETERS_OUTPUT_ROOT ?= .build/flight-parameters
+FLIGHT_PARAMETERS_PROCESSING_CONFIG ?= configs/flight/processing/default.yaml
+FLIGHT_PARAMETERS_STABILITY_CONFIG ?= configs/flight/stability/default.yaml
+FLIGHT_PARAMETERS_COMPARE_RUNS ?=
 FLIGHT_PARAMETERS_RUN_ID ?=
 FLIGHT_PARAMETERS_TRIAL_INDEX ?= 1
 FLIGHT_PARAMETERS_TRIAL_DIR ?= $(FLIGHT_PARAMETERS_OUTPUT_ROOT)/sample
@@ -65,5 +68,8 @@ test-integration-flight-parameters-response-sample: generate-assets
 measure-flight-parameters:
 	@PYTHONPATH=src uv run --with pyulog python make/scripts/run_flight_parameters_campaign.py \
 	    --config '$(FLIGHT_CONFIG)' \
+	    --processing-config '$(FLIGHT_PARAMETERS_PROCESSING_CONFIG)' \
+	    --stability-config '$(FLIGHT_PARAMETERS_STABILITY_CONFIG)' \
+	    $(foreach run,$(FLIGHT_PARAMETERS_COMPARE_RUNS),--compare-run '$(run)') \
 	    --output-root '$(FLIGHT_PARAMETERS_OUTPUT_ROOT)' \
 	    $(if $(strip $(FLIGHT_PARAMETERS_RUN_ID)),--run-id '$(FLIGHT_PARAMETERS_RUN_ID)')

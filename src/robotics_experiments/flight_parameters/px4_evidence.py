@@ -211,10 +211,12 @@ def _effective_position_target(
     return east_m, north_m, goal.altitude_m - home_altitude
 
 
-def _measurement_indices(
-    *, config: FlightParametersConfig, raw: RawFlightTrace, loiter_enter_us: int
-) -> tuple[int, ...]:
-    desired_start_us = loiter_enter_us + round(config.hover.settle_s * 1_000_000)
+def _measurement_indices(*, config: FlightParametersConfig, raw: RawFlightTrace) -> tuple[int, ...]:
+    # Reserve the full transition allowance so status publication timing cannot
+    # move the measurement window. Verification separately enforces that deadline.
+    desired_start_us = raw.time_us[0] + round(
+        (config.hover.mode_transition_timeout_s + config.hover.settle_s) * 1_000_000
+    )
     start = int(np.searchsorted(raw.time_us, desired_start_us, side="left"))
     count = round(config.hover.measure_s * config.hover.sample_rate_hz)
     stop = start + count
@@ -381,7 +383,7 @@ def verify_px4_hover_evidence(
     if unexpected:
         raise ValueError(f"PX4 entered unexpected modes before loiter: {unexpected}")
 
-    indices = _measurement_indices(config=config, raw=raw, loiter_enter_us=loiter.timestamp_us)
+    indices = _measurement_indices(config=config, raw=raw)
     sample_times_us = tuple(raw.time_us[index] for index in indices)
     measurement_start_us = sample_times_us[0]
     measurement_end_us = measurement_start_us + round(config.hover.measure_s * 1_000_000)

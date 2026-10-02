@@ -8,6 +8,10 @@ scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 sim:
   enhanced_determinism: true
 
+alignment:
+  capture:
+    timeout_s: 20.0
+
 vehicles:
   x500_01:
     id: 0
@@ -40,4 +44,4 @@ vehicles:
         - kind: policy
           label: alignment-probes
           artifact: alignment-probe
-          timeout_s: 300.0
+          timeout_s: 700.0

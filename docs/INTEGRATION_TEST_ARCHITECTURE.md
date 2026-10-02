@@ -37,16 +37,20 @@ fit/publication, and the alignment target-envelope gate.
 ## Targets
 
 `make measure-flight-parameters` is an owning campaign rather than part of the
-aggregate integration suite. It invokes the internal
-`test-integration-flight-parameters-sample` target once per configured trial.
-Each invocation uses the ordinary strict PX4/Isaac harness with isolated
-processes and run artifacts, then copies its single ULog beside the raw
-ground-truth pose candidate and bridge log. The host-safe `flight_parameters`
-coordinator decodes that ULog, rejects any trial that does not prove the PX4
-hover mode/control/goal contract, and writes the selected neutral trace and
-verification record. After every configured trial succeeds, it derives and
-validates the immutable hover-envelope bundle and atomically advances its
-relative `latest` symlink. See `docs/FLIGHT_PARAMETERS.md`.
+aggregate integration suite. Its functional host runner invokes the internal
+hover or response target for each configured flight, using the strict PX4/Isaac
+harness with fresh processes. The runner verifies each completed flight,
+extracts its full trace, compresses and verifies raw logs, and checkpoints it
+before releasing the worker. Successful flights own private harness roots under
+`.build/docker/integration/flight-parameters/`. Flight-parameter targets mount
+that flight's private log directory over the authored bridge-log location inside
+Isaac, preserving config fingerprints and preventing concurrent filename
+collisions. After writers stop, the harness gives the host user ownership of
+these private raw logs and producer outputs for postprocessing. Only hash-verified duplicate
+ULogs and bridge logs are removed after producer checkpointing. Failed captures
+remain available. Both kinds resume from validated checkpoints. Final derivation,
+stability analysis, manifest validation and atomic `latest` publication happen
+only after all flights complete. See `docs/FLIGHT_PARAMETERS.md`.
 
 - `make test-integration` runs `test-integration-isaac` and
   `test-integration-px4-takeoff`.

@@ -43,6 +43,79 @@ The seed initializes the simulator's existing NumPy random stream before fleet
 setup; no new noise or randomization model is introduced. Seeds record the
 requested random stream, not a guarantee of bitwise simulator repeatability.
 
+## Campaign flow
+
+The host runner is a sequence of functions with explicit inputs and results:
+
+```text
+campaign config + experiment/response definitions
+  -> resolve immutable per-flight definitions and pin capture inputs
+  -> validate completed-flight checkpoints
+  -> dispatch unfinished hover batches, then response batches
+
+for each flight:
+  definition -> capture -> verify and extract complete traces
+  -> metadata and hashes -> gzip and verify -> completion checkpoint
+  -> remove verified raw duplicates -> return completed-flight record
+
+after all configured flights:
+  validate completeness -> derive parameters -> aggregate statistics
+  -> final stability analysis -> campaign/report metadata
+  -> validate manifest -> finalize immutable bundle -> publish latest
+```
+
+A flight definition identifies its kind, index, set and seed. The campaign
+configuration references the physical experiment (vehicle, scene, PX4 and
+sensor settings), hover schedule, and complete response command suite.
+Derived-output margins and policy warmup remain campaign settings. Processing
+and statistical settings are separate from the flight instructions. No second
+authored flight-definition format is maintained.
+
+The runner pins actual source-file hashes, including uncommitted capture code,
+container image IDs, host package versions, configuration and resolved flight
+identities in `capture_inputs.json`. It checks those inputs before each batch
+and after collection. Source/runtime changes require a new capture campaign;
+completed evidence is never silently combined with a changed method.
+
+Each worker finishes verification, extraction, compression and checkpointing
+before accepting another flight. Statistical analysis is never called from the
+per-flight pipeline. Worker count changes scheduling, not the command sequence.
+Each batch contains one flight kind, keeping the long response flights together
+instead of leaving response work queued behind a mixed batch.
+
+### Lossless storage and resume
+
+`configs/flight/processing/default.yaml` owns gzip level and disk budgets;
+`FLIGHT_PARAMETERS_PROCESSING_CONFIG` selects it. Gzip stores the exact original
+ULog and bridge bytes. JSON traces remain complete and directly readable.
+The closed harness bridge log is retained, including teardown records after the
+standalone recorder's initial copy; its recorded prefix must match that copy.
+
+Compression writes a temporary file, verifies the original-content SHA-256 by
+streaming decompression, then atomically installs the archive. A flight's
+`complete.json` records its identity, input digest, retained-file sizes, stored
+and original-content hashes, and capture/processing times. Only then are the
+uncompressed logs and matching copies in that flight's private harness directory
+removed. Other logs and failed attempts remain available. Archive readers stream
+decompression, including through alignment's relative symlinks; no persistent
+uncompressed cache is needed. The manifest hashes stored bytes, while ULog and
+bridge provenance hashes identify original contents. Plain and gzip are storage
+encodings of the same evidence contract; existing bundles are not rewritten.
+
+`capture.json` checkpoints successful raw capture separately. An interrupted
+postprocessing stage reuses that capture. A verified `complete.json` skips both
+capture and postprocessing for hover and response. A capture without a success
+receipt is preserved under `failed/` before retrying on explicit campaign
+resume; the campaign reports these failed/incomplete capture attempts. A corrupt
+completed checkpoint fails validation instead of silently recapturing its flight.
+
+Before each batch the runner estimates space for all remaining archives, raw
+files and compression staging for active workers, and the configured free-space
+reserve. Completed-flight sizes refine the initial estimate upward. Insufficient
+space stops dispatch without deleting evidence; resume is possible after space
+is available. This is a capacity estimate, not a bound on unexpectedly large
+failure logs. Console and per-flight metadata expose real storage and timings.
+
 ## Hover collection and statistics
 
 Each hover repetition starts fresh PX4 SITL and Isaac processes. The collector
@@ -52,8 +125,17 @@ AUTO_LOITER` transition, automatic position control, armed and airborne state,
 fresh reports, and unchanged held position/yaw goal. A routine label, elapsed
 time, or low velocity is not accepted as proof of hover.
 
-Six seconds after verified loiter entry, the collector retains exactly 30
-seconds at 20 Hz. All 600 samples in each trace are preserved. The published
+The raw hold has a fixed schedule: the configured transition allowance, then
+the settling interval, then exactly 30 seconds at 20 Hz. Verification requires
+AUTO_LOITER entry before that allowance expires and selects the scheduled
+measurement window regardless of the actual transition time. With the production
+configuration, measurement starts 21 seconds after raw capture begins and has
+at least six seconds of verified loiter settling. A late transition fails;
+verification never shifts the window to accommodate it. All 600 samples in each
+trace are preserved. The isolated capture stops when this complete fixed schedule
+has elapsed, rather than waiting for the routine's separate speed-based hover
+hold. An existing driver failure still requires recovery and fails the capture;
+the completed ULog remains the authority for hover verification. The published
 hover bounds use every sample from the 30 fitting repetitions, expanded by the authored
 position and attitude margins. This full window is the controller-alignment
 qualification input and must not be shortened or resampled.
@@ -94,6 +176,18 @@ ULog, and bridge log for each repetition. The trace is augmented from its ULog
 with the complete controller-boundary state before the flight-parameters bundle
 is finalized. No field, sample, command, timestamp, fit/validation split, or
 controller-boundary value is reduced in the artifact.
+Each response profile reserves the full configured preconditioning timeout
+before recording begins. The configured continuous speed/rate/tilt stability
+hold must be satisfied at that fixed deadline; otherwise capture fails. Early
+settling never advances the next profile, and late settling never shifts its
+measurement window. The response routine timeout must cover every profile's
+complete preconditioning interval and command sequence.
+The response header records `controller_state_method` as
+`px4-ulog-controller-boundary-v2`. This method reconstructs the velocity
+controller's filtered derivative from full-rate estimator velocity and its
+logged filter parameters. It does not use EKF acceleration as the controller
+derivative. Alignment requires this capture method; older recordings must be
+recaptured without modifying their producer artifacts.
 
 Alignment preparation resolves one immutable `FlightParametersBundle`, pins it
 inside the alignment run, selects one complete response flight from each of the three sets, and
@@ -143,22 +237,31 @@ Each run is immutable and timestamped:
 .build/flight-parameters/<flight-parameters-id>/<run-id>/
   flight_parameters.json
   campaign.json
+  capture_inputs.json
+  stability.json
   evidence/trial-001/raw_trace.json
   evidence/trial-001/hover_verification.json
   evidence/trial-001/trace.json
-  evidence/trial-001/bridge.log
-  evidence/trial-001/flight.ulg
+  evidence/trial-001/capture.json
+  evidence/trial-001/complete.json
+  evidence/trial-001/bridge.log.gz
+  evidence/trial-001/flight.ulg.gz
   ...
+  response/repetition-001/capture.json
+  response/repetition-001/complete.json
+  response/repetition-001/raw_response.json
   response/repetition-001/flight_parameters_response.json
-  response/repetition-001/flight_parameters.ulg
-  response/repetition-001/flight_parameters_bridge.log
+  response/repetition-001/flight_parameters.ulg.gz
+  response/repetition-001/flight_parameters_bridge.log.gz
   manifest.json
 ```
 
 An explicit `FLIGHT_PARAMETERS_RUN_ID` may continue an unpublished partial run;
-complete verified hover trials are retained and must match the configured set,
-seed, and configuration fingerprint. Response flights are captured again. A finalized run cannot be resumed
-or modified.
+complete verified hover and response flights are retained and must match their
+checkpointed inputs and hashes. Once
+`flight_parameters.json` exists, resuming retries only final analysis and
+publication. A finalized run cannot be resumed or modified. Parameter and manifest writes
+are atomic; a failed manifest validation cannot mark a partial run finalized.
 
 `flight_parameters.json` has artifact kind
 `robotics-experiments-flight-parameters`, schema version 1, `created_at_utc`,
@@ -175,10 +278,95 @@ metadata must agree with its recorded JSON. `execution.worker_count` limits
 concurrent independent flights for both behavior kinds. It atomically advances the relative symlink
 `.build/flight-parameters/<flight-parameters-id>/latest` to that immutable run.
 There is no `best` label because these are measured inputs, not ranked
-candidates.
+candidates. `latest` means complete evidence, not statistical qualification.
+A qualified baseline is a separate explicit designation.
 
 Alignment and RL record the exact artifact fingerprint. They never silently
 switch to a newer `latest`: alignment pins the resolved run during preparation,
 records its canonical `run_id`, and training rejects a flight-parameters
 artifact whose `run_id` or fingerprint does not match its controller
 qualification.
+
+## Stability analysis
+
+Stability is a read-only final stage inside `flight_parameters`. The campaign
+collects and verifies all hover and response flights, derives and writes
+`flight_parameters.json`, analyzes that completed evidence into `stability.json`,
+then finalizes the manifest and publishes. Capture callbacks, sensor updates,
+controller execution, and parameter derivation do not call the analyzer.
+The primary schema and downstream alignment/training checks are unchanged.
+A reported stability failure does not prevent ordinary evidence publication.
+
+`configs/flight/stability/default.yaml` owns analysis settings separately from
+capture settings. Its digest is recorded in the report, without changing the
+capture configuration fingerprint or measured outputs. The immutable report
+pins each input artifact and analyzed evidence by digest. New bundles inventory
+`stability.json` in their existing manifest; historical bundles remain unchanged.
+
+The report retains full-window statistics for each flight, each dataset, and the
+whole campaign: signed extrema, RMS, p95, p99, absolute peak, worst-flight RMS
+and identity, excursion counts/frequency/duration, endpoint displacement, linear
+position trend, attitude, linear speed, and angular speed. Endpoint displacement
+compares the first and last configured windows; it can include oscillation and
+is not by itself proof of unbounded drift. The excursion threshold is a reporting
+threshold, not a flight or controller acceptance limit.
+
+Comparisons retain raw sample counts, timestamps, held goals, physical and
+controller initial states, commands, per-field differences, and the first
+unequal sample. Full-rate response bridge logs additionally identify the first
+simulation timestamp with different actuator timing, rotor commands, or physical
+state. No interpolation, fitted time shift, or trajectory alignment is applied.
+The exact-repeatability result is diagnostic; it does not decide statistical
+stability. Different controller-state reconstruction methods or response
+definitions make response comparisons incompatible.
+Every recorded hover and response bridge stream must contain dynamics with strictly
+increasing simulation timestamps. Empty or mixed timelines raise an evidence error,
+including when no comparison run was supplied. All analyzed bridge logs are pinned
+by digest in the report.
+
+Both repeated-seed and disjoint-seed batches receive statistical comparisons.
+Whole flights, rather than correlated time samples, are resampled for bootstrap
+confidence intervals of horizontal RMS and p99 relative changes. The campaign,
+fit, validation, and acceptance groups must each qualify; good pooled statistics
+cannot hide an inconclusive subset. Peak and worst-flight RMS increases are
+checked separately. Drift and excursions remain descriptive diagnostics.
+
+Response profiles are compared separately across complete response flights from
+all three sets, which execute the same profile suite. Each profile retains RMS,
+p99, peak, and worst-flight RMS for displacement from its initial position and
+for velocity and body yaw-rate tracking error (velocity mode), or body-rate
+tracking error and speed (CTBR mode). Each signal uses its original samples;
+there is no interpolation or fitted time shift. A flight's many profiles do not
+count as independent repetitions. These are repeatability metrics, not controller
+acceptance limits, and they do not replace the retained trajectory diagnostics.
+
+Settings own the confidence level, relative change limit, and minimum flight
+count. An interval spanning the allowed boundary is inconclusive; missing
+comparisons, a zero reference scale, or too few independent flights cannot pass.
+The ordinary three-response-flight campaign is insufficient for the default
+statistical minimum; qualification campaigns need additional response seeds.
+Such expanded campaigns qualify the gathering mechanism. They are not alignment
+inputs: alignment currently requires exactly one response recording per set.
+Both repeated-seed and disjoint-seed comparisons must pass hover and response
+statistics for the combined report to pass. An individual comparison records its
+own result even when the combined evidence is incomplete. No baseline is
+designated by this function.
+
+Pass explicit completed comparison directories with
+`FLIGHT_PARAMETERS_COMPARE_RUNS='<run-a> <run-b>'` when measuring a campaign.
+An analysis exception leaves completed recordings and derived parameters in place;
+resuming that unpublished run retries analysis without recapturing flights.
+Analysis of an existing run writes outside every producer bundle:
+
+```sh
+PYTHONPATH=src uv run --with pyulog python make/scripts/run_flight_parameters_campaign.py \
+  --analyze-run .build/flight-parameters/<id>/<current-run> \
+  --compare-run .build/flight-parameters/<id>/<comparison-run> \
+  --analysis-output .build/flight-parameters-stability/<analysis-run>/stability.json
+```
+
+Establish a baseline only after freezing the capture implementation/environment,
+qualifying fresh repeated-seed and disjoint-seed campaigns, and checking a further
+fresh campaign against those qualification runs. Keep the qualification inputs
+and report as immutable evidence. Subsequent routine runs compare to this saved
+baseline; capture-affecting changes require requalification before replacement.

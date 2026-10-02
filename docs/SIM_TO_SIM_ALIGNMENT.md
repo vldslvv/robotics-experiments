@@ -37,7 +37,13 @@ Input validation completes before the alignment run directory is created. An
 invalid or incompatible flight-parameters selector therefore exits with one
 preflight error and leaves no empty or partially staged alignment run. The
 consumer never copies those producer-owned inputs; final alignment evidence
-retains relative references to the pinned timestamped bundle.
+retains relative references to the pinned timestamped bundle. ULogs and bridge
+logs may be gzip-compressed in that producer; audit and replay readers stream
+their original bytes without changing the reference names or copying inputs.
+The fitting entrypoint uses that prepared bundle for both controller definitions,
+preserving their authored definition fingerprints. Different authored selectors
+such as `latest` and an exact run path cannot override the prepared input or
+cause a false definition mismatch after simulation.
 
 The dependency direction is:
 
@@ -197,7 +203,9 @@ preconditioning so the reference plant matches Lab training and press-policy
 deployment. The Lab target also consumes the Hydra-owned rigid-body gyroscopic
 force setting, which is disabled to match the standalone PX4 plant. Each
 profile precondition uses a bounded velocity command to return to the routine
-reference position before applying the configured stability hold. The recenter
+reference position and reserves the full configured preconditioning timeout.
+The continuous stability hold must be satisfied at that deadline; an early
+stable state does not advance the profile and a late one fails capture. The recenter
 gain and speed bound live in `alignment.capture`, so profile order cannot
 accumulate displacement against the routine safety envelope. Each profile then
 records its absolute PX4 simulation start time and the complete initial
@@ -254,6 +262,10 @@ on either the same tick or the next one. Replay derives those source-age choices
 from the recorded attitude, rate, and thrust topics, then joins the target motor
 prediction by at most one 4 ms physics tick. It reports both adjacent handoffs,
 the total actuator join offset distribution, and the peak collective window.
+When the thrust topic has no publication at a motor timestamp, replay recovers
+that collective by inverting unsaturated PX4 motor allocation. A neighboring
+logged thrust value must not introduce a spurious handoff delay. Saturated
+outputs retain the logged thrust value because allocation is not invertible.
 The unshifted intermediate setpoint metrics remain authoritative, so this join
 cannot absorb a controller-value error. CTBR remains the direct rate-controller
 contract.
@@ -266,7 +278,14 @@ whether the boundary lands on or between estimator publications. ULog
 rate-limited `trajectory_setpoint` samples are not used to infer command
 transitions. The velocity-integral seed reconstructs the current acceleration
 setpoint from the recorded `vehicle_local_position_setpoint` output and reports
-its source age. Replay builds relative command time from integer physics steps so
+its source age. Its derivative seed comes from the velocity-controller low-pass
+of estimator velocity differences, using the recorded sample times and
+`MPC_VELD_LP`. EKF `ax/ay/az` are a different acceleration signal and cannot seed
+that filter. Capture requires disabled velocity low-pass/notch filters and
+unchanged velocity-filter parameters. Response recordings identify this method
+as `px4-ulog-controller-boundary-v2`; preparation rejects missing or different
+methods and requires a new capture. Existing producer artifacts remain immutable.
+Replay builds relative command time from integer physics steps so
 large absolute profile start times cannot delay an exact command boundary by a
 floating-point tick. The replay also reproduces PX4's
 velocity-only vertical state blending and applies logged hover-estimate updates

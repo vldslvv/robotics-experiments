@@ -71,6 +71,11 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         ]
         flight_parameters = importlib.import_module("robotics_experiments.flight_parameters")
         assert flight_parameters.__all__ == [
+            "compress_flight_evidence",
+            "flight_evidence_sha256",
+            "open_flight_evidence",
+            "StabilityReport",
+            "analyze_flight_parameters_stability",
             "FlightParametersConfig",
             "FlightParameters",
             "FlightParametersBundle",

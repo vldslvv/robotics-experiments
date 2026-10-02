@@ -504,8 +504,12 @@ def test_trace_rejects_out_of_range_initial_hover_thrust() -> None:
         _trace(value=raw, name="trace")  # noqa: SLF001 - trace validation contract
 
 
+@pytest.mark.parametrize(
+    "controller_state_method", ["px4-ulog-controller-boundary-v2", None, "unknown"]
+)
 def test_flight_parameters_response_preserves_complete_alignment_input(
     tmp_path: Path,
+    controller_state_method: str | None,
 ) -> None:
     definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
     traces = tuple(
@@ -522,10 +526,20 @@ def test_flight_parameters_response_preserves_complete_alignment_input(
                 "schema_version": 1,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
+                "controller_state_method": controller_state_method,
                 "traces": [asdict(trace) for trace in traces],
             }
         )
     )
+
+    if controller_state_method != "px4-ulog-controller-boundary-v2":
+        with pytest.raises(ValueError, match="new controller-boundary capture"):
+            _validated_payload(
+                path=path,
+                definition=definition,
+                expected_profile_count=len(definition.profiles),
+            )
+        return
 
     payload = _validated_payload(
         path=path,
@@ -598,6 +612,7 @@ def test_flight_parameters_response_accepts_bridge_quantized_cadence(
                 "schema_version": 1,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
+                "controller_state_method": "px4-ulog-controller-boundary-v2",
                 "traces": [asdict(trace) for trace in traces],
             }
         )
@@ -628,6 +643,7 @@ def test_flight_parameters_response_rejects_reduced_alignment_input(
                 "schema_version": 1,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
+                "controller_state_method": "px4-ulog-controller-boundary-v2",
                 "traces": [asdict(trace) for trace in traces[:-1]],
             }
         )

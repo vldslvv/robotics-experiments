@@ -30,8 +30,9 @@ lifecycle, with a test-only injected adapter that emits the controller
 definition's linear-velocity, yaw-rate, and combined probes. It writes exact
 command timing, initial state, position, attitude, body/world velocity, and
 angular velocity to the selected flight-parameters response directory. Before each profile,
-the adapter holds a neutral setpoint through the configured minimum and
-continuous speed/rate/tilt stability window. This excludes OFFBOARD priming
+the adapter holds a neutral setpoint until the fixed preconditioning deadline
+and requires the continuous speed/rate/tilt stability window at that deadline.
+Late stabilization fails instead of moving the profile start. This excludes OFFBOARD priming
 from the recorded policy-execution response and gives each reset Lab replay a
 near-equilibrium initial state. Trace yaw remains body-FLU +CCW while the
 outbound PX4 setpoint is converted to NED +clockwise. Its response routine

@@ -76,6 +76,8 @@ def _validated_payload(
         raise ValueError("flight parameters response controller does not match alignment")
     if value.get("definition_fingerprint") != definition.definition_fingerprint:
         raise ValueError("flight parameters response definition does not match alignment")
+    if value.get("controller_state_method") != "px4-ulog-controller-boundary-v2":
+        raise ValueError("flight parameters response requires a new controller-boundary capture")
     raw_traces = value.get("traces")
     if not isinstance(raw_traces, list) or len(raw_traces) != expected_profile_count:
         raise ValueError("flight parameters response does not cover every alignment profile")

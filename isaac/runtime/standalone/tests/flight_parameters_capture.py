@@ -92,9 +92,10 @@ def _run(*, context: SceneTestContext) -> None:
     angular_velocities: list[tuple[float, float, float]] = []
     times_us: list[int] = []
     capture_start_us: int | None = None
+    capture_complete = False
 
     def routine_tick(fleet) -> None:
-        nonlocal capture_start_us
+        nonlocal capture_start_us, capture_complete
         flying = fleet.flying[0]
         progress = flying.driver.routine_state
         if progress.cursor != 2:
@@ -108,6 +109,7 @@ def _run(*, context: SceneTestContext) -> None:
         sim_time_us = read_bridge_host_status(host=host).sim_time_us
         if capture_start_us is None:
             capture_start_us = sim_time_us
+        capture_complete = sim_time_us >= capture_start_us + round(expected_hold_s * 1_000_000)
         if len(times_us) >= expected_samples:
             return
         sample_target_us = capture_start_us + round(
@@ -190,6 +192,8 @@ def _run(*, context: SceneTestContext) -> None:
             test_name=_TEST_NAME,
             px4_container_log_name="flight_parameters_capture_px4.log",
             routine_tick_hook=routine_tick,
+            routine_stop_predicate=lambda fleet: capture_complete
+            and fleet.flying[0].driver.failure is None,
             post_routine_hook=post_routine,
             success_label="raw task-neutral hover evidence",
         ),
