@@ -81,7 +81,12 @@ contract; yaw reaction remains explicitly modeled by the rotor wrench. The
 reduced Lab rotor wrench is translated from the body's local-frame origin to
 PhysX's center-of-mass force path before submission.
 
-## Action and cadence
+## Action and update rates
+
+New training uses `rates.command_rate_hz` from the shared experiment config.
+Loaded policies use the rate recorded in their immutable artifact. Recording
+frequency is independently configured by `rates.sample_rate_hz`. Vehicle pusher
+limits are read from the selected vehicle, alongside its asset path.
 
 `rl.action` contains only normalized action kind, dimension, and scales:
 

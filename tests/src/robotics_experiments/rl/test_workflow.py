@@ -24,7 +24,7 @@ def _controller(*, config, flight_parameters, fingerprint: str | None = None):
     return SimpleNamespace(
         vehicle=vehicle_label,
         airframe=Path(vehicle.spawn.usd_path).name,
-        command_rate_hz=config.rl.policy_rate_hz,
+        command_rate_hz=config.rates.command_rate_hz,
         certified_control_modes=(config.rl.action.kind,),
         advisory_quality_passed=True,
         advisory_quality_reasons=(),

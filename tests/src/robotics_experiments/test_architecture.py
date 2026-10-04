@@ -20,7 +20,7 @@ _ALLOWED_DEPENDENCIES = {
     "controller": frozenset({"config", "px4_bridge"}),
     "drone": frozenset({"config"}),
     "environment": frozenset({"config", "switches"}),
-    "flight_parameters": frozenset(),
+    "flight_parameters": frozenset({"config"}),
     "px4_bridge": frozenset({"config"}),
     "rl": frozenset(
         {"commanding", "config", "controller", "flight_parameters", "px4_bridge", "switches"}

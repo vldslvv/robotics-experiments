@@ -14,9 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
-
-from omegaconf import OmegaConf
+from typing import Any
 
 from robotics_experiments.flight_parameters import (
     FlightParametersConfig,
@@ -44,14 +42,6 @@ class _Flight:
     index: int
     seed: int
     directory: str
-
-
-@dataclass(frozen=True)
-class _Processing:
-    gzip_level: int
-    minimum_free_bytes: int
-    raw_flight_budget_bytes: int
-    estimated_archive_bytes_per_flight: int
 
 
 @dataclass(frozen=True)
@@ -87,21 +77,6 @@ def _write_json(*, path: Path, value: Any) -> None:
     pending = path.with_name(path.name + ".pending")
     pending.write_text(encoded)
     pending.replace(path)
-
-
-def _processing(path: Path, /) -> _Processing:
-    value = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
-    if not isinstance(value, dict) or set(value) != set(_Processing.__annotations__):
-        raise ValueError("flight processing settings fields mismatch")
-    if any(type(item) is not int or item < 0 for item in value.values()):
-        raise ValueError("flight processing settings must be nonnegative integers")
-    settings = _Processing(**cast(dict[str, int], value))
-    if (
-        settings.gzip_level > 9
-        or min(settings.raw_flight_budget_bytes, settings.estimated_archive_bytes_per_flight) == 0
-    ):
-        raise ValueError("invalid compression level or flight storage budget")
-    return settings
 
 
 def _flights(config: FlightParametersConfig, /) -> tuple[_Flight, ...]:
@@ -336,7 +311,6 @@ def _run_flight(
     config: FlightParametersConfig,
     run_dir: Path,
     flight: _Flight,
-    settings: _Processing,
 ) -> _CompletedFlight:
     print(f"Flight {flight.directory}: seed={flight.seed}", flush=True)
     _capture_flight(
@@ -348,7 +322,7 @@ def _run_flight(
     capture = json.loads((directory / "capture.json").read_text())
     logs = tuple(directory / item["path"] for item in capture["files"][2:])
     compressed = tuple(
-        compress_flight_evidence(path=path, level=settings.gzip_level) for path in logs
+        compress_flight_evidence(path=path, level=config.execution.gzip_level) for path in logs
     )
     retained = tuple(
         path
@@ -377,20 +351,19 @@ def _run_flight(
 def _check_space(
     *,
     run_dir: Path,
-    settings: _Processing,
     remaining: int,
-    workers: int,
+    config: FlightParametersConfig,
     completed: tuple[_CompletedFlight, ...],
 ) -> None:
     estimate = max(
         (
-            settings.estimated_archive_bytes_per_flight,
+            config.execution.estimated_archive_bytes_per_flight,
             *(flight.retained_bytes for flight in completed),
         )
     )
     needed = (
-        settings.minimum_free_bytes
-        + min(workers, remaining) * settings.raw_flight_budget_bytes
+        config.execution.minimum_free_bytes
+        + min(config.execution.worker_count, remaining) * config.execution.raw_flight_budget_bytes
         + remaining * estimate
     )
     free = shutil.disk_usage(run_dir).free
@@ -413,7 +386,6 @@ def _collect_flights(
     config: FlightParametersConfig,
     run_dir: Path,
     flights: tuple[_Flight, ...],
-    settings: _Processing,
 ) -> tuple[_CompletedFlight, ...]:
     completed = {}
     for flight in flights:
@@ -432,9 +404,8 @@ def _collect_flights(
                 raise ValueError("flight definition changed during the campaign")
             _check_space(
                 run_dir=run_dir,
-                settings=settings,
                 remaining=len(flights) - len(completed),
-                workers=config.execution.worker_count,
+                config=config,
                 completed=tuple(completed.values()),
             )
             batch = pending[offset : offset + config.execution.worker_count]
@@ -446,7 +417,6 @@ def _collect_flights(
                     config=config,
                     run_dir=run_dir,
                     flight=flight,
-                    settings=settings,
                 )
                 for flight in batch
             )
@@ -487,9 +457,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--flight-count", type=int)
-    parser.add_argument(
-        "--processing-config", type=Path, default=Path("configs/flight/processing/default.yaml")
-    )
     parser.add_argument(
         "--stability-config", type=Path, default=Path("configs/flight/stability/default.yaml")
     )
@@ -545,15 +512,13 @@ def main() -> None:
             )
             return
 
-        settings = _processing(args.processing_config)
         flights = _flights(config)
-        _collect_flights(
+        completed = _collect_flights(
             repo_root=repo_root,
             config_path=config_path,
             config=config,
             run_dir=run_dir,
             flights=flights,
-            settings=settings,
         )
         write_flight_dataset(
             run_dir=run_dir,
@@ -563,8 +528,10 @@ def main() -> None:
                 "completed": True,
                 "definition": _file_record(path=run_dir / "definition.json", root=run_dir),
                 "flights": [
-                    _file_record(path=run_dir / flight.directory / "complete.json", root=run_dir)
-                    for flight in flights
+                    _file_record(
+                        path=run_dir / record.flight.directory / "complete.json", root=run_dir
+                    )
+                    for record in completed
                 ],
             },
         )

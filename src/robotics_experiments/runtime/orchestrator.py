@@ -380,7 +380,7 @@ def _prepare_policy_observer(
             f"num_switches={state.config.switches.num_switches}"
         )
     reset = state.config.rl.press.reset
-    lab_vehicle = state.config.rl.lab_vehicle
+    pusher = state.config.vehicles[spawned.label].pusher
     observer = PressObservationIO(
         stage=state.stage,
         articulation_path=spawned.articulation_path,
@@ -390,8 +390,8 @@ def _prepare_policy_observer(
         physical_contact_enabled=reset.physical_contact_enabled,
         switch_wall_offset_m=reset.switch_wall_offset_m,
         wall_half_extents_m=reset.wall_half_extents_m,
-        pusher_effort_limit_n=lab_vehicle.pusher_effort_limit_n,
-        pusher_velocity_limit_mps=lab_vehicle.pusher_velocity_limit_mps,
+        pusher_effort_limit_n=pusher.effort_limit_n,
+        pusher_velocity_limit_mps=pusher.velocity_limit_mps,
     )
     return replace(spawned, policy_observer=observer)
 

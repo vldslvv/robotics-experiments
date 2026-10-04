@@ -473,7 +473,8 @@ def _run_contact_chain(
         raise AssertionError("--contact-chain requires exactly one environment")
     _seed_everything(args.seed)
     contact_chain_duration_s = (
-        config.rl.episode_length_s + config.rl.press.goal.stable_steps / config.rl.policy_rate_hz
+        config.rl.episode_length_s
+        + config.rl.press.goal.stable_steps / config.rates.command_rate_hz
     )
     cfg = make_switch_press_env_cfg(
         experiment_config=config, switch_asset=load_switch_asset(model=config.switches.model)
@@ -803,9 +804,9 @@ def _contact_chain_inputs(
         mismatches.append(
             f"controller airframe {controller.airframe!r} != {Path(vehicle.spawn.usd_path).name!r}"
         )
-    if controller.command_rate_hz != config.rl.policy_rate_hz:
+    if controller.command_rate_hz != config.rates.command_rate_hz:
         mismatches.append(
-            f"controller cadence {controller.command_rate_hz} != {config.rl.policy_rate_hz}"
+            f"controller rate {controller.command_rate_hz} != {config.rates.command_rate_hz}"
         )
     if config.rl.action.kind not in controller.certified_control_modes:
         mismatches.append(f"controller does not certify action kind {config.rl.action.kind!r}")

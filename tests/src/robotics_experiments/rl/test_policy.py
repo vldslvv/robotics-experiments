@@ -338,16 +338,16 @@ def _preflight_config(*, artifacts: list[Path], action_cfg=None, policy_rate_hz=
     }
     return SimpleNamespace(
         vehicles=vehicles,
+        rates=SimpleNamespace(command_rate_hz=policy_rate_hz),
         rl=SimpleNamespace(
             action=_action_cfg(max_body_velocity_mps=99.0) if action_cfg is None else action_cfg,
-            policy_rate_hz=policy_rate_hz,
             press=SimpleNamespace(task="approach"),
         ),
         driver=SimpleNamespace(control_rate_hz=50.0),
     )
 
 
-def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Path) -> None:
+def test_policy_preflight_uses_artifact_action_and_rate(tmp_path: Path) -> None:
     policy_root = tmp_path / "training" / "press-approach"
     old_run = policy_root / "old-run"
     old_run.mkdir(parents=True)

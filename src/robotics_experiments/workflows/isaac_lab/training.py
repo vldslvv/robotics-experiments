@@ -270,7 +270,7 @@ def _artifact_metadata(
         flight_parameters_digest=flight_parameters_digest,
         obs_schema_version=int(env_cfg.observation_schema_version),
         obs_dim=int(env_cfg.observation_space),
-        policy_rate_hz=config.rl.policy_rate_hz,
+        policy_rate_hz=config.rates.command_rate_hz,
         policy_interface=str(env_cfg.policy_interface),
         curriculum_stage=(
             config.rl.press.task

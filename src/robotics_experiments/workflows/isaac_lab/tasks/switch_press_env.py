@@ -119,7 +119,9 @@ def make_switch_press_env_cfg(
             f"configured stage {rl.press.task!r}"
         )
     policy_rate_hz = (
-        rl.policy_rate_hz if policy_contract is None else policy_contract.policy_rate_hz
+        experiment_config.rates.command_rate_hz
+        if policy_contract is None
+        else policy_contract.policy_rate_hz
     )
     action_dim = rl.action.action_dim if policy_contract is None else policy_contract.action_dim
     decimation = math.ceil(experiment_config.sim.physics_hz / policy_rate_hz)
@@ -154,6 +156,7 @@ def make_switch_press_env_cfg(
         drone_cfg=_make_drone_articulation_cfg(
             usd_path=vehicle.spawn.usd_path,
             prim_path=_DRONE_PRIM_PATH,
+            pusher=vehicle.pusher,
             lab_vehicle=rl.lab_vehicle,
         ),
         switch_cfg=ArticulationCfg(

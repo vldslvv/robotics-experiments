@@ -218,8 +218,8 @@ def _env(*vehicles):
         scene="@scene.usd",
         sim=SimpleNamespace(physics_hz=250.0),
         switches=SimpleNamespace(num_switches=1),
+        rates=SimpleNamespace(command_rate_hz=20.0, sample_rate_hz=20.0),
         rl=SimpleNamespace(
-            policy_rate_hz=20.0,
             action=SimpleNamespace(),
         ),
         vehicles={f"drone{vehicle.id}": vehicle for vehicle in vehicles},
@@ -486,7 +486,7 @@ def test_switch_latch_samples_every_physics_tick(monkeypatch):
         fleet = module.tick_drivers(state=fleet, physics_dt_s=0.004, monotonic_s=7.0)
 
     assert len(steps) == 250
-    assert env.rl.policy_rate_hz == 20.0
+    assert env.rates.command_rate_hz == 20.0
 
 
 def test_tick_drivers_isolates_errors_and_shares_one_fleet_tick(monkeypatch):

@@ -7,7 +7,9 @@ import pytest
 from hydra.errors import ConfigCompositionException
 from omegaconf import OmegaConf
 
+from robotics_experiments.alignment import load_controller_definition
 from robotics_experiments.config import load_config
+from robotics_experiments.flight_parameters import load_flight_parameters_config
 from tests.support.paths import REPO_ROOT
 
 _ROOT = REPO_ROOT / "configs"
@@ -107,6 +109,7 @@ def test_default_experiment_has_only_global_root_config():
     assert config.rl.training.attempt_seeds == (42,)
     assert set(vars(config)) - {"_config_frozen"} == {
         "sim",
+        "rates",
         "switches",
         "rl",
         "scene",
@@ -136,7 +139,7 @@ def test_default_experiment_has_only_global_root_config():
     assert vehicle.routine.failure_recovery_timeout_s == 30.0
     assert [step["kind"] for step in vehicle.routine.steps] == ["arm", "takeoff", "hover"]
     assert config.rl.training.vehicle_id == 0
-    assert config.rl.policy_rate_hz == 20.0
+    assert config.rates.command_rate_hz == 20.0
     assert config.driver.control_rate_hz == 50.0
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
@@ -276,7 +279,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
         "pinned_flight_parameters",
     )
     assert tuple(source.weight for source in config.rl.press.reset.mix) == (0.8, 0.2)
-    assert config.rl.press.goal.stable_steps / config.rl.policy_rate_hz == 30.0
+    assert config.rl.press.goal.stable_steps / config.rates.command_rate_hz == 30.0
     assert tuple(phase.max_iterations for phase in training.phases) == (50, 30, 100)
     assert tuple(phase.learning_rate for phase in training.phases) == (
         1.0e-4,
@@ -778,10 +781,12 @@ def test_press_approach_validation(tmp_path, override, match):
     [
         ({"driver": {"control_rate_hz": 0.0}}, "control_rate_hz"),
         ({"driver": {"offboard_setpoint_rate_hz": float("inf")}}, "finite and positive"),
-        ({"rl": {"policy_rate_hz": float("nan")}}, "finite and positive"),
+        ({"rates": {"command_rate_hz": float("nan")}}, "finite and positive"),
+        ({"rates": {"sample_rate_hz": 0.0}}, "finite and positive"),
+        ({"rates": {"sample_rate_hz": 300.0}}, "sample_rate_hz must not exceed"),
         (
-            {"driver": {"control_rate_hz": 10.0}, "rl": {"policy_rate_hz": 20.0}},
-            "policy_rate_hz must not exceed",
+            {"driver": {"control_rate_hz": 10.0}, "rates": {"command_rate_hz": 20.0}},
+            "command_rate_hz must not exceed",
         ),
         (
             {
@@ -804,6 +809,35 @@ def test_rate_validation(tmp_path, overrides, match):
     OmegaConf.save(authored, path)
     with pytest.raises(ValueError, match=match):
         load_config(path)
+
+
+@pytest.mark.parametrize("sample_rate", [None, 10.0, 50.0])
+def test_shared_rates_resolve_for_capture_and_alignment(tmp_path, sample_rate):
+    experiment = _write_experiment(
+        tmp_path, "shared_rates", {"x500_01": _vehicle(0, "/x500_01", 0.0)}
+    )
+    rates = {"command_rate_hz": 25.0}
+    if sample_rate is not None:
+        rates["sample_rate_hz"] = sample_rate
+    OmegaConf.save(OmegaConf.merge(OmegaConf.load(experiment), {"rates": rates}), experiment)
+    resolved = load_config(experiment)
+    expected_sample_rate = 25.0 if sample_rate is None else sample_rate
+    assert resolved.rates.command_rate_hz == 25.0
+    assert resolved.rates.sample_rate_hz == expected_sample_rate
+    assert resolved.vehicles["x500_01"].pusher.effort_limit_n == 50.0
+    assert resolved.vehicles["x500_01"].pusher.velocity_limit_mps == 1.0
+    suite = OmegaConf.load(_ROOT / "flight/holybro_x500_v2_suite.yaml")
+    suite.experiment_config = str(experiment)
+    suite_path = tmp_path / "suite.yaml"
+    OmegaConf.save(suite, suite_path)
+    capture = load_flight_parameters_config(path=suite_path)
+    assert capture.command_rate_hz == 25.0
+    assert capture.sample_rate_hz == expected_sample_rate
+    definition = OmegaConf.load(_ROOT / "alignment/controllers/px4_sitl_x500_velocity.yaml")
+    definition.experiment_config = str(experiment)
+    definition_path = tmp_path / "controller.yaml"
+    OmegaConf.save(definition, definition_path)
+    assert load_controller_definition(definition_path).command_rate_hz == 25.0
 
 
 @pytest.mark.parametrize(

@@ -80,7 +80,7 @@ and backlogs describe future work, not current implementation requirements.
   boundary shielding the core import path. The guard is
   `tests/src/robotics_experiments/test_core_imports.py`.
 - Layering: `config -> controller -> {alignment, rl} -> workflows`, with
-  independent `flight_parameters -> {alignment, rl}` and
+  `config -> flight_parameters -> {alignment, rl}` and
   `config -> switches -> {environment, rl}` boundaries. Domain packages
   (`drone`, `environment`, `simulation`, `px4_bridge`) sit below runtime and Kit
   shells. Controller and flight-parameter packages must not depend on alignment,

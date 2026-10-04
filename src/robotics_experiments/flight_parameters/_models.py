@@ -20,16 +20,19 @@ class HoverConfig:
     mode_report_max_age_s: float
     settle_s: float
     measure_s: float
-    sample_rate_hz: float
     target_position_enu_m: Vector3
     target_yaw_rad: float
 
 
 @dataclass(frozen=True)
 class FlightExecutionConfig:
-    """Campaign scheduling settings."""
+    """Campaign scheduling, compression and storage settings."""
 
     worker_count: int
+    gzip_level: int
+    minimum_free_bytes: int
+    raw_flight_budget_bytes: int
+    estimated_archive_bytes_per_flight: int
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,8 @@ class FlightParametersConfig:
     stages: tuple[FlightStage, ...]
     preparation: FlightPreparation
     execution: FlightExecutionConfig
+    command_rate_hz: float
+    sample_rate_hz: float
     config_fingerprint: str
 
     @property

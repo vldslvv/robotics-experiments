@@ -54,12 +54,17 @@ def _adapter(*, module, config):
     return factory(artifact="flight-suite", hold_s=None)
 
 
-def test_complete_suite_preserves_one_policy_state_and_fixed_preparations(monkeypatch) -> None:
+@pytest.mark.parametrize("sample_rate", [10.0, 20.0, 50.0])
+def test_complete_suite_preserves_one_policy_state_and_fixed_preparations(
+    monkeypatch, sample_rate
+) -> None:
     module = _load_script(monkeypatch)
     config = load_flight_parameters_config(
-        path=REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml"
+        path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
     )
+    config = replace(config, sample_rate_hz=sample_rate)
     adapter = _adapter(module=module, config=config)
+    assert adapter.policy_rate_hz == config.command_rate_hz == 20.0
     state = adapter.initial_state
     complete = False
     saw_velocity = saw_ctbr = False
@@ -84,7 +89,7 @@ def test_complete_suite_preserves_one_policy_state_and_fixed_preparations(monkey
 def test_early_readiness_keeps_window_fixed_and_late_readiness_fails(monkeypatch) -> None:
     module = _load_script(monkeypatch)
     config = load_flight_parameters_config(
-        path=REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml"
+        path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
     )
     adapter = _adapter(module=module, config=config)
     state = adapter.initial_state
@@ -104,7 +109,7 @@ def test_early_readiness_keeps_window_fixed_and_late_readiness_fails(monkeypatch
 def test_rotational_commands_preserve_body_flu_signs(monkeypatch, mode) -> None:
     module = _load_script(monkeypatch)
     config = load_flight_parameters_config(
-        path=REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml"
+        path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
     )
     stage = next(stage for stage in config.stages[1:] if stage.control_mode == mode)
     command = replace(stage.commands[0], yaw_rate_radps=0.2, body_rate_flu_radps=(0.1, 0.2, 0.3))

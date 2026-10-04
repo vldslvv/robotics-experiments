@@ -232,7 +232,7 @@ def _policy_factory(*, config: FlightParametersConfig):
         if artifact != "flight-suite" or hold_s is not None:
             raise ValueError("flight capture requires the injected flight-suite policy")
         return PolicyAdapter(
-            policy_rate_hz=config.hover.sample_rate_hz,
+            policy_rate_hz=config.command_rate_hz,
             initial_state=_ProbeState(),
             advance=_advance_factory(config=config),
         )
@@ -254,9 +254,9 @@ def _deploy_pusher(*, context: SceneTestContext, host, config: FlightParametersC
     joint = UsdPhysics.PrismaticJoint(prim)
     drive = UsdPhysics.DriveAPI.Get(prim, "linear")
     drive.CreateTargetPositionAttr(float(joint.GetUpperLimitAttr().Get()))
-    drive.CreateMaxForceAttr(float(context.config.rl.lab_vehicle.pusher_effort_limit_n))
+    drive.CreateMaxForceAttr(float(context.config.vehicles[config.vehicle].pusher.effort_limit_n))
     PhysxSchema.PhysxJointAPI.Apply(prim).CreateMaxJointVelocityAttr().Set(
-        float(context.config.rl.lab_vehicle.pusher_velocity_limit_mps)
+        float(context.config.vehicles[config.vehicle].pusher.velocity_limit_mps)
     )
 
 
@@ -284,7 +284,7 @@ def _run(context: SceneTestContext, /) -> None:
     sample_count = 0
     hover_start_us = -1
     hover_end_us = -1
-    period_us = round(1e6 / config.hover.sample_rate_hz)
+    period_us = round(1e6 / config.sample_rate_hz)
 
     with (directory / "motion.jsonl").open("w") as stream:
 
@@ -394,7 +394,8 @@ def _run(context: SceneTestContext, /) -> None:
                 "state_source": config.state_source,
                 "source_backend": config.source_backend,
                 "preparation": asdict(config.preparation),
-                "sample_rate_hz": config.hover.sample_rate_hz,
+                "sample_rate_hz": config.sample_rate_hz,
+                "command_rate_hz": config.command_rate_hz,
                 "sample_count": sample_count,
                 "routine_steps": _plain(_routine_steps(config=config)),
                 "px4_home_lat_lon_alt": [

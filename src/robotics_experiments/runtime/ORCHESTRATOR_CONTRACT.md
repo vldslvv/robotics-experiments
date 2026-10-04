@@ -71,6 +71,10 @@ host's sensor-send leg before any actuator-poll leg. This ordering preserves
 multi-vehicle isolation and bounds lockstep latency by the slowest PX4 rather
 than serially starving later sends.
 
+Policy observers use the selected vehicle's pusher limits. Exported policy
+artifacts continue to own their execution rate; shared experiment rate defaults
+only author new policies and calibration commands.
+
 ## Shell responsibilities
 
 The live `experiment_runtime` extension owns Kit stage/timeline/PhysX event

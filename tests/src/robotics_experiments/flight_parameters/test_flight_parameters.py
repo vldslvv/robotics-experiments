@@ -34,17 +34,15 @@ def _config(tmp_path: Path, repetitions: int = 2, /):
     payload = cast(
         dict[str, Any],
         OmegaConf.to_container(
-            OmegaConf.load(REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml")
+            OmegaConf.load(REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml")
         ),
     )
     payload["flight_count"] = repetitions
     payload["start_seed"] = 1
-    payload["stages"][0]["hover"].update(
-        mode_transition_timeout_s=3.0, settle_s=2.0, measure_s=1.0, sample_rate_hz=2.0
-    )
+    payload["stages"][0]["hover"].update(mode_transition_timeout_s=3.0, settle_s=2.0, measure_s=1.0)
     path = tmp_path / "flight.yaml"
     path.write_text(OmegaConf.to_yaml(OmegaConf.create(payload)))
-    return load_flight_parameters_config(path=path)
+    return replace(load_flight_parameters_config(path=path), sample_rate_hz=2.0)
 
 
 def _array(values, dtype=float):
@@ -106,8 +104,10 @@ def _parsed_log(*, measurement_mode: int = 4, commands=(400, 22)) -> ParsedPx4Ho
 
 
 def _raw(config) -> RawFlightTrace:
+    period_us = round(1e6 / config.sample_rate_hz)
     times = tuple(
-        10_000_000 + index * 500_000 + (100_000 if index % 2 else 0) for index in range(13)
+        10_000_000 + index * period_us + (period_us // 5 if index % 2 else 0)
+        for index in range(round(6 * config.sample_rate_hz) + 1)
     )
     return RawFlightTrace(
         artifact_kind="robotics-experiments-flight-parameters-raw-trace",
@@ -136,8 +136,9 @@ def _raw(config) -> RawFlightTrace:
     )
 
 
-def test_px4_verification_selects_only_auto_loiter_samples(tmp_path: Path) -> None:
-    config = _config(tmp_path, 1)
+@pytest.mark.parametrize("sample_rate", [2.0, 4.0])
+def test_px4_verification_selects_only_auto_loiter_samples(tmp_path: Path, sample_rate) -> None:
+    config = replace(_config(tmp_path, 1), sample_rate_hz=sample_rate)
     verification, trace = verify_px4_hover_evidence(
         config=config,
         raw=_raw(config),
@@ -156,15 +157,11 @@ def test_px4_verification_selects_only_auto_loiter_samples(tmp_path: Path) -> No
     assert trace.measurement_start_us == 15_000_000
     assert trace.measurement_end_us == 16_000_000
     assert trace.target_position_enu_m == pytest.approx((0.0, 0.0, 2.5))
-    assert len(trace.time_s) == 2
-    assert trace.linear_velocity_enu_mps == (
-        _raw(config).linear_velocity_enu_mps[10],
-        _raw(config).linear_velocity_enu_mps[11],
-    )
-    assert trace.angular_velocity_enu_radps == (
-        _raw(config).angular_velocity_enu_radps[10],
-        _raw(config).angular_velocity_enu_radps[11],
-    )
+    assert config.command_rate_hz == 20.0
+    assert len(trace.time_s) == round(config.hover.measure_s * sample_rate)
+    measured = slice(round(5 * sample_rate), round(6 * sample_rate))
+    assert trace.linear_velocity_enu_mps == _raw(config).linear_velocity_enu_mps[measured]
+    assert trace.angular_velocity_enu_radps == _raw(config).angular_velocity_enu_radps[measured]
 
 
 def test_px4_verification_window_does_not_follow_loiter_report_time(tmp_path: Path) -> None:
@@ -253,7 +250,7 @@ def test_external_offboard_commands_after_hover_are_allowed(tmp_path: Path) -> N
 
 def test_canonical_suite_preserves_physical_commands_and_seed_order() -> None:
     config = load_flight_parameters_config(
-        path=REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml"
+        path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
     )
     assert config.flight_count == 10
     assert len(config.stages) == 24
@@ -286,12 +283,12 @@ def test_canonical_suite_preserves_physical_commands_and_seed_order() -> None:
 def test_invalid_campaign_size_fails(count) -> None:
     with pytest.raises(ValueError, match="flight_count"):
         load_flight_parameters_config(
-            path=REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml", flight_count=count
+            path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml", flight_count=count
         )
 
 
 def test_count_override_changes_identity_without_changing_stages() -> None:
-    path = REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml"
+    path = REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
     a = load_flight_parameters_config(path=path)
     b = load_flight_parameters_config(path=path, flight_count=23)
     assert a.stages == b.stages
@@ -463,10 +460,14 @@ def test_stability_resamples_whole_flights_and_requires_comparison_batches(tmp_p
     assert report.runs[0].hover[0].excursion_flight_count == 10
 
 
-def test_campaign_identity_and_resume_preserve_evidence(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("flight_count", "workers"), ((1, 1), (4, 2)))
+def test_campaign_identity_and_resume_preserve_evidence(
+    tmp_path, monkeypatch, flight_count, workers
+):
     import runpy
     import sys
     import types
+    from threading import Barrier, Lock
 
     pyulog = types.ModuleType("pyulog")
     pyulog.ULog = object  # Unit test supplies processing rather than a ULog decoder.
@@ -475,12 +476,27 @@ def test_campaign_identity_and_resume_preserve_evidence(tmp_path, monkeypatch):
     main = namespace["main"]
     globals_ = main.__globals__
     captures = []
+    capture_barrier = Barrier(workers, timeout=10)
+    capture_lock = Lock()
+    active_captures = 0
+    peak_captures = 0
     monkeypatch.setitem(globals_, "_check_space", lambda **_kwargs: None)
 
     def capture(command, *, cwd, check):
+        nonlocal active_captures, peak_captures
         assert check
         values = dict(item.split("=", 1) for item in command if "=" in item)
         directory = Path(values["FLIGHT_PARAMETERS_TRIAL_DIR"])
+        index = int(values["FLIGHT_PARAMETERS_FLIGHT_INDEX"])
+        for previous in range(index // workers * workers):
+            completed = directory.parent / f"flight-{previous:03d}"
+            assert (completed / "complete.json").is_file()
+            assert (completed / "flight.ulg.gz").is_file()
+            assert not (completed / "flight.ulg").exists()
+        with capture_lock:
+            active_captures += 1
+            peak_captures = max(peak_captures, active_captures)
+        capture_barrier.wait()
         integration = Path(values["INTEGRATION_ROOT"]) / "capture"
         integration.mkdir(parents=True)
         for name, content in (
@@ -493,6 +509,9 @@ def test_campaign_identity_and_resume_preserve_evidence(tmp_path, monkeypatch):
         (integration / "flight.ulg").write_bytes((directory / "flight.ulg").read_bytes())
         (integration / "capture_bridge.log").write_bytes((directory / "bridge.log").read_bytes())
         captures.append(directory)
+        capture_barrier.wait()
+        with capture_lock:
+            active_captures -= 1
 
     monkeypatch.setitem(globals_, "subprocess", types.SimpleNamespace(run=capture))
 
@@ -517,7 +536,11 @@ def test_campaign_identity_and_resume_preserve_evidence(tmp_path, monkeypatch):
     monkeypatch.setitem(globals_, "_publish_campaign", interrupted_analysis)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "flight.yaml"
-    config_path.write_text((REPO_ROOT / "configs/flight/holybro_x500_v2_hover.yaml").read_text())
+    config_path.write_text(
+        (REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml")
+        .read_text()
+        .replace("worker_count: 1", f"worker_count: {workers}")
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -525,10 +548,8 @@ def test_campaign_identity_and_resume_preserve_evidence(tmp_path, monkeypatch):
             "campaign",
             "--config",
             str(config_path),
-            "--processing-config",
-            str(REPO_ROOT / "configs/flight/processing/default.yaml"),
             "--flight-count",
-            "1",
+            str(flight_count),
             "--run-id",
             "checkpoint",
             "--output-root",
@@ -537,7 +558,7 @@ def test_campaign_identity_and_resume_preserve_evidence(tmp_path, monkeypatch):
     )
     with pytest.raises(RuntimeError, match="analysis interrupted"):
         main()
-    assert len(captures) == 1
+    assert len(captures) == flight_count and peak_captures == workers
     directory = captures[0]
     assert (directory / "flight.ulg.gz").is_file()
     assert not (directory / "flight.ulg").exists()
@@ -554,13 +575,17 @@ def test_campaign_identity_and_resume_preserve_evidence(tmp_path, monkeypatch):
         "flights",
     }
     definition = json.loads((directory.parents[1] / "definition.json").read_text())
-    assert definition["flight_count"] == 1 and len(definition["stages"]) == 24
+    assert definition["flight_count"] == flight_count and len(definition["stages"]) == 24
+    dataset = load_flight_dataset(directory.parents[1])
+    assert [(flight.flight_index, flight.seed) for flight in dataset.flights] == [
+        (index, definition["start_seed"] + index) for index in range(flight_count)
+    ]
     calls = []
     monkeypatch.setitem(globals_, "_publish_campaign", lambda **kwargs: calls.append(kwargs))
     main()
-    assert len(captures) == 1 and len(calls) == 1
+    assert len(captures) == flight_count and len(calls) == 1
     assert (directory / "complete.json").read_bytes() == complete
     (directory / "bridge.log.gz").write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="hash or size mismatch"):
         main()
-    assert len(captures) == 1
+    assert len(captures) == flight_count

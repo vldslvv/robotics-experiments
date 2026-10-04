@@ -1,0 +1,32 @@
+# @package _global_
+defaults:
+  - /base
+  - /experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - _self_
+
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
+sim:
+  enhanced_determinism: true
+
+vehicles:
+  x500_01:
+    id: 0
+    ros: {namespace: /x500_01}
+    spawn: {position_xy: [0.0, 0.0]}
+    px4:
+      # Default topics plus full-rate attitude/rate/actuator topics. Exact
+      # 250 Hz controller replay cannot be reconstructed from decimated ULogs.
+      logging_profile: 17
+    bridge:
+      # Isolate calibration from stochastic IMU/GPS inputs.
+      # PX4 still requires nonconstant pressure samples to keep its barometer
+      # instance healthy.
+      sensor_noise_enabled: false
+      sensor_excitation_mode: deterministic
+      barometer_noise_std_pa: 0.1
+      # PX4's exact-field innovation is outside its initialization gate, so
+      # retain a small deterministic magnetic excitation.
+      magnetometer_noise_scale: 0.1
+      # Preserve physics-rate plant state for the controller-boundary replay.
+      dynamics_debug_log_interval: 1

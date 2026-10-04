@@ -28,6 +28,7 @@ from robotics_experiments.alignment._models import (
     SearchSpec,
     SettingValue,
 )
+from robotics_experiments.config import load_config
 
 __all__: list[str] = []
 
@@ -1111,6 +1112,10 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError(f"cannot load controller definition {definition_path}: {exc}") from exc
     definition = _object(value=loaded, name=str(definition_path))
+    if "command_rate_hz" in definition:
+        raise ValueError("set rates.command_rate_hz in the referenced experiment")
+    experiment_config = _string(value=definition.get("experiment_config"), name="experiment_config")
+    command_rate_hz = load_config(experiment_config).rates.command_rate_hz
     backend = _string(value=definition.get("backend"), name="backend")
     if backend not in _BACKENDS:
         raise ValueError(f"unsupported controller backend {backend!r}")
@@ -1127,6 +1132,7 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
         _string(value=value, name="publication_metrics") for value in publication_metrics_value
     )
     raw_for_fingerprint = dict(definition)
+    raw_for_fingerprint["command_rate_hz"] = command_rate_hz
     fingerprint = _fingerprint(raw_for_fingerprint)
     return ControllerDefinition(
         alignment_id=_string(value=definition.get("alignment_id"), name="alignment_id"),
@@ -1135,21 +1141,14 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
             value=definition.get("controller_schema_version")
         ),
         backend=backend,
-        experiment_config=_string(
-            value=definition.get("experiment_config"),
-            name="experiment_config",
-        ),
+        experiment_config=experiment_config,
         flight_parameters_artifact=_string(
             value=definition.get("flight_parameters_artifact"),
             name="flight_parameters_artifact",
         ),
         vehicle=_string(value=definition.get("vehicle"), name="vehicle"),
         airframe=_string(value=definition.get("airframe"), name="airframe"),
-        command_rate_hz=_finite(
-            value=definition.get("command_rate_hz"),
-            name="command_rate_hz",
-            positive=True,
-        ),
+        command_rate_hz=command_rate_hz,
         base_settings=base_settings,
         probe_families=_probe_families(value=definition.get("probe_families")),
         parameters=_parameters(

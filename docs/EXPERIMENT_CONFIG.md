@@ -43,14 +43,16 @@ Specialized experiment entrypoints stay at the config root:
 `flight_parameters_x500.yaml` captures a complete hover/response suite,
 `alignment_px4_x500_velocity.yaml` defines the alignment diagnostic environment, and
 `flight_benchmark.yaml` / `flight_benchmark_takeoff_quad.yaml` wrap the circle
-and single-drone flights with longer cold-start bridge deadlines. Training
-curricula and stage experiments remain under `configs/train/`.
+and single-drone flights with longer cold-start bridge deadlines. The two calibration experiments inherit the common environment in
+`experiment/calibration/x500.yaml`, including deterministic sensor settings and
+high-rate logging. Training curricula and stage experiments remain under
+`configs/train/`.
 
 ## Root structure
 
 The root contains only execution-wide configuration:
 
-- `sim`, `switches`, `rl`, `scene`, `driver`, `flight_benchmark`, and
+- `sim`, `rates`, `switches`, `rl`, `scene`, `driver`, `flight_benchmark`, and
   `alignment`;
 - `vehicles`, an ordered mapping of complete per-vehicle configs.
 
@@ -96,11 +98,16 @@ reproducibility must still be verified with replicate captures.
 
 `driver.control_rate_hz` drives the fleet cyclic executive,
 `driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and
-`rl.policy_rate_hz` authors training. Switch activation runs every physics step
+`rates.command_rate_hz` drives capture commands, alignment and new training.
+`rates.sample_rate_hz` defaults to `${rates.command_rate_hz}` in `base.yaml` and
+may be overridden independently for recording. Flight suites and alignment
+definitions resolve these values from their referenced experiment rather than
+authoring separate rate literals. Switch activation runs every physics step
 using `switches.model.confirmation_s`, independently of policy cadence. Exported artifacts own evaluation and
-deployment policy cadence. All rates must be finite and positive; authored or
+deployment policy rate. All rates must be finite and positive; authored or
 artifact policy cadence and setpoint rates cannot exceed the driver rate, and
-the driver rate cannot exceed `sim.physics_hz`. Defaults are 50, 50, and 20 Hz
+the driver rate cannot exceed `sim.physics_hz`. Recording cannot exceed the
+physics rate. Defaults are 50, 50, and 20 Hz
 respectively.
 
 `sim.enhanced_determinism` remains disabled by default and is enabled by the

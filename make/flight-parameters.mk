@@ -2,9 +2,8 @@
 # Task-neutral flight parameters
 ########################################
 
-FLIGHT_CONFIG ?= configs/flight/holybro_x500_v2_hover.yaml
+FLIGHT_CONFIG ?= configs/flight/holybro_x500_v2_suite.yaml
 FLIGHT_PARAMETERS_OUTPUT_ROOT ?= .build/flight-parameters
-FLIGHT_PARAMETERS_PROCESSING_CONFIG ?= configs/flight/processing/default.yaml
 FLIGHT_PARAMETERS_STABILITY_CONFIG ?= configs/flight/stability/default.yaml
 FLIGHT_PARAMETERS_COMPARE_RUNS ?=
 FLIGHT_PARAMETERS_RUN_ID ?=
@@ -42,7 +41,6 @@ flight-parameters:
 	@PYTHONPATH=src uv run --with pyulog python make/scripts/run_flight_parameters_campaign.py \
 	    --config '$(FLIGHT_CONFIG)' \
 	    $(if $(strip $(FLIGHT_COUNT)),--flight-count '$(FLIGHT_COUNT)') \
-	    --processing-config '$(FLIGHT_PARAMETERS_PROCESSING_CONFIG)' \
 	    --stability-config '$(FLIGHT_PARAMETERS_STABILITY_CONFIG)' \
 	    $(foreach run,$(FLIGHT_PARAMETERS_COMPARE_RUNS),--compare-run '$(run)') \
 	    --output-root '$(FLIGHT_PARAMETERS_OUTPUT_ROOT)' \

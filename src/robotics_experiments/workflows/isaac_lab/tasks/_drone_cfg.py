@@ -5,8 +5,8 @@ Torch/isaaclab leaf (off the core import path). Moved here from
 and made config-driven: the USD asset comes from ``drone.usd_path`` (Hydra) rather
 than a hardcoded assets path. The USD carries static geometry/topology, mass
 properties, and the authoritative pusher stiffness/damping. This cfg applies
-only Lab-specific solver caps, effort and velocity limits, and initial state
-from ``rl.lab_vehicle``.
+Lab-specific solver caps and initial state from ``rl.lab_vehicle`` and shared
+pusher limits from the selected vehicle.
 
 Assumes the pusher-enabled variant (the default ``holybro_x500_v2``): a
 pusher-less variant built with ``drone.pusher.enabled=false`` has no
@@ -22,7 +22,9 @@ from isaaclab.sim import RigidBodyPropertiesCfg, UsdFileCfg
 __all__: list[str] = []
 
 
-def _make_drone_articulation_cfg(*, usd_path: str, prim_path: str, lab_vehicle) -> ArticulationCfg:
+def _make_drone_articulation_cfg(
+    *, usd_path: str, prim_path: str, lab_vehicle, pusher
+) -> ArticulationCfg:
     """Build the drone ``ArticulationCfg`` for the Lab env from config.
 
     Args:
@@ -57,8 +59,8 @@ def _make_drone_articulation_cfg(*, usd_path: str, prim_path: str, lab_vehicle) 
                 joint_names_expr=["pusher_joint"],
                 stiffness=None,
                 damping=None,
-                effort_limit=lab_vehicle.pusher_effort_limit_n,
-                velocity_limit=lab_vehicle.pusher_velocity_limit_mps,
+                effort_limit=pusher.effort_limit_n,
+                velocity_limit=pusher.velocity_limit_mps,
             ),
         },
     )

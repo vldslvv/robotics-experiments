@@ -114,13 +114,13 @@ def verify_flight_recording(*, config: FlightParametersConfig, directory: Path) 
         ):
             raise ValueError("measurement windows contain preparation or another stage")
         if index == 0:
-            if stop - start != round(config.hover.measure_s * config.hover.sample_rate_hz):
+            if stop - start != round(config.hover.measure_s * config.sample_rate_hz):
                 raise ValueError("hover measurement sample count differs from its fixed window")
             continue
         duration = sum(command.duration_s for command in config.stages[index].commands)
         if (
             abs((stage["end_sim_time_us"] - stage["start_sim_time_us"]) * 1e-6 - duration)
-            >= 1 / config.hover.sample_rate_hz
+            >= 1 / config.sample_rate_hz
         ):
             raise ValueError("response command duration differs from the authored schedule")
         for topic, flags in (

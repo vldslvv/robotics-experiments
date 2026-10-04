@@ -4,12 +4,11 @@ defaults:
 
 # Shared Isaac Lab RL scale. The physics decimation is derived in the env as
 # scheduled exactly from sim.physics_hz (250 / 20 alternates 13 and 12 physics
-# steps), so the physics cadence stays single-sourced on sim.physics_hz.
+# steps), so the physics step rate stays single-sourced on sim.physics_hz.
 num_envs: 16
 env_spacing: 4.0
 # Episode timeout for the selected task.
 episode_length_s: 5.0
-policy_rate_hz: 20.0
 
 # Lab-only spawn/solver caps. Pusher stiffness and damping are inherited from
 # the generated USD and therefore remain single-sourced in the airframe config.
@@ -20,8 +19,6 @@ lab_vehicle:
   max_depenetration_velocity_mps: 10.0
   # Match the standalone PX4 plant's generated-USD/default PhysX contract.
   enable_gyroscopic_forces: false
-  pusher_effort_limit_n: 50.0
-  pusher_velocity_limit_mps: 1.0
 
 # PPO training (make train-rl, rl.training adapter). task_id selects the
 # Gymnasium task the entrypoint trains.

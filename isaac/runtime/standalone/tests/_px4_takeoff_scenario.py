@@ -392,13 +392,12 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
 
     env = context.config
     active_routines = [
-        vehicle.routine for vehicle in env.vehicles.values() if vehicle.routine.steps
+        vehicle.routine
+        for vehicle in env.vehicles.values()
+        if (options.routine_steps if options.routine_steps is not None else vehicle.routine.steps)
     ]
     if not active_routines:
-        raise ValueError(
-            f"{options.test_name}: no vehicle has a non-empty routine.steps; run this scenario "
-            "under a takeoff experiment (e.g. configs/routines/basic_takeoff_quad.yaml)"
-        )
+        raise ValueError(f"{options.test_name}: no vehicle has authored or injected routine steps")
     ground_settle_s = max(routine.ground_settle_s for routine in active_routines)
 
     context.report(f"{options.test_name}: running in {'strict' if strict else 'forgiving'} mode")

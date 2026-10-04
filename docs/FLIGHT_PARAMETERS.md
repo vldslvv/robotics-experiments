@@ -6,10 +6,10 @@ owns neither dataset splits nor fitted controller or training bounds.
 
 ## Flight definition
 
-`configs/flight/holybro_x500_v2_hover.yaml` owns the complete physical suite:
+`configs/flight/holybro_x500_v2_suite.yaml` owns the complete physical suite:
 vehicle and experiment, `start_seed`, `flight_count`, takeoff height threshold,
-ordered stages, response preparation, and worker count. The first stage defines
-hover timing, sampling cadence, requested pose and PX4 report freshness. Each
+ordered stages, response preparation, and execution settings. The first stage
+defines hover timing, requested pose and PX4 report freshness. Each
 response stage defines its name, control mode, axis, optional position hold, and
 ordered commands with durations. Velocity commands use body-FLU velocity and
 yaw rate; CTBR commands use normalized collective thrust and body-FLU rates.
@@ -23,7 +23,8 @@ flight's physical state, PX4 controller history and random stream. There is no
 stage reset or reseeding. A seed identifies a random stream; it does not promise
 bitwise replay of PX4 command activation.
 
-`configs/flight_parameters_x500.yaml` owns the physical environment. Calibration
+`configs/flight_parameters_x500.yaml` selects the shared X500 calibration
+environment used by capture and alignment. Calibration
 uses simulator ground truth and disables artificial random sensor noise. Small
 deterministic pressure and magnetic excitation keeps PX4 sensor initialization
 healthy. Sensor noise and domain randomization during training are separate
@@ -37,33 +38,62 @@ make flight-parameters FLIGHT_COUNT=100
 ```
 
 The optional count overrides the YAML default and changes campaign identity.
-GNU Make's `-n` prints commands; it is not a flight count. Processing and stability
-settings live separately in `configs/flight/processing/default.yaml` and
-`configs/flight/stability/default.yaml`.
+GNU Make's `-n` prints commands; it is not a flight count. The suite's `execution`
+section owns worker count, compression level and storage budgets. Only stability
+settings live separately, in `configs/flight/stability/default.yaml`.
+
+Set parallel captures in `configs/flight/holybro_x500_v2_suite.yaml`:
+
+```yaml
+execution:
+  worker_count: 2
+```
+
+Shared `rates.command_rate_hz` and `rates.sample_rate_hz` come from the referenced
+experiment. The recording rate follows the command rate by default through YAML
+interpolation; an experiment can override recording independently. Response
+commands use the command rate, while every stage records at the sample rate.
+Both resolved rates enter the physical definition and flight metadata. Pusher
+limits come from the selected vehicle, shared with runtime and training.
+
+The default is one worker. Each worker runs an independent Isaac/PX4 flight,
+with its own capture directory and container name. Parallelism applies to whole
+flights; the 24 stages within a flight remain sequential.
 
 ```text
-flight definition -> assign independent flights and seeds
+load flight config -> assign independent flights and seeds
 
-for each independent flight:
-  definition -> capture the complete timeline
-  -> verify PX4 state and extract stage metadata
-  -> reconstruct response controller states from ULog
-  -> lossless compression and hashes -> completion checkpoint
-  -> remove verified raw log duplicates
+for each batch (up to execution.worker_count flights in parallel):
+  for each flight:
+    definition -> capture the complete timeline
+    -> verify PX4 state and extract stage metadata
+    -> reconstruct response controller states from ULog
+    -> lossless compression and hashes -> completion checkpoint
+    -> remove verified raw log duplicates
+  collect completed-flight results before starting the next batch
 
 after all flights:
-  validate completeness -> write unsplit dataset metadata
+  aggregate ordered completion records -> write unsplit dataset metadata
   -> final stability analysis in a separate report
   -> validate file integrity -> finalize immutable run -> publish latest
 ```
 
-Capture callbacks never invoke stability analysis. Each worker completes
-postprocessing before accepting another flight. Worker count changes scheduling,
-not stage commands or seed assignment. `definition.json` records the flight
-configuration, including the requested count and starting seed. Resume requires
-the same definition. Validation checks that the requested flights and stages
+Capture callbacks never invoke stability analysis. The next batch waits for
+every flight in the current batch to finish capture and postprocessing. Worker
+count changes scheduling, not stage commands or seed assignment. `definition.json` records the flight
+configuration, including the requested count, starting seed and resolved rates,
+excluding operational execution settings. Resume requires
+the same physical definition. Validation checks that the requested flights and stages
 completed and that retained files are intact. Git state and unrelated repository
 changes do not affect capture validity.
+
+The host runner uses functions with explicit inputs and frozen configuration,
+flight and completion records. `_flights(config)` assigns work;
+`_collect_flights(...)` returns ordered completed records; `_run_flight(...)`
+owns capture, processing, compression and cleanup for one flight. `main()` passes
+the completed records into dataset metadata and then calls `_publish_campaign`.
+Subprocesses, files and the worker pool are explicit I/O boundaries; this is
+functional orchestration, not a side-effect-free computation.
 
 ## Timing and measurements
 
@@ -186,7 +216,7 @@ not decide statistical acceptance.
 Reports are written outside the producer bundle, at
 `<output-root>/<id>/stability/<run-id>.json`. Comparisons check the recorded flight
 definitions (excluding count and starting seed), stage commands and measurement
-cadence. This checks that the same measurements are being compared; it does not
+rate. This checks that the same measurements are being compared; it does not
 assert that software or hardware environments were identical.
 
 Qualification requires passing both repeated-seed and disjoint-seed batch

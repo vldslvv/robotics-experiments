@@ -92,6 +92,11 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
     ros_namespaces: set[str] = set()
     ros_frame_prefixes: set[str] = set()
     for label, v in vehicles.items():
+        if any(
+            not math.isfinite(value) or value <= 0.0
+            for value in (v.pusher.effort_limit_n, v.pusher.velocity_limit_mps)
+        ):
+            raise ValueError(f"vehicle {label!r} pusher limits must be finite and positive")
         if not 0 <= v.px4.logging_profile <= 4095:
             raise ValueError(
                 f"vehicle {label!r} px4.logging_profile must be between 0 and 4095, "
@@ -186,13 +191,16 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
         "sim.physics_hz": experiment.sim.physics_hz,
         "driver.control_rate_hz": experiment.driver.control_rate_hz,
         "driver.offboard_setpoint_rate_hz": experiment.driver.offboard_setpoint_rate_hz,
-        "rl.policy_rate_hz": experiment.rl.policy_rate_hz,
+        "rates.command_rate_hz": experiment.rates.command_rate_hz,
+        "rates.sample_rate_hz": experiment.rates.sample_rate_hz,
     }
     for name, value in rates.items():
         if not math.isfinite(value) or value <= 0.0:
             raise ValueError(f"{name} must be finite and positive, got {value!r}")
-    if experiment.rl.policy_rate_hz > experiment.driver.control_rate_hz:
-        raise ValueError("rl.policy_rate_hz must not exceed driver.control_rate_hz")
+    if experiment.rates.command_rate_hz > experiment.driver.control_rate_hz:
+        raise ValueError("rates.command_rate_hz must not exceed driver.control_rate_hz")
+    if experiment.rates.sample_rate_hz > experiment.sim.physics_hz:
+        raise ValueError("rates.sample_rate_hz must not exceed sim.physics_hz")
     if experiment.driver.offboard_setpoint_rate_hz > experiment.driver.control_rate_hz:
         raise ValueError("driver.offboard_setpoint_rate_hz must not exceed driver.control_rate_hz")
     if experiment.driver.control_rate_hz > experiment.sim.physics_hz:

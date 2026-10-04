@@ -7,7 +7,6 @@ flight_parameters_artifact: .build/flight-parameters/holybro-x500-v2-hover-v1/la
 vehicle: x500_01
 airframe: holybro_x500_v2.usda
 image: vv-isaac-lab-custom
-command_rate_hz: 20.0
 
 settings:
   command_delay_s: 0.0

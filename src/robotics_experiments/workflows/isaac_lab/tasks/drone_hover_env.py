@@ -107,7 +107,7 @@ def make_drone_hover_env_cfg(
     """Build the Isaac Lab task config from one resolved experiment."""
     vehicle = _training_vehicle(experiment_config)
     policy_rate_hz = (
-        experiment_config.rl.policy_rate_hz
+        experiment_config.rates.command_rate_hz
         if policy_contract is None
         else policy_contract.policy_rate_hz
     )
@@ -137,6 +137,7 @@ def make_drone_hover_env_cfg(
         drone_cfg=_make_drone_articulation_cfg(
             usd_path=vehicle.spawn.usd_path,
             prim_path=_DRONE_PRIM_PATH,
+            pusher=vehicle.pusher,
             lab_vehicle=experiment_config.rl.lab_vehicle,
         ),
         scene=InteractiveSceneCfg(

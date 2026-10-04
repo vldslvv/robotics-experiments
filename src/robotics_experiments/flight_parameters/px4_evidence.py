@@ -220,12 +220,12 @@ def _measurement_indices(
         (config.hover.mode_transition_timeout_s + config.hover.settle_s) * 1_000_000
     )
     start = int(np.searchsorted(raw.time_us, desired_start_us, side="left"))
-    count = round(config.hover.measure_s * config.hover.sample_rate_hz)
+    count = round(config.hover.measure_s * config.sample_rate_hz)
     stop = start + count
     if stop > len(raw.time_us):
         raise ValueError("raw pose trace does not cover the verified hover measurement")
     indices = tuple(range(start, stop))
-    period_us = 1_000_000.0 / config.hover.sample_rate_hz
+    period_us = 1_000_000.0 / config.sample_rate_hz
     for index in indices:
         expected_us = hold_start_us + round(index * period_us)
         phase_us = raw.time_us[index] - expected_us
@@ -503,7 +503,7 @@ def verify_px4_hover_evidence(
         measurement_end_us=measurement_end_us,
         target_position_enu_m=effective_position,
         target_attitude_flu_enu_wxyz=effective_attitude,
-        time_s=tuple(index / config.hover.sample_rate_hz for index in range(len(indices))),
+        time_s=tuple(index / config.sample_rate_hz for index in range(len(indices))),
         position_enu_m=tuple(raw.position_enu_m[index] for index in indices),
         attitude_flu_enu_wxyz=tuple(raw.attitude_flu_enu_wxyz[index] for index in indices),
         linear_velocity_enu_mps=tuple(raw.linear_velocity_enu_mps[index] for index in indices),

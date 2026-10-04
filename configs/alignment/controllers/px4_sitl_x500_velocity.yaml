@@ -7,7 +7,6 @@ flight_parameters_artifact: .build/flight-parameters/holybro-x500-v2-hover-v1/la
 vehicle: x500_01
 airframe: holybro_x500_v2.usda
 image: vv-px4-sitl
-command_rate_hz: 20.0
 
 # PX4 owns this cascade during capture. The pinned values keep the reference
 # definition complete and seed the target's deterministic candidate centers.

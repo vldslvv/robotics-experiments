@@ -31,6 +31,11 @@ vehicles:
 The mapping label is used in runtime logs. `id` remains the PX4 numeric identity;
 `ros.namespace` is the independent operator-facing ROS identity.
 
+`vehicles.<label>.pusher` owns runtime `effort_limit_n` and
+`velocity_limit_mps`. Capture, policy deployment and Isaac Lab use the selected
+vehicle's limits. Geometry, stiffness and damping remain asset-owned; Lab-only
+spawn and solver settings remain under `rl.lab_vehicle`.
+
 ## Resolution and validation
 
 The loader enriches each `VehicleConfig` once:

@@ -15,6 +15,9 @@ spawn:
   stationary_ground_z: 0.0
   stationary_ground_clearance_m: 0.05
   stationary_spawn_z_fallback: 0.07
+pusher:
+  effort_limit_n: 50.0
+  velocity_limit_mps: 1.0
 px4:
   # PX4 SDLOG_PROFILE bitmask. The default general-analysis profile remains
   # compact; experiments that audit controller-rate topics opt into high rate.

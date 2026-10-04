@@ -40,7 +40,7 @@ measurements must not silently replace or relabel existing SITL evidence.
 The current [flight-parameter workflow](FLIGHT_PARAMETERS.md) already provides
 immutable evidence, firmware information, independent fitting, validation, and
 acceptance flights, and explicit provenance. Its
-[configuration](../configs/flight/holybro_x500_v2_hover.yaml) currently selects
+[configuration](../configs/flight/holybro_x500_v2_suite.yaml) currently selects
 only SITL with simulator ground truth, and the loader enforces that boundary.
 Supporting HIL requires a deliberate extension.
 

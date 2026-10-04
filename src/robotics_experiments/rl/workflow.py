@@ -100,9 +100,9 @@ def prepare_policy_inputs(
         controller_mismatches.append(
             f"airframe {controller.airframe!r} != {Path(vehicle.spawn.usd_path).name!r}"
         )
-    if controller.command_rate_hz != config.rl.policy_rate_hz:
+    if controller.command_rate_hz != config.rates.command_rate_hz:
         controller_mismatches.append(
-            f"cadence {controller.command_rate_hz} != {config.rl.policy_rate_hz}"
+            f"rate {controller.command_rate_hz} != {config.rates.command_rate_hz}"
         )
     if action.kind not in controller.certified_control_modes or action.action_dim != 4:
         controller_mismatches.append(

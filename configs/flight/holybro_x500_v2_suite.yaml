@@ -19,6 +19,11 @@ preparation:
   max_tilt_deg: 0.25
 execution:
   worker_count: 1
+  gzip_level: 6
+  minimum_free_bytes: 5368709120
+  # Raw producer/harness copies and compression staging per worker.
+  raw_flight_budget_bytes: 1073741824
+  estimated_archive_bytes_per_flight: 105000000
 stages:
   - name: hover
     kind: "hover"
@@ -31,7 +36,6 @@ stages:
       mode_report_max_age_s: 2.5
       settle_s: 6.0
       measure_s: 30.0
-      sample_rate_hz: 20.0
       target_position_enu_m: [0.0, 0.0, 2.5]
       target_yaw_rad: 0.0
     commands: []

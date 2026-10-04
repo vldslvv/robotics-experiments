@@ -1,7 +1,0 @@
-# Host postprocessing only; these settings never enter the physical flight.
-gzip_level: 6
-minimum_free_bytes: 5368709120
-# Includes the producer and harness copies plus compression staging per worker.
-raw_flight_budget_bytes: 1073741824
-# Initial estimate from the response pilot; completed flights refine it upward.
-estimated_archive_bytes_per_flight: 105000000

@@ -810,9 +810,9 @@ def _resolved_experiment_fingerprint(
     mismatches = []
     if Path(vehicle.spawn.usd_path).name != target.airframe:
         mismatches.append(f"airframe {Path(vehicle.spawn.usd_path).name!r} != {target.airframe!r}")
-    if experiment.rl.policy_rate_hz != target.command_rate_hz:
+    if experiment.rates.command_rate_hz != target.command_rate_hz:
         mismatches.append(
-            f"command cadence {experiment.rl.policy_rate_hz} != " f"{target.command_rate_hz}"
+            f"command rate {experiment.rates.command_rate_hz} != " f"{target.command_rate_hz}"
         )
     action = experiment.rl.action
     if action.action_dim != 4:

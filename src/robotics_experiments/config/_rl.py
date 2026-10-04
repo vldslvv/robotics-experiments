@@ -43,8 +43,6 @@ class IsaacLabVehicleConfig(_FreezableConfig):
     max_angular_velocity_radps: float
     max_depenetration_velocity_mps: float
     enable_gyroscopic_forces: bool
-    pusher_effort_limit_n: float
-    pusher_velocity_limit_mps: float
 
 
 @dataclass
@@ -435,8 +433,8 @@ class RlConfig(_FreezableConfig):
 
     Replaces the retired ``isaac_lab`` group as the single source of truth for
     the DirectRLEnv Lab-scale tunables. ``decimation`` is not authored here: the
-    env schedules it from ``sim.physics_hz`` and ``policy_rate_hz`` so the
-    physics cadence stays single-sourced on ``sim.physics_hz``.
+    env schedules it from ``sim.physics_hz`` and ``rates.command_rate_hz`` so the
+    physics step rate stays single-sourced on ``sim.physics_hz``.
 
     Attributes:
         action: The RL action-level selection and controller tunables.
@@ -446,7 +444,6 @@ class RlConfig(_FreezableConfig):
         num_envs: Number of parallel cloned envs.
         env_spacing: Distance between cloned env origins, meters.
         episode_length_s: Episode timeout in seconds for the selected task.
-        policy_rate_hz: Exact-average RL policy decision rate.
     """
 
     action: RlActionConfig
@@ -458,4 +455,3 @@ class RlConfig(_FreezableConfig):
     num_envs: int
     env_spacing: float
     episode_length_s: float
-    policy_rate_hz: float

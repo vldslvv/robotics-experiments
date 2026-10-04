@@ -47,8 +47,8 @@ cause a false definition mismatch after simulation.
 
 The dependency direction is:
 
-`config -> controller -> {alignment, rl} -> workflows`, with the independent
-`flight_parameters -> {alignment, rl}` evidence boundary.
+`config -> controller -> {alignment, rl} -> workflows`, with the
+`config -> flight_parameters -> {alignment, rl}` evidence boundary.
 
 The only supported controller and alignment artifact contract is schema 1.
 There are no artifact migrations, compatibility sentinels, alternate plant
@@ -120,7 +120,11 @@ not require another alignment engine or a policy dependency.
 
 ## Search
 
-Controller definitions live in `configs/alignment/controllers/`. Every tunable
+Controller definitions live in `configs/alignment/controllers/`. Their command
+rate is resolved from the referenced experiment's `rates.command_rate_hz` and
+included in the definition fingerprint; it is not authored again in each
+definition. Capture and alignment share the X500 calibration environment.
+Every tunable
 field must be declared as a `ParameterSpec`; search never invents controller
 fields. The `coarse-to-fine-beam` strategy:
 

@@ -16,6 +16,22 @@ __all__ = ["ExperimentConfig", "VehicleConfig"]
 
 
 @dataclass
+class _RatesConfig(_FreezableConfig):
+    """Shared command updates and independently selectable recording rate."""
+
+    command_rate_hz: float
+    sample_rate_hz: float
+
+
+@dataclass
+class _PusherConfig(_FreezableConfig):
+    """Runtime actuator limits shared by capture, deployment and training."""
+
+    effort_limit_n: float
+    velocity_limit_mps: float
+
+
+@dataclass
 class _FlightBenchmarkConfig(_FreezableConfig):
     """Opt-in full-GUI benchmark methodology parameters."""
 
@@ -67,6 +83,7 @@ class VehicleConfig(_FreezableConfig):
     bridge: Px4BridgeConfig
     px4: _Px4RuntimeConfig
     routine: RoutineConfig
+    pusher: _PusherConfig
     mavlink_port: int = field(init=False, default=0)
     gcs_port: int = field(init=False, default=0)
     debug_log_path: str = field(init=False, default="")
@@ -79,6 +96,7 @@ class ExperimentConfig(_FreezableConfig):
     """Complete configuration for one orchestrator execution."""
 
     sim: SimSettings
+    rates: _RatesConfig
     switches: LightSwitchConfig
     rl: RlConfig
     scene: str

@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from omegaconf import OmegaConf
 
+from robotics_experiments.config import load_config
 from robotics_experiments.flight_parameters._models import (
     FlightCommand,
     FlightExecutionConfig,
@@ -34,7 +35,11 @@ def load_flight_parameters_config(
 ) -> FlightParametersConfig:
     """Load physical stages and an optional campaign-size override."""
     payload = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
-    fields = set(FlightParametersConfig.__annotations__) - {"config_fingerprint"}
+    fields = set(FlightParametersConfig.__annotations__) - {
+        "config_fingerprint",
+        "command_rate_hz",
+        "sample_rate_hz",
+    }
     if not isinstance(payload, dict) or set(payload) != fields:
         raise ValueError("flight config fields mismatch")
     payload = cast(dict[str, Any], payload)
@@ -113,6 +118,7 @@ def load_flight_parameters_config(
     count = payload["flight_count"] if flight_count is None else flight_count
     if type(count) is not int or count <= 0:
         raise ValueError("flight_count must be a positive integer")
+    experiment = load_config(payload["experiment_config"])
     config = FlightParametersConfig(
         **{
             **payload,
@@ -122,9 +128,19 @@ def load_flight_parameters_config(
             "execution": FlightExecutionConfig(**payload["execution"]),
         },
         config_fingerprint="",
+        command_rate_hz=experiment.rates.command_rate_hz,
+        sample_rate_hz=experiment.rates.sample_rate_hz,
     )
     if config.execution.worker_count <= 0:
         raise ValueError("worker_count must be positive")
+    execution = config.execution
+    if any(type(value) is not int or value < 0 for value in asdict(execution).values()):
+        raise ValueError("flight execution settings must be nonnegative integers")
+    if (
+        execution.gzip_level > 9
+        or min(execution.raw_flight_budget_bytes, execution.estimated_archive_bytes_per_flight) == 0
+    ):
+        raise ValueError("invalid compression level or flight storage budget")
     if any(
         value <= 0 or not math.isfinite(value)
         for key, value in asdict(config.preparation).items()
@@ -138,12 +154,12 @@ def load_flight_parameters_config(
             hover.mode_report_max_age_s,
             hover.settle_s,
             hover.measure_s,
-            hover.sample_rate_hz,
+            config.sample_rate_hz,
         )
         <= 0
     ):
-        raise ValueError("hover schedule and cadence must be positive")
-    sample_count = hover.measure_s * hover.sample_rate_hz
+        raise ValueError("hover schedule and sample rate must be positive")
+    sample_count = hover.measure_s * config.sample_rate_hz
     if (
         not math.isclose(sample_count, round(sample_count), rel_tol=0.0, abs_tol=1e-9)
         or sample_count < 2

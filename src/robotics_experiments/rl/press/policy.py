@@ -23,7 +23,7 @@ def press_policy_contract(
         policy_interface=PolicyInterface.PRESS,
         obs_schema_version=OBSERVATION_SCHEMA_VERSION,
         obs_dim=PRESS_OBSERVATION_DIM,
-        policy_rate_hz=config.rl.policy_rate_hz,
+        policy_rate_hz=config.rates.command_rate_hz,
         action_kind=action.kind,
         action_dim=action.action_dim,
         max_body_velocity_mps=action.max_body_velocity_mps,
