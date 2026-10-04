@@ -23,33 +23,16 @@ Run it with `make test-integration-press-hover-goto`; it needs no PX4 container.
 It prints the same `[isaac-standalone-test] ERROR:` failure sentinel the harness
 greps for.
 
-`flight_parameters_capture_response.py` is the PX4-backed flight-parameters
-response capture shell. It
-uses the shared fleet scenario and ordinary `{kind: policy}` OFFBOARD
-lifecycle, with a test-only injected adapter that emits the controller
-definition's linear-velocity, yaw-rate, and combined probes. It writes exact
-command timing, initial state, position, attitude, body/world velocity, and
-angular velocity to the selected flight-parameters response directory. Before each profile,
-the adapter holds a neutral setpoint until the fixed preconditioning deadline
-and requires the continuous speed/rate/tilt stability window at that deadline.
-Late stabilization fails instead of moving the profile start. This excludes OFFBOARD priming
-from the recorded policy-execution response and gives each reset Lab replay a
-near-equilibrium initial state. Trace yaw remains body-FLU +CCW while the
-outbound PX4 setpoint is converted to NED +clockwise. Its response routine
-ends with the probe policy and lets teardown stop the ephemeral simulator;
-landing and auto-disarm are outside this controller target. It is not a
-press-policy scenario and adds no commanding routine kind.
-
-`flight_parameters_capture.py` is the isolated hover-evidence leaf owned by
-`make measure-flight-parameters`. Each fresh PX4/Isaac invocation uses the
-ordinary arm, takeoff, and hover routine and records a long raw simulator
-ground-truth pose candidate at the configured cadence. It does not infer hover
-from the routine cursor or kinematics. The host coordinator decodes the
-corresponding completed PX4 ULog inside `flight_parameters`, proves the PX4
-mode/control/goal contract, and only then selects the settled measurement
-window. The raw trace, ULog, verification record, selected trace, and bridge
-log remain together as trial evidence. Statistics derivation and publication
-remain in the host-safe `robotics_experiments.flight_parameters` module.
+`flight_parameters_capture.py` runs one independent 24-stage flight for
+`make flight-parameters`: native AUTO_LOITER hover followed by the canonical
+response suite. It injects a deterministic policy adapter into the ordinary
+OFFBOARD lifecycle, and derives fixed hover completion from the stage schedule.
+A physics callback records continuous ground truth through takeoff, preparation,
+transitions and measurements. Body-FLU yaw/rates are sign-converted at the wire
+boundary. The host verifies ULog control state, records lossless sample ranges,
+reconstructs controller boundaries, compresses logs and checkpoints each flight.
+Stability analysis runs only after the complete campaign. See
+[flight parameters](../../../../docs/FLIGHT_PARAMETERS.md).
 
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
 gate, invoked by `make test-integration-press-contact-chain` with one

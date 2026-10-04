@@ -33,21 +33,42 @@ class FlightExecutionConfig:
 
 
 @dataclass(frozen=True)
-class ResponseConfig:
-    """Repeated general controller-response collection."""
+class FlightCommand:
+    """One authored body-FLU command, held for its complete duration."""
 
-    kind: str
-    experiment_config: str
-    definition: str
+    duration_s: float
+    velocity_body_flu_mps: Vector3
+    yaw_rate_radps: float
+    collective_thrust_normalized: float
+    body_rate_flu_radps: Vector3
 
 
 @dataclass(frozen=True)
-class FlightSetConfig:
-    """Independent complete flights assigned before capture."""
+class FlightStage:
+    """Physical measurement instructions without consumer dataset membership."""
 
     name: str
-    hover_count: int
-    response_count: int
+    kind: str
+    control_mode: str
+    axis: str
+    hold_position: bool
+    commands: tuple[FlightCommand, ...]
+    hover: HoverConfig | None
+
+
+@dataclass(frozen=True)
+class FlightPreparation:
+    """Fixed response preparation schedule and readiness requirements."""
+
+    pusher_deployed: bool
+    minimum_neutral_s: float
+    stable_hold_s: float
+    timeout_s: float
+    recenter_gain_hz: float
+    recenter_max_speed_mps: float
+    max_linear_speed_mps: float
+    max_angular_speed_radps: float
+    max_tilt_deg: float
 
 
 @dataclass(frozen=True)
@@ -60,15 +81,21 @@ class FlightParametersConfig:
     state_source: str
     experiment_config: str
     vehicle: str
-    starting_seed: int
-    sets: tuple[FlightSetConfig, ...]
-    hover: HoverConfig
-    response: ResponseConfig
-    policy_warmup_s: float
-    position_margin_m: float
-    attitude_margin_rad: float
+    start_seed: int
+    flight_count: int
+    takeoff_min_climb_m: float
+    stages: tuple[FlightStage, ...]
+    preparation: FlightPreparation
     execution: FlightExecutionConfig
     config_fingerprint: str
+
+    @property
+    def hover(self) -> HoverConfig:
+        """The first stage's native PX4 hold schedule."""
+        hover = self.stages[0].hover
+        if hover is None:
+            raise ValueError("the first flight stage must be hover")
+        return hover
 
 
 @dataclass(frozen=True)

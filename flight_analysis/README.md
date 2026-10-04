@@ -24,7 +24,7 @@ loaders in `tools/_ulog_common.py`.
 ## Sim-to-real comparison
 
 Task-neutral repeated-flight evidence and position/pose envelopes are produced
-by `make measure-flight-parameters`; see `docs/FLIGHT_PARAMETERS.md`. Those
+by `make flight-parameters`; see `docs/FLIGHT_PARAMETERS.md`. Those
 artifacts establish the stable comparison boundary. The tools below remain
 diagnostics for explaining differences in the retained ULogs and bridge or
 hardware logs.

@@ -102,15 +102,21 @@ def _build_hover_step(
     if "hold_s" not in descriptor:
         raise ValueError(f"routine step {index} (hover) is missing required 'hold_s'")
     hold_s = float(descriptor["hold_s"])
+    completion = descriptor.get("completion", "stable")
+    if completion not in {"stable", "elapsed"}:
+        raise ValueError(f"routine step {index} has invalid hover completion {completion!r}")
     return RoutineStep(
         command=None,
-        is_complete=hovering_stable(
+        is_complete=_always
+        if completion == "elapsed"
+        else hovering_stable(
             max_abs_vertical_speed_m_s=gates.hover_max_abs_vertical_speed_m_s,
             max_abs_horizontal_speed_m_s=gates.hover_max_abs_horizontal_speed_m_s,
         ),
         label="hover",
         timeout_s=float(hover_settle_s) + hold_s,
         hold_s=hold_s,
+        hold_from_entry=completion == "elapsed",
         invariants=flight_invariants,
     )
 

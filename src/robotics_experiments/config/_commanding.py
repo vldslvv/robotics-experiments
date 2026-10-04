@@ -13,6 +13,7 @@ class RoutineStepConfig(TypedDict, total=False):
     climb_m: NotRequired[float]
     min_climb_m: NotRequired[float]
     hold_s: NotRequired[float]
+    completion: NotRequired[Literal["stable", "elapsed"]]
     distance_m: NotRequired[float]
     timeout_s: NotRequired[float]
     x: NotRequired[float]

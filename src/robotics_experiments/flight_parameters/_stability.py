@@ -13,19 +13,17 @@ from typing import Any, cast
 import numpy as np
 from omegaconf import OmegaConf
 
-from robotics_experiments.flight_parameters._artifact import (
-    load_flight_parameters,
-    load_flight_parameters_bundle,
-    load_flight_trace,
+from robotics_experiments.flight_parameters._dataset import (
+    FlightDataset,
+    _hover_trace,
+    _stage_views,
+    load_flight_dataset,
 )
 from robotics_experiments.flight_parameters._derive import _trace_signal_values, summarize_signal
 from robotics_experiments.flight_parameters._evidence import (
-    flight_evidence_sha256,
     open_flight_evidence,
-    resolve_flight_evidence,
 )
 from robotics_experiments.flight_parameters._models import (
-    FlightParameters,
     FlightTrace,
     SignalStatistics,
 )
@@ -90,14 +88,26 @@ class _PopulationComparison:
 
 
 @dataclass(frozen=True)
+class _ResponseSummary:
+    profile: str
+    signal: str
+    flight_count: int
+    sample_count: int
+    statistics: SignalStatistics
+    worst_flight_seed: int
+    worst_flight_rms: float
+    peak_flight_seed: int
+
+
+@dataclass(frozen=True)
 class _RunSummary:
     run_dir: str
     run_id: str
     artifact_sha256: str
-    artifact_fingerprint: str
     manifest_sha256: str | None
     evidence_sha256: tuple[tuple[str, str], ...]
     hover: tuple[_HoverSummary, ...]
+    response: tuple[_ResponseSummary, ...]
 
 
 @dataclass(frozen=True)
@@ -149,7 +159,7 @@ def _digest(path: Path, /) -> str:
 
 
 def _identity(trace: FlightTrace, /) -> str:
-    return f"{trace.set_name}/seed-{trace.seed}/trial-{trace.trial_index:03d}"
+    return f"flight-{trace.trial_index:03d}/seed-{trace.seed}"
 
 
 def _horizontal(trace: FlightTrace, /) -> np.ndarray:
@@ -459,7 +469,7 @@ def _response_population(
     # Each profile is repeated in independent flights. Profiles and their time
     # samples within one flight never count as independent repetitions.
     signals_by_run = []
-    identity_fields = ("profile", "family", "control_mode", "axis", "split")
+    identity_fields = ("name", "kind", "control_mode", "axis")
     identities = tuple(tuple(t[field] for field in identity_fields) for t in reference[0]["traces"])
     for flights in (reference, current):
         signals: dict[tuple[str, str], list[np.ndarray]] = {}
@@ -473,7 +483,7 @@ def _response_population(
                 for name, values in _response_signals(trace).items():
                     if len(values) != len(trace["time_s"]):
                         raise ValueError("stability response signal sample counts differ")
-                    signals.setdefault((trace["profile"], name), []).append(values)
+                    signals.setdefault((trace["name"], name), []).append(values)
         signals_by_run.append(signals)
     a, b = signals_by_run
     return tuple(
@@ -496,236 +506,208 @@ def _status(statuses: set[str], /) -> str:
     return "pass" if statuses == {"pass"} else "insufficient-evidence"
 
 
+def _response_summary(
+    *, profile: str, signal: str, flights: tuple[dict[str, Any], ...]
+) -> _ResponseSummary:
+    arrays = tuple(
+        _response_signals(next(t for t in flight["traces"] if t["name"] == profile))[signal]
+        for flight in flights
+    )
+    rms = tuple(float(np.sqrt(np.mean(a**2))) for a in arrays)
+    peaks = tuple(float(np.max(np.abs(a))) for a in arrays)
+    unit = "m/s" if signal.endswith("mps") else "rad/s" if signal.endswith("radps") else "m"
+    return _ResponseSummary(
+        profile,
+        signal,
+        len(flights),
+        sum(len(a) for a in arrays),
+        summarize_signal(name=signal, unit=unit, values=np.concatenate(arrays)),
+        flights[int(np.argmax(rms))]["seed"],
+        max(rms),
+        flights[int(np.argmax(peaks))]["seed"],
+    )
+
+
 def _load_run(
     path: Path, /
-) -> tuple[FlightParameters, tuple[FlightTrace, ...], tuple[dict[str, Any], ...]]:
-    parameters = load_flight_parameters(path)
-    if (path / "manifest.json").exists():
-        load_flight_parameters_bundle(path=path)
-    hover = tuple(
-        load_flight_trace(path / "evidence" / f"trial-{i:03d}" / "trace.json")
-        for i in range(1, parameters.hover_trial_count + 1)
-    )
-    for trace, expected in zip(hover, parameters.hover.trace_statistics, strict=True):
-        if (trace.campaign_run_id, trace.trial_index, trace.set_name, trace.seed) != (
-            parameters.run_id,
-            expected.trial_index,
-            expected.set_name,
-            expected.seed,
-        ) or not trace.completed:
-            raise ValueError("stability hover evidence identity mismatch or incomplete capture")
+) -> tuple[FlightDataset, tuple[FlightTrace, ...], tuple[dict[str, Any], ...]]:
+    dataset = load_flight_dataset(path)
+    hover = []
     response = []
-    for record in parameters.response.traces:
-        for relative, digest in (
-            (record.reference_path, record.reference_sha256),
-            (record.ulog_path, record.ulog_sha256),
-            (record.bridge_log_path, record.bridge_log_sha256),
-        ):
-            if flight_evidence_sha256(path / relative) != digest:
-                raise ValueError(f"stability response evidence hash mismatch: {relative}")
-        payload = json.loads((path / record.reference_path).read_text())
-        if (payload["set_name"], payload["seed"], len(payload["traces"])) != (
-            record.set_name,
-            record.seed,
-            record.profile_count,
-        ) or any(not t["completed"] for t in payload["traces"]):
-            raise ValueError("stability response evidence identity mismatch or incomplete capture")
-        response.append(payload)
-    bridge_paths = tuple(
-        resolve_flight_evidence(path / "evidence" / f"trial-{trace.trial_index:03d}" / "bridge.log")
-        for trace in hover
-    ) + tuple(path / record.bridge_log_path for record in parameters.response.traces)
-    for bridge_path in bridge_paths:
-        if sum(1 for _ in _bridge_rows(bridge_path)) == 0:
-            raise ValueError(f"stability requires recorded bridge dynamics in {bridge_path}")
-    return parameters, hover, tuple(response)
+    for flight in dataset.flights:
+        views = _stage_views(flight)
+        hover.append(_hover_trace(dataset=dataset, flight=flight, view=views[0]))
+        response.append(
+            {
+                "seed": flight.seed,
+                "traces": views[1:],
+                "controller_state_method": flight.metadata["controller_state_method"],
+            }
+        )
+        bridge = flight.directory / "bridge.log.gz"
+        if sum(1 for _ in _bridge_rows(bridge)) == 0:
+            raise ValueError(f"stability requires recorded bridge dynamics in {bridge}")
+    return dataset, tuple(hover), tuple(response)
 
 
 def analyze_flight_parameters_stability(
     *, run_dir: Path, comparison_run_dirs: tuple[Path, ...], settings_path: Path
 ) -> StabilityReport:
-    """Analyze finished evidence without modifying it or invoking any capture work.
-
-    Both repeated and disjoint seeds receive statistical hover comparisons.
-    Exact differences are diagnostic. Response profiles are compared across whole
-    flights separately from hover. Reports do not designate a baseline.
-    """
+    """Analyze finished unsplit flights; exact sample differences are diagnostic."""
     settings = _settings(settings_path)
     paths = tuple(path.resolve(strict=True) for path in (run_dir, *comparison_run_dirs))
     if len(set(paths)) != len(paths):
         raise ValueError("stability comparisons require distinct producer runs")
     loaded = tuple(_load_run(path) for path in paths)
     summaries = []
-    for path, (parameters, hover, _) in zip(paths, loaded, strict=True):
-        groups = (
-            (("campaign", hover),)
-            + tuple(
-                (name, tuple(t for t in hover if t.set_name == name))
-                for name in ("fit", "validation", "acceptance")
+    for path, (dataset, hover, response) in zip(paths, loaded, strict=True):
+        evidence_paths = tuple(
+            p.relative_to(path).as_posix()
+            for flight in dataset.flights
+            for p in (
+                flight.directory / "flight.json",
+                flight.directory / "motion.jsonl",
+                flight.directory / "bridge.log.gz",
             )
-            + tuple((_identity(t), (t,)) for t in hover)
         )
-        evidence_paths = tuple(f"evidence/trial-{t.trial_index:03d}/trace.json" for t in hover)
-        evidence_paths += tuple(
-            resolve_flight_evidence(path / "evidence" / f"trial-{t.trial_index:03d}" / "bridge.log")
-            .relative_to(path)
-            .as_posix()
-            for t in hover
-        )
-        evidence_paths += tuple(r.reference_path for r in parameters.response.traces)
-        evidence_paths += tuple(r.bridge_log_path for r in parameters.response.traces)
         summaries.append(
             _RunSummary(
                 run_dir=str(path),
-                run_id=parameters.run_id,
-                artifact_sha256=_digest(path / "flight_parameters.json"),
-                artifact_fingerprint=parameters.artifact_fingerprint,
+                run_id=dataset.run_id,
+                artifact_sha256=dataset.artifact_digest,
                 manifest_sha256=_digest(path / "manifest.json")
                 if (path / "manifest.json").exists()
                 else None,
                 evidence_sha256=tuple((p, _digest(path / p)) for p in evidence_paths),
                 hover=tuple(
-                    _hover_summary(identity=name, traces=traces, settings=settings)
-                    for name, traces in groups
+                    _hover_summary(identity=identity, traces=traces, settings=settings)
+                    for identity, traces in (
+                        ("campaign", hover),
+                        *((_identity(t), (t,)) for t in hover),
+                    )
+                ),
+                response=tuple(
+                    _response_summary(profile=name, signal=signal, flights=response)
+                    for name, signal in (
+                        (trace["name"], signal)
+                        for trace in response[0]["traces"]
+                        for signal in _response_signals(trace)
+                    )
                 ),
             )
         )
-    current_parameters, current_hover, current_response = loaded[0]
+    current_dataset, current_hover, current_response = loaded[0]
     comparisons = []
-    for reference_path, (reference_parameters, reference_hover, reference_response) in zip(
-        paths[1:], loaded[1:], strict=True
-    ):
-        current_seeds = tuple((t.set_name, t.seed) for t in current_hover) + tuple(
-            (r["set_name"], r["seed"]) for r in current_response
-        )
-        reference_seeds = tuple((t.set_name, t.seed) for t in reference_hover) + tuple(
-            (r["set_name"], r["seed"]) for r in reference_response
-        )
+    for reference_dataset, reference_hover, reference_response in loaded[1:]:
+        current_seeds = tuple(f.seed for f in current_dataset.flights)
+        reference_seeds = tuple(f.seed for f in reference_dataset.flights)
         relationship = (
             "identical"
             if current_seeds == reference_seeds
             else "disjoint"
-            if not {s for _, s in current_seeds} & {s for _, s in reference_seeds}
+            if not set(current_seeds) & set(reference_seeds)
             else "overlapping"
         )
+        compatible = {
+            key: value
+            for key, value in current_dataset.definition.items()
+            if key not in {"start_seed", "flight_count"}
+        } == {
+            key: value
+            for key, value in reference_dataset.definition.items()
+            if key not in {"start_seed", "flight_count"}
+        } and all(
+            current_dataset.flights[0].metadata[field]
+            == reference_dataset.flights[0].metadata[field]
+            for field in ("sample_rate_hz", "controller_state_method")
+        )
+        current_stages = current_dataset.flights[0].metadata["stages"]
+        reference_stages = reference_dataset.flights[0].metadata["stages"]
+        compatible = compatible and tuple(
+            (t["name"], t["control_mode"], t["commands"], t["hover"]) for t in current_stages
+        ) == tuple(
+            (t["name"], t["control_mode"], t["commands"], t["hover"]) for t in reference_stages
+        )
         differences = []
-        for a, b in zip(reference_hover, current_hover, strict=True):
-            for field in (
-                "measurement_start_us",
-                "measurement_end_us",
-                "target_position_enu_m",
-                "target_attitude_flu_enu_wxyz",
-                "time_s",
-                "position_enu_m",
-                "attitude_flu_enu_wxyz",
-                "linear_velocity_enu_mps",
-                "angular_velocity_enu_radps",
-            ):
-                differences.append(
-                    _difference(
-                        identity=_identity(b),
-                        field=field,
-                        reference=getattr(a, field),
-                        current=getattr(b, field),
-                    )
-                )
-        for a_response, b_response in zip(reference_response, current_response, strict=True):
-            a_profiles = {t["profile"]: t for t in a_response["traces"]}
-            b_profiles = {t["profile"]: t for t in b_response["traces"]}
-            if a_profiles.keys() != b_profiles.keys():
-                raise ValueError("stability response profile identities differ")
-            for name, b in b_profiles.items():
-                a = a_profiles[name]
-                for field in sorted(a.keys() | b.keys()):
-                    if field not in a or field not in b:
-                        raise ValueError(f"stability response field missing: {name}/{field}")
-                    # Source-age dictionaries retain all values; no timestamp alignment is fitted.
-                    av, bv = a[field], b[field]
-                    if isinstance(av, dict) or isinstance(bv, dict):
-                        av, bv = json.dumps(av, sort_keys=True), json.dumps(bv, sort_keys=True)
+        if relationship == "identical" and compatible:
+            for a, b in zip(reference_hover, current_hover, strict=True):
+                for field in (
+                    "measurement_start_us",
+                    "measurement_end_us",
+                    "target_position_enu_m",
+                    "target_attitude_flu_enu_wxyz",
+                    "time_s",
+                    "position_enu_m",
+                    "attitude_flu_enu_wxyz",
+                    "linear_velocity_enu_mps",
+                    "angular_velocity_enu_radps",
+                ):
                     differences.append(
                         _difference(
-                            identity=f"{b_response['set_name']}/seed-{b_response['seed']}/{name}",
+                            identity=_identity(b),
                             field=field,
-                            reference=av,
-                            current=bv,
+                            reference=getattr(a, field),
+                            current=getattr(b, field),
                         )
                     )
-        for a_record, b_record in zip(
-            reference_parameters.response.traces, current_parameters.response.traces, strict=True
-        ):
-            differences.extend(
-                _bridge_differences(
-                    reference=reference_path / a_record.bridge_log_path,
-                    current=paths[0] / b_record.bridge_log_path,
-                    identity=f"{b_record.set_name}/seed-{b_record.seed}/full-flight",
+            for a, b in zip(reference_response, current_response, strict=True):
+                for ap, bp in zip(a["traces"], b["traces"], strict=True):
+                    for field in sorted(ap.keys() | bp.keys()):
+                        av, bv = ap[field], bp[field]
+                        if isinstance(av, dict) or isinstance(bv, dict) or field == "commands":
+                            av, bv = json.dumps(av, sort_keys=True), json.dumps(bv, sort_keys=True)
+                        differences.append(
+                            _difference(
+                                identity=f"seed-{b['seed']}/{bp['name']}",
+                                field=field,
+                                reference=av,
+                                current=bv,
+                            )
+                        )
+            for a, b in zip(reference_dataset.flights, current_dataset.flights, strict=True):
+                differences.extend(
+                    _bridge_differences(
+                        reference=a.directory / "bridge.log.gz",
+                        current=b.directory / "bridge.log.gz",
+                        identity=f"seed-{b.seed}/full-flight",
+                    )
                 )
-            )
-        population = tuple(
-            item
-            for group in ("campaign", "fit", "validation", "acceptance")
-            for item in _population(
-                group=group,
-                signal="horizontal_m",
-                reference=tuple(
-                    _horizontal(t)
-                    for t in reference_hover
-                    if group == "campaign" or t.set_name == group
-                ),
-                current=tuple(
-                    _horizontal(t)
-                    for t in current_hover
-                    if group == "campaign" or t.set_name == group
-                ),
-                settings=settings,
-            )
+        population = _population(
+            group="campaign",
+            signal="horizontal_m",
+            reference=tuple(_horizontal(t) for t in reference_hover),
+            current=tuple(_horizontal(t) for t in current_hover),
+            settings=settings,
         )
-        response_population = _response_population(
-            reference=reference_response, current=current_response, settings=settings
-        )
-        compatible = all(
-            getattr(reference_parameters, field) == getattr(current_parameters, field)
-            for field in (
-                "experiment_fingerprint",
-                "vehicle_fingerprint",
-                "source_image",
-                "sample_rate_hz",
-                "measure_s",
-                "settle_s",
+        response_population = (
+            _response_population(
+                reference=reference_response, current=current_response, settings=settings
             )
-        )
-        method_equal = all(
-            a.get("controller_state_method") == b.get("controller_state_method")
-            and a.get("definition_fingerprint") == b.get("definition_fingerprint")
-            for a, b in zip(reference_response, current_response, strict=True)
-        )
-        repeatability = "not-applicable"
-        if relationship == "identical":
-            repeatability = (
-                "pass"
-                if compatible and method_equal and all(d.equal for d in differences)
-                else "fail"
-            )
-        population_status = (
-            _status({p.status for p in population}) if compatible else "incompatible"
+            if compatible
+            else ()
         )
         comparisons.append(
             _Comparison(
-                reference_run_id=reference_parameters.run_id,
+                reference_run_id=reference_dataset.run_id,
                 seed_relationship=relationship,
-                repeatability_status=repeatability,
+                repeatability_status=("pass" if all(d.equal for d in differences) else "fail")
+                if relationship == "identical" and compatible
+                else "not-applicable",
                 differences=tuple(differences),
                 population=population,
-                population_status=population_status,
+                population_status=_status({p.status for p in population})
+                if compatible
+                else "incompatible",
                 response_population=response_population,
                 response_status=_status({p.status for p in response_population})
-                if compatible and method_equal
+                if compatible
                 else "incompatible",
             )
         )
     status = _status({s for c in comparisons for s in (c.population_status, c.response_status)})
-    relationships = {c.seed_relationship for c in comparisons}
-    if status == "pass" and not {"identical", "disjoint"} <= relationships:
+    if status == "pass" and not {"identical", "disjoint"} <= {
+        c.seed_relationship for c in comparisons
+    }:
         status = "insufficient-evidence"
     return StabilityReport(
         artifact_kind="robotics-experiments-flight-parameters-stability",

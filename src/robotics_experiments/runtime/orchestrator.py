@@ -32,7 +32,7 @@ from robotics_experiments.commanding import (
     routine_driver_is_done,
     tick_routine_driver,
 )
-from robotics_experiments.config import ExperimentConfig, VehicleConfig
+from robotics_experiments.config import ExperimentConfig, RoutineStepConfig, VehicleConfig
 from robotics_experiments.drone import despawn_drone, spawn_drone
 from robotics_experiments.environment import (
     SwitchesRuntimeState,
@@ -401,6 +401,7 @@ def build_drivers(
     state: FleetState,
     make_env: Callable[[SpawnedDrone, MavlinkCommandPort], DriverEnvironment],
     policy_factory: Callable[..., PolicyAdapter] | None = None,
+    routine_steps: tuple[RoutineStepConfig, ...] | None = None,
 ) -> FleetState:
     """Compose drivers, optionally with an alignment-shell policy factory."""
     clock_host = next((drone.host for drone in state.drones if drone.host is not None), None)
@@ -434,7 +435,7 @@ def build_drivers(
         )
         context = DriverContext(
             params=DriverParams(
-                steps=routine.steps,
+                steps=routine.steps if routine_steps is None else routine_steps,
                 gates=EnvelopeGates(
                     max_tilt_deg=routine.max_tilt_deg,
                     max_lateral_drift_m=routine.max_lateral_drift_m,

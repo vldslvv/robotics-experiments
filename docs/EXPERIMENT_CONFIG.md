@@ -40,8 +40,8 @@ experiment's directory. Shared per-vehicle routine groups remain under
 `configs/experiment/routine/`.
 
 Specialized experiment entrypoints stay at the config root:
-`flight_parameters_x500_hover.yaml` measures hover,
-`alignment_px4_x500_velocity.yaml` captures controller responses, and
+`flight_parameters_x500.yaml` captures a complete hover/response suite,
+`alignment_px4_x500_velocity.yaml` defines the alignment diagnostic environment, and
 `flight_benchmark.yaml` / `flight_benchmark_takeoff_quad.yaml` wrap the circle
 and single-drone flights with longer cold-start bridge deadlines. Training
 curricula and stage experiments remain under `configs/train/`.

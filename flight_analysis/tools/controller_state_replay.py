@@ -886,7 +886,11 @@ def _augment_reference_controller_state(
     reference = json.loads(reference_path.read_text())
     if reference.get("schema_version") != 1:
         raise ValueError(f"{reference_path} must use alignment trace schema 1")
-    raw_profiles = reference.get("traces")
+    raw_profiles = (
+        [stage for stage in reference["stages"] if stage["kind"] == "controller-response"]
+        if reference.get("artifact_kind") == "robotics-experiments-flight-recording"
+        else reference.get("traces")
+    )
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ValueError(f"{reference_path} has no alignment traces")
 
@@ -929,7 +933,7 @@ def _augment_reference_controller_state(
         )
         profile_reports.append(
             {
-                "profile": raw_profile["profile"],
+                "profile": raw_profile.get("profile", raw_profile.get("name")),
                 "start_sim_time_us": start_us,
                 "source_age_us": raw_profile["initial_controller_state_source_age_us"],
             }

@@ -48,12 +48,11 @@ failure. Rebind every lifecycle, bridge, and driver transition result. Helpers
 that report simulated elapsed time receive a sim-time callable; they must not
 depend on mutable resource properties.
 
-Controller alignment has two standalone backends. Flight-parameters response
-collection under `tests/flight_parameters_capture_response.py` starts through
-the normal `SimulationApp` fleet harness and injects only a deterministic `PolicyAdapter`.
-The adapter streams a neutral setpoint through a minimum handoff period and a
-continuous stability window before recording each profile; its body-FLU yaw
-command is sign-converted only at the PX4 NED wire boundary.
+Flight-parameter collection under `tests/flight_parameters_capture.py` starts
+through the normal fleet harness. It records a complete hover/response suite
+with one seed and PX4 controller history per independent flight. A deterministic
+adapter handles fixed response preparation and body-FLU commands; the recorder
+retains transition motion and explicit measurement boundaries.
 `alignment_sweep_target.py` is a host-safe coordinator. It spawns the configured
 number of persistent workers, and each worker constructs `AppLauncher` before
 importing `isaaclab` and builds one hover environment per local

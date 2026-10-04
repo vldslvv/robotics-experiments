@@ -40,6 +40,7 @@ from robotics_experiments.commanding import (
     MavlinkCommandPort,
     PolicyAdapter,
 )
+from robotics_experiments.config import RoutineStepConfig
 from robotics_experiments.px4_bridge import IsaacArticulationIO, tilt_angle_deg
 
 if TYPE_CHECKING:
@@ -299,6 +300,7 @@ def _drive_to_done(
     fleet: FleetState,
     routine_tick_hook: Callable[[FleetState], None] | None,
     routine_stop_predicate: Callable[[FleetState], bool] | None,
+    physics_tick_hook: Callable[[FleetState], None] | None = None,
     /,
 ) -> FleetState:
     """Tick physics and every per-drone driver until all routines are done.
@@ -325,6 +327,8 @@ def _drive_to_done(
             return
         try:
             fleet = tick_drivers(state=fleet, physics_dt_s=float(dt))
+            if physics_tick_hook is not None:
+                physics_tick_hook(fleet)
         except BaseException as exc:  # re-raised on the host loop after update()
             callback_error = exc
 
@@ -479,6 +483,7 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
                 state=fleet,
                 make_env=make_env,
                 policy_factory=options.policy_factory,
+                routine_steps=options.routine_steps,
             )
 
         with timing.timed_stage("drive_routine", sim_time_us=sim_time_us):
@@ -487,6 +492,7 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
                 fleet,
                 options.routine_tick_hook,
                 options.routine_stop_predicate,
+                options.physics_tick_hook,
             )
         if options.post_routine_hook is not None:
             options.post_routine_hook(context, fleet)
@@ -530,6 +536,8 @@ class Px4TakeoffScenarioOptions:
     routine_stop_predicate: Callable[[FleetState], bool] | None = None
     post_routine_hook: Callable[[SceneTestContext, Any], None] | None = None
     policy_factory: Callable[..., PolicyAdapter] | None = None
+    routine_steps: tuple[RoutineStepConfig, ...] | None = None
+    physics_tick_hook: Callable[[FleetState], None] | None = None
     success_label: str = "configured routine"
 
 

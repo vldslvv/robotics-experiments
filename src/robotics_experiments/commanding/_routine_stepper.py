@@ -328,7 +328,7 @@ def _enter_step(
         sent=True,
         baseline_position_enu=baseline,
         step_started_us=now_us,
-        hold_since_us=None,
+        hold_since_us=now_us if step.hold_from_entry else None,
         offboard=offboard,
     )
     return entered, RoutineDecision.continue_(

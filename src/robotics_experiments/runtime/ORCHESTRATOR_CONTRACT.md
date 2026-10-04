@@ -100,3 +100,10 @@ step.
 The runtime modules are Isaac-only lazy leaves. `robotics_experiments.runtime`
 must remain importable without Isaac; importing a lazy runtime symbol may load
 the Isaac dependencies.
+
+Flight capture may pass resolved `routine_steps` to `build_drivers`, alongside
+its injected `policy_factory`. The capture shell derives these steps from its
+canonical physical stage schedule and records them in producer evidence. Ordinary
+runtime callers use each vehicle's authored routine steps. The strict scenario's
+optional `physics_tick_hook` receives the rebound frozen fleet immediately after
+each physics/driver tick; it is a recording hook, not a second driver clock.

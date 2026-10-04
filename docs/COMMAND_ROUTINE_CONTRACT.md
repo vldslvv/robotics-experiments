@@ -388,7 +388,7 @@ per-drone takeoff target into a `VehicleRoutine` (unknown `kind`, any step missi
 field, or a `policy` step without an injected factory, raises `ValueError`); it
 is pure (no Isaac/pymavlink) and is the shared
 seam both drivers use. The takeoff step completes on a real climb
-(`climbed_at_least(min_climb_m)`), the hover step on `hovering_stable(...)` held
+(`climbed_at_least(min_climb_m)`), the default hover step on `hovering_stable(...)` held
 for `hold_s`, the forward step on observed world +X/east displacement, the `goto`
 step on `reached_world_position(...)` (absolute world ENU) plus heading
 alignment, the `policy` step when its adapter reports completion after accepted
@@ -432,3 +432,9 @@ hold continuously for the step's `hold_s`.
 **Still deferred:** cross-drone synchronization (today every drone's
 context/state pair runs independently; a barrier/fleet-sync layer can be
 re-introduced over the per-drone drivers when a use case needs it).
+
+Capture routines may use `{kind: hover, hold_s, completion: elapsed}`. This
+completion mode measures `hold_s` from actual step entry rather than accumulating
+stable-speed time. Flight envelope invariants still apply. Offline flight-parameter
+verification separately proves PX4 AUTO_LOITER and the held pose; elapsed
+completion itself is not hover qualification. The default is `completion: stable`.

@@ -87,7 +87,7 @@ def _mode_events(data: dict[str, np.ndarray], /) -> tuple[Px4ModeEvent, ...]:
     return tuple(events)
 
 
-def _command_events(log: ParsedPx4HoverLog, /) -> tuple[Px4CommandEvent, ...]:
+def _command_events(*, log: ParsedPx4HoverLog, window_end_us: int) -> tuple[Px4CommandEvent, ...]:
     commands = log.vehicle_command
     acks = log.vehicle_command_ack
     external = [
@@ -98,7 +98,7 @@ def _command_events(log: ParsedPx4HoverLog, /) -> tuple[Px4CommandEvent, ...]:
             commands["from_external"],
             strict=True,
         )
-        if bool(from_external)
+        if bool(from_external) and int(timestamp) < window_end_us
     ]
     if tuple(command for _, command in external) != (
         _MAV_CMD_COMPONENT_ARM_DISARM,
@@ -211,10 +211,12 @@ def _effective_position_target(
     return east_m, north_m, goal.altitude_m - home_altitude
 
 
-def _measurement_indices(*, config: FlightParametersConfig, raw: RawFlightTrace) -> tuple[int, ...]:
+def _measurement_indices(
+    *, config: FlightParametersConfig, raw: RawFlightTrace, hold_start_us: int
+) -> tuple[int, ...]:
     # Reserve the full transition allowance so status publication timing cannot
     # move the measurement window. Verification separately enforces that deadline.
-    desired_start_us = raw.time_us[0] + round(
+    desired_start_us = hold_start_us + round(
         (config.hover.mode_transition_timeout_s + config.hover.settle_s) * 1_000_000
     )
     start = int(np.searchsorted(raw.time_us, desired_start_us, side="left"))
@@ -225,12 +227,11 @@ def _measurement_indices(*, config: FlightParametersConfig, raw: RawFlightTrace)
     indices = tuple(range(start, stop))
     period_us = 1_000_000.0 / config.hover.sample_rate_hz
     for index in indices:
-        expected_us = raw.time_us[0] + round(index * period_us)
+        expected_us = hold_start_us + round(index * period_us)
         phase_us = raw.time_us[index] - expected_us
         if not 0 <= phase_us < period_us:
             raise ValueError("raw pose trace does not contain one sample per configured time bin")
-    start_us = raw.time_us[start]
-    required_end_us = start_us + round(config.hover.measure_s * 1_000_000)
+    required_end_us = desired_start_us + round(config.hover.measure_s * 1_000_000)
     if raw.time_us[indices[-1]] >= required_end_us:
         raise ValueError("raw pose trace measurement timestamps exceed the selected interval")
     return indices
@@ -334,6 +335,7 @@ def verify_px4_hover_evidence(
     log: ParsedPx4HoverLog,
     raw_trace_sha256: str,
     ulog_sha256: str,
+    hold_start_us: int | None = None,
 ) -> tuple[HoverVerification, FlightTrace]:
     """Prove PX4 loiter state and extract one backend-neutral hover trace."""
 
@@ -346,7 +348,19 @@ def verify_px4_hover_evidence(
         or raw.state_source != config.state_source
     ):
         raise ValueError("raw hover trace provenance does not match the flight config")
-    commands = _command_events(log)
+    hold_start_us = raw.time_us[0] if hold_start_us is None else hold_start_us
+    commands = _command_events(
+        log=log,
+        window_end_us=hold_start_us
+        + round(
+            (
+                config.hover.mode_transition_timeout_s
+                + config.hover.settle_s
+                + config.hover.measure_s
+            )
+            * 1_000_000
+        ),
+    )
     modes = _mode_events(log.vehicle_status)
     takeoff_mode = next(
         (
@@ -370,7 +384,7 @@ def verify_px4_hover_evidence(
     )
     if loiter is None:
         raise ValueError("PX4 never transitioned from AUTO_TAKEOFF to AUTO_LOITER")
-    if loiter.timestamp_us - raw.time_us[0] > round(
+    if loiter.timestamp_us - hold_start_us > round(
         config.hover.mode_transition_timeout_s * 1_000_000
     ):
         raise ValueError("PX4 AUTO_LOITER transition exceeded the configured timeout")
@@ -383,9 +397,11 @@ def verify_px4_hover_evidence(
     if unexpected:
         raise ValueError(f"PX4 entered unexpected modes before loiter: {unexpected}")
 
-    indices = _measurement_indices(config=config, raw=raw)
+    indices = _measurement_indices(config=config, raw=raw, hold_start_us=hold_start_us)
     sample_times_us = tuple(raw.time_us[index] for index in indices)
-    measurement_start_us = sample_times_us[0]
+    measurement_start_us = hold_start_us + round(
+        (config.hover.mode_transition_timeout_s + config.hover.settle_s) * 1_000_000
+    )
     measurement_end_us = measurement_start_us + round(config.hover.measure_s * 1_000_000)
     departed_loiter = [
         event.mode

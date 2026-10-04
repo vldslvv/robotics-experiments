@@ -36,9 +36,9 @@ fit/publication, and the alignment target-envelope gate.
 
 ## Targets
 
-`make measure-flight-parameters` is an owning campaign rather than part of the
+`make flight-parameters` is an owning campaign rather than part of the
 aggregate integration suite. Its functional host runner invokes the internal
-hover or response target for each configured flight, using the strict PX4/Isaac
+24-stage flight target for each configured flight, using the strict PX4/Isaac
 harness with fresh processes. The runner verifies each completed flight,
 extracts its full trace, compresses and verifies raw logs, and checkpoints it
 before releasing the worker. Successful flights own private harness roots under
@@ -48,7 +48,7 @@ Isaac, preserving config fingerprints and preventing concurrent filename
 collisions. After writers stop, the harness gives the host user ownership of
 these private raw logs and producer outputs for postprocessing. Only hash-verified duplicate
 ULogs and bridge logs are removed after producer checkpointing. Failed captures
-remain available. Both kinds resume from validated checkpoints. Final derivation,
+remain available. Flights resume from validated checkpoints. Final dataset aggregation,
 stability analysis, manifest validation and atomic `latest` publication happen
 only after all flights complete. See `docs/FLIGHT_PARAMETERS.md`.
 

@@ -229,6 +229,7 @@ class RoutineStep:
     timeout_s: float
     retry_on_temporarily_rejected: bool = False
     hold_s: float = 0.0
+    hold_from_entry: bool = False
     invariants: tuple[_Invariant, ...] = ()
     streaming: Optional["_StreamingSpec"] = None
     guided: Optional["_GuidedSpec"] = None

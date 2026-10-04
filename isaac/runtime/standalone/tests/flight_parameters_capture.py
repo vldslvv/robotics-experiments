@@ -1,34 +1,62 @@
-"""Capture raw task-neutral PX4 SITL motion evidence for flight parameters."""
+"""Capture one independent flight: native hover followed by the response suite."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
 import shutil
 from collections.abc import Mapping
-from dataclasses import fields, is_dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from _px4_takeoff_scenario import (
-    Px4TakeoffScenarioOptions,
-    run_px4_takeoff_scenario,
-)
+from _px4_takeoff_scenario import Px4TakeoffScenarioOptions, run_px4_takeoff_scenario
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.flight_parameters import flight_trials, load_flight_parameters_config
-from robotics_experiments.px4_bridge import VehicleState
+from robotics_experiments.commanding import (
+    AttitudeRateSetpoint,
+    PolicyAdapter,
+    PolicyInput,
+    PolicyResult,
+    VelocitySetpoint,
+)
+from robotics_experiments.config import RoutineStepConfig
+from robotics_experiments.flight_parameters import (
+    FlightParametersConfig,
+    load_flight_parameters_config,
+)
+from robotics_experiments.px4_bridge import body_velocity_flu_from_state, world_enu_to_body_flu
 from robotics_experiments.px4_bridge.frames import rotate_vector_wxyz
 
 _TEST_NAME = "flight_parameters_capture"
-_CONFIG_ENV = "FLIGHT_PARAMETERS_CONFIG"
-_RUN_ID_ENV = "FLIGHT_PARAMETERS_RUN_ID"
-_TRIAL_INDEX_ENV = "FLIGHT_PARAMETERS_TRIAL_INDEX"
-_TRIAL_DIR_ENV = "FLIGHT_PARAMETERS_TRIAL_DIR"
-_DEFAULT_CONFIG = "configs/flight/holybro_x500_v2_hover.yaml"
+
+
+@dataclass(frozen=True)
+class _Boundary:
+    stage_index: int
+    preparation_start_us: int
+    start_sim_time_us: int
+    end_sim_time_us: int
+    initial_position_enu_m: tuple[float, ...]
+    initial_attitude_flu_enu_wxyz: tuple[float, ...]
+    initial_linear_velocity_enu_mps: tuple[float, ...]
+    initial_angular_velocity_body_flu_radps: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class _ProbeState:
+    stage_index: int = 1
+    command_index: int = 0
+    phase: str = "precondition"
+    phase_started_us: int = -1
+    stable_started_us: int = -1
+    command_started_us: int = -1
+    boundaries: tuple[_Boundary, ...] = ()
+    requested: object = None
+    requested_at_us: int = -1
+    complete: bool = False
 
 
 def _plain(value: Any, /) -> Any:
@@ -36,168 +64,370 @@ def _plain(value: Any, /) -> Any:
         return {field.name: _plain(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
         return {str(key): _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, np.ndarray)):
         return [_plain(item) for item in value]
     return value
 
 
-def _fingerprint(value: object, /) -> str:
-    encoded = json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _float3(values, /) -> tuple[float, float, float]:
-    return float(values[0]), float(values[1]), float(values[2])
-
-
-def _float4(values, /) -> tuple[float, float, float, float]:
-    return float(values[0]), float(values[1]), float(values[2]), float(values[3])
-
-
-def _yaw_quaternion(yaw_rad: float, /) -> tuple[float, float, float, float]:
-    return math.cos(0.5 * yaw_rad), 0.0, 0.0, math.sin(0.5 * yaw_rad)
-
-
-def _run(*, context: SceneTestContext) -> None:
-    config = load_flight_parameters_config(os.environ.get(_CONFIG_ENV, _DEFAULT_CONFIG))
-    run_id = os.environ[_RUN_ID_ENV]
-    trial_index = int(os.environ[_TRIAL_INDEX_ENV])
-    trial_dir = Path(os.environ[_TRIAL_DIR_ENV])
-    trials = flight_trials(config=config, kind="hover")
-    if not 1 <= trial_index <= len(trials):
-        raise ValueError("hover trial index is outside configured flight sets")
-    set_name, seed = trials[trial_index - 1]
-    np.random.seed(seed)
-    if tuple(context.config.vehicles) != (config.vehicle,):
-        raise ValueError(
-            f"flight parameter experiment must contain only vehicle {config.vehicle!r}"
-        )
-    routine_steps = context.config.vehicles[config.vehicle].routine.steps
-    expected_kinds = ("arm", "takeoff", "hover")
-    if tuple(step["kind"] for step in routine_steps) != expected_kinds:
-        raise ValueError(f"flight parameter routine must be {expected_kinds}")
-    hover_hold_s = float(routine_steps[2]["hold_s"])
-    expected_hold_s = (
-        config.hover.mode_transition_timeout_s + config.hover.settle_s + config.hover.measure_s
+def _routine_steps(*, config: FlightParametersConfig) -> tuple[RoutineStepConfig, ...]:
+    hover = config.hover
+    hold_s = hover.mode_transition_timeout_s + hover.settle_s + hover.measure_s
+    response_s = sum(
+        config.preparation.timeout_s + sum(command.duration_s for command in stage.commands)
+        for stage in config.stages[1:]
     )
-    if not math.isclose(hover_hold_s, expected_hold_s, rel_tol=0.0, abs_tol=1.0e-9):
-        raise ValueError(
-            f"flight parameter hover hold {hover_hold_s} does not equal {expected_hold_s}"
+    return (
+        {"kind": "arm"},
+        {
+            "kind": "takeoff",
+            "climb_m": hover.target_position_enu_m[2],
+            "min_climb_m": config.takeoff_min_climb_m,
+        },
+        {"kind": "hover", "hold_s": hold_s, "completion": "elapsed"},
+        {
+            "kind": "policy",
+            "artifact": "flight-suite",
+            "label": "flight-response-stages",
+            "timeout_s": response_s + config.preparation.timeout_s,
+        },
+    )
+
+
+def _position_setpoint(
+    *, policy_input: PolicyInput, target: tuple[float, ...], config: FlightParametersConfig
+) -> VelocitySetpoint:
+    vehicle = policy_input.vehicle_state
+    desired = (np.asarray(target) - vehicle.position_enu) * config.preparation.recenter_gain_hz
+    speed = float(np.linalg.norm(desired))
+    if speed > config.preparation.recenter_max_speed_mps:
+        desired *= config.preparation.recenter_max_speed_mps / speed
+    body = world_enu_to_body_flu(vehicle.orientation_flu_enu_wxyz, desired)
+    return VelocitySetpoint(float(body[0]), -float(body[1]), -float(body[2]), 0.0)
+
+
+def _is_stable(*, policy_input: PolicyInput, config: FlightParametersConfig) -> bool:
+    vehicle = policy_input.vehicle_state
+    w, x, y, _z = vehicle.orientation_flu_enu_wxyz
+    tilt = math.degrees(math.acos(max(-1.0, min(1.0, 1.0 - 2.0 * (x * x + y * y)))))
+    limits = config.preparation
+    return (
+        np.linalg.norm(vehicle.linear_velocity_enu) <= limits.max_linear_speed_mps
+        and np.linalg.norm(vehicle.angular_velocity_flu) <= limits.max_angular_speed_radps
+        and tilt <= limits.max_tilt_deg
+        and math.isfinite(w)
+    )
+
+
+def _advance_factory(*, config: FlightParametersConfig):
+    def advance(*, policy_input: PolicyInput, state: object) -> PolicyResult:
+        if not isinstance(state, _ProbeState):
+            raise TypeError("flight suite policy state has an unexpected type")
+        now = policy_input.sim_time_us
+        neutral = _position_setpoint(
+            policy_input=policy_input,
+            target=tuple(policy_input.reference_position_enu),
+            config=config,
         )
-
-    expected_samples = round(expected_hold_s * config.hover.sample_rate_hz)
-    positions: list[tuple[float, float, float]] = []
-    attitudes: list[tuple[float, float, float, float]] = []
-    linear_velocities: list[tuple[float, float, float]] = []
-    angular_velocities: list[tuple[float, float, float]] = []
-    times_us: list[int] = []
-    capture_start_us: int | None = None
-    capture_complete = False
-
-    def routine_tick(fleet) -> None:
-        nonlocal capture_start_us, capture_complete
-        flying = fleet.flying[0]
-        progress = flying.driver.routine_state
-        if progress.cursor != 2:
-            return
-        from robotics_experiments.runtime import read_bridge_host_status
-
-        host = flying.spawned.host
-        observer = flying.spawned.observer
-        if host is None or observer is None:
-            raise AssertionError("flight parameter capture requires a live bridge observer")
-        sim_time_us = read_bridge_host_status(host=host).sim_time_us
-        if capture_start_us is None:
-            capture_start_us = sim_time_us
-        capture_complete = sim_time_us >= capture_start_us + round(expected_hold_s * 1_000_000)
-        if len(times_us) >= expected_samples:
-            return
-        sample_target_us = capture_start_us + round(
-            len(times_us) * 1_000_000 / config.hover.sample_rate_hz
-        )
-        if sim_time_us < sample_target_us:
-            return
-        state: VehicleState = observer.read_state(sim_time_us)
-        times_us.append(sim_time_us)
-        positions.append(_float3(state.position_enu))
-        attitudes.append(_float4(state.orientation_flu_enu_wxyz))
-        linear_velocities.append(_float3(state.linear_velocity_enu))
-        angular_velocities.append(
-            _float3(rotate_vector_wxyz(state.orientation_flu_enu_wxyz, state.angular_velocity_flu))
-        )
-
-    def post_routine(_context: SceneTestContext, fleet) -> None:
-        if len(times_us) != expected_samples:
-            raise AssertionError(
-                f"flight parameter trial captured {len(times_us)} raw samples, "
-                f"expected {expected_samples}"
+        if state.phase == "precondition":
+            if state.phase_started_us < 0:
+                state = replace(state, phase_started_us=now)
+            elapsed = now - state.phase_started_us
+            stable = elapsed >= round(config.preparation.minimum_neutral_s * 1e6) and _is_stable(
+                policy_input=policy_input, config=config
             )
-        from robotics_experiments.runtime import read_bridge_host_status
-
-        flying = fleet.flying[0]
-        host = flying.spawned.host
-        if host is None:
-            raise AssertionError("flight parameter capture retained no bridge host")
-        debug_log_path = read_bridge_host_status(host=host).debug_log_path
-        if debug_log_path is None:
-            raise AssertionError("flight parameter capture retained no bridge log")
-        if not trial_dir.is_dir() or any(trial_dir.iterdir()):
-            raise ValueError("flight parameter trial directory must exist and be empty")
-        shutil.copy2(debug_log_path, trial_dir / "bridge.log")
-        experiment = _plain(context.config)
-        vehicle_config = context.config.vehicles[config.vehicle]
-        vehicle = _plain(vehicle_config)
-        payload = {
-            "artifact_kind": "robotics-experiments-flight-parameters-raw-trace",
-            "schema_version": 1,
-            "flight_parameters_id": config.flight_parameters_id,
-            "campaign_run_id": run_id,
-            "trial_index": trial_index,
-            "set_name": set_name,
-            "seed": seed,
-            "source_backend": config.source_backend,
-            "state_source": config.state_source,
-            "config_fingerprint": config.config_fingerprint,
-            "experiment_fingerprint": _fingerprint(experiment),
-            "vehicle_fingerprint": _fingerprint(vehicle),
-            "source_image": (
-                f"isaac={os.environ.get('ISAAC_BENCHMARK_IMAGE', 'unknown-isaac-image')};"
-                f"px4={os.environ.get('PX4_BENCHMARK_IMAGE', 'unknown-px4-image')}"
-            ),
-            "requested_target_position_enu_m": list(config.hover.target_position_enu_m),
-            "requested_target_attitude_flu_enu_wxyz": list(
-                _yaw_quaternion(config.hover.target_yaw_rad)
-            ),
-            "px4_home_lat_lon_alt": [
-                vehicle_config.bridge.home_lat_deg,
-                vehicle_config.bridge.home_lon_deg,
-                vehicle_config.bridge.home_alt_m,
-            ],
-            "time_us": times_us,
-            "position_enu_m": positions,
-            "attitude_flu_enu_wxyz": attitudes,
-            "linear_velocity_enu_mps": linear_velocities,
-            "angular_velocity_enu_radps": angular_velocities,
-            "completed": True,
-            "failure_reason": "",
-        }
-        (trial_dir / "raw_trace.json").write_text(
-            json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+            since = (
+                state.stable_started_us
+                if stable and state.stable_started_us >= 0
+                else now
+                if stable
+                else -1
+            )
+            state = replace(state, stable_started_us=since)
+            if elapsed < round(config.preparation.timeout_s * 1e6):
+                return PolicyResult(
+                    state=replace(state, requested=neutral, requested_at_us=now), setpoint=neutral
+                )
+            if since < 0 or now - since < round(config.preparation.stable_hold_s * 1e6):
+                return PolicyResult(
+                    state=state,
+                    setpoint=neutral,
+                    failure_reason=(
+                        f"stage {config.stages[state.stage_index].name!r} did not stabilize "
+                        f"within {config.preparation.timeout_s}s"
+                    ),
+                )
+            vehicle = policy_input.vehicle_state
+            boundary = _Boundary(
+                state.stage_index,
+                state.phase_started_us,
+                now,
+                -1,
+                tuple(float(v) for v in vehicle.position_enu),
+                tuple(float(v) for v in vehicle.orientation_flu_enu_wxyz),
+                tuple(float(v) for v in vehicle.linear_velocity_enu),
+                tuple(float(v) for v in vehicle.angular_velocity_flu),
+            )
+            state = replace(
+                state,
+                phase="measurement",
+                phase_started_us=now,
+                command_started_us=now,
+                boundaries=(*state.boundaries, boundary),
+            )
+        stage = config.stages[state.stage_index]
+        while now - state.command_started_us >= round(
+            stage.commands[state.command_index].duration_s * 1e6
+        ):
+            next_start = state.command_started_us + round(
+                stage.commands[state.command_index].duration_s * 1e6
+            )
+            if state.command_index + 1 < len(stage.commands):
+                state = replace(
+                    state, command_index=state.command_index + 1, command_started_us=next_start
+                )
+                continue
+            boundaries = (
+                *state.boundaries[:-1],
+                replace(state.boundaries[-1], end_sim_time_us=now),
+            )
+            complete = state.stage_index + 1 == len(config.stages)
+            successor = replace(
+                state,
+                stage_index=state.stage_index + 1,
+                command_index=0,
+                phase="complete" if complete else "precondition",
+                phase_started_us=now,
+                stable_started_us=-1,
+                command_started_us=-1,
+                boundaries=boundaries,
+                requested=neutral,
+                requested_at_us=now,
+                complete=complete,
+            )
+            return PolicyResult(state=successor, setpoint=neutral, complete=complete)
+        command = stage.commands[state.command_index]
+        if stage.control_mode == "ctbr":
+            roll, pitch, yaw = command.body_rate_flu_radps
+            setpoint = AttitudeRateSetpoint(
+                command.collective_thrust_normalized, roll, -pitch, -yaw
+            )
+        elif stage.hold_position:
+            setpoint = _position_setpoint(
+                policy_input=policy_input,
+                target=state.boundaries[-1].initial_position_enu_m,
+                config=config,
+            )
+        else:
+            forward, left, up = command.velocity_body_flu_mps
+            setpoint = VelocitySetpoint(forward, -left, -up, -command.yaw_rate_radps)
+        return PolicyResult(
+            state=replace(state, requested=setpoint, requested_at_us=now), setpoint=setpoint
         )
 
-    run_px4_takeoff_scenario(
-        context,
-        Px4TakeoffScenarioOptions(
-            test_name=_TEST_NAME,
-            px4_container_log_name="flight_parameters_capture_px4.log",
-            routine_tick_hook=routine_tick,
-            routine_stop_predicate=lambda fleet: capture_complete
-            and fleet.flying[0].driver.failure is None,
-            post_routine_hook=post_routine,
-            success_label="raw task-neutral hover evidence",
-        ),
+    return advance
+
+
+def _policy_factory(*, config: FlightParametersConfig):
+    def factory(*, artifact: str, hold_s: float | None) -> PolicyAdapter:
+        if artifact != "flight-suite" or hold_s is not None:
+            raise ValueError("flight capture requires the injected flight-suite policy")
+        return PolicyAdapter(
+            policy_rate_hz=config.hover.sample_rate_hz,
+            initial_state=_ProbeState(),
+            advance=_advance_factory(config=config),
+        )
+
+    return factory
+
+
+def _deploy_pusher(*, context: SceneTestContext, host, config: FlightParametersConfig) -> None:
+    if not config.preparation.pusher_deployed:
+        return
+    import omni.usd
+    from pxr import PhysxSchema, UsdPhysics
+
+    stage = omni.usd.get_context().get_stage()
+    path = f"{host.params.articulation_path}/pusher_joint"
+    prim = stage.GetPrimAtPath(path)
+    if not prim.IsValid():
+        raise RuntimeError(f"flight plant has no pusher joint at {path!r}")
+    joint = UsdPhysics.PrismaticJoint(prim)
+    drive = UsdPhysics.DriveAPI.Get(prim, "linear")
+    drive.CreateTargetPositionAttr(float(joint.GetUpperLimitAttr().Get()))
+    drive.CreateMaxForceAttr(float(context.config.rl.lab_vehicle.pusher_effort_limit_n))
+    PhysxSchema.PhysxJointAPI.Apply(prim).CreateMaxJointVelocityAttr().Set(
+        float(context.config.rl.lab_vehicle.pusher_velocity_limit_mps)
     )
+
+
+def _run(context: SceneTestContext, /) -> None:
+    config = load_flight_parameters_config(
+        path=os.environ["FLIGHT_PARAMETERS_CONFIG"],
+        flight_count=int(os.environ["FLIGHT_COUNT"]) if os.environ.get("FLIGHT_COUNT") else None,
+    )
+    index = int(os.environ["FLIGHT_PARAMETERS_FLIGHT_INDEX"])
+    seed = config.start_seed + index
+    np.random.seed(seed)
+    directory = Path(os.environ["FLIGHT_PARAMETERS_TRIAL_DIR"])
+    if tuple(context.config.vehicles) != (config.vehicle,):
+        raise ValueError("flight capture requires exactly its configured vehicle")
+    vehicle = context.config.vehicles[config.vehicle]
+    if (
+        vehicle.bridge.sensor_noise_enabled
+        or vehicle.bridge.sensor_excitation_mode != "deterministic"
+    ):
+        raise ValueError("flight calibration requires noise-free deterministic sensor excitation")
+    directory.mkdir(parents=True, exist_ok=True)
+    if any(directory.iterdir()):
+        raise ValueError("flight capture directory must be empty")
+    next_sample_us = -1
+    sample_count = 0
+    hover_start_us = -1
+    hover_end_us = -1
+    period_us = round(1e6 / config.hover.sample_rate_hz)
+
+    with (directory / "motion.jsonl").open("w") as stream:
+
+        def physics_tick(fleet) -> None:
+            nonlocal next_sample_us, sample_count, hover_start_us, hover_end_us
+            from robotics_experiments.runtime import read_bridge_host_status
+
+            flying = fleet.flying[0]
+            host, observer = flying.spawned.host, flying.spawned.observer
+            if host is None or observer is None:
+                raise AssertionError("capture requires a live bridge observer")
+            now = read_bridge_host_status(host=host).sim_time_us
+            progress = flying.driver.routine_state
+            if progress.cursor == 2 and progress.sent and hover_start_us < 0:
+                hover_start_us = progress.step_started_us
+                hover_end_us = hover_start_us + round(
+                    (
+                        config.hover.mode_transition_timeout_s
+                        + config.hover.settle_s
+                        + config.hover.measure_s
+                    )
+                    * 1e6
+                )
+                next_sample_us = now
+            if next_sample_us < 0:
+                next_sample_us = now
+            if now < next_sample_us:
+                return
+            next_sample_us += period_us
+            state = observer.read_state(now)
+            policy = progress.offboard.policy_state or progress.last_policy_state
+            phase = "startup"
+            stage_index = -1
+            if hover_start_us >= 0 and now < hover_end_us:
+                stage_index = 0
+                elapsed = (now - hover_start_us) * 1e-6
+                phase = (
+                    "transition"
+                    if elapsed < config.hover.mode_transition_timeout_s
+                    else "settle"
+                    if elapsed < config.hover.mode_transition_timeout_s + config.hover.settle_s
+                    else "measurement"
+                )
+            elif isinstance(policy, _ProbeState):
+                stage_index, phase = policy.stage_index, policy.phase
+            row = {
+                "sim_time_us": now,
+                "stage_index": stage_index,
+                "phase": phase,
+                "position_enu_m": _plain(state.position_enu),
+                "attitude_flu_enu_wxyz": _plain(state.orientation_flu_enu_wxyz),
+                "linear_velocity_enu_mps": _plain(state.linear_velocity_enu),
+                "velocity_body_flu_mps": _plain(body_velocity_flu_from_state(state)),
+                "angular_velocity_body_flu_radps": _plain(state.angular_velocity_flu),
+                "angular_velocity_enu_radps": _plain(
+                    rotate_vector_wxyz(state.orientation_flu_enu_wxyz, state.angular_velocity_flu)
+                ),
+                "requested_command": _plain(policy.requested)
+                if isinstance(policy, _ProbeState)
+                else None,
+                "requested_at_us": policy.requested_at_us
+                if isinstance(policy, _ProbeState)
+                else None,
+                "transmitted_command": _plain(progress.offboard.transmitted_setpoint),
+                "transmitted_at_us": progress.offboard.transmitted_setpoint_sim_time_us,
+                "policy_generation": progress.offboard.policy_generation,
+                "transmitted_policy_generation": progress.offboard.transmitted_policy_generation,
+            }
+            stream.write(json.dumps(row, allow_nan=False, separators=(",", ":")) + "\n")
+            sample_count += 1
+
+        def post_routine(_context: SceneTestContext, fleet) -> None:
+            from robotics_experiments.runtime import read_bridge_host_status
+
+            flying = fleet.flying[0]
+            state = flying.driver.routine_state.last_policy_state
+            if (
+                not isinstance(state, _ProbeState)
+                or not state.complete
+                or len(state.boundaries) != len(config.stages) - 1
+            ):
+                raise AssertionError("flight did not finish every configured stage")
+            host = flying.spawned.host
+            if host is None:
+                raise AssertionError("capture retained no bridge host")
+            log = read_bridge_host_status(host=host).debug_log_path
+            if log is None:
+                raise AssertionError("capture retained no bridge log")
+            stream.flush()
+            boundaries = [
+                {
+                    "stage_index": 0,
+                    "preparation_start_us": hover_start_us,
+                    "start_sim_time_us": hover_start_us
+                    + round((config.hover.mode_transition_timeout_s + config.hover.settle_s) * 1e6),
+                    "end_sim_time_us": hover_end_us,
+                },
+                *(asdict(boundary) for boundary in state.boundaries),
+            ]
+            payload = {
+                "artifact_kind": "robotics-experiments-flight-recording",
+                "schema_version": 1,
+                "flight_parameters_id": config.flight_parameters_id,
+                "run_id": os.environ["FLIGHT_PARAMETERS_RUN_ID"],
+                "flight_index": index,
+                "seed": seed,
+                "state_source": config.state_source,
+                "source_backend": config.source_backend,
+                "preparation": asdict(config.preparation),
+                "sample_rate_hz": config.hover.sample_rate_hz,
+                "sample_count": sample_count,
+                "routine_steps": _plain(_routine_steps(config=config)),
+                "px4_home_lat_lon_alt": [
+                    vehicle.bridge.home_lat_deg,
+                    vehicle.bridge.home_lon_deg,
+                    vehicle.bridge.home_alt_m,
+                ],
+                "stages": [
+                    {**asdict(stage), **boundary}
+                    for stage, boundary in zip(config.stages, boundaries, strict=True)
+                ],
+                "completed": True,
+            }
+            (directory / "raw_flight.json").write_text(
+                json.dumps(payload, allow_nan=False, indent=2) + "\n"
+            )
+            shutil.copy2(log, directory / "bridge.log")
+
+        run_px4_takeoff_scenario(
+            context,
+            Px4TakeoffScenarioOptions(
+                test_name=_TEST_NAME,
+                px4_container_log_name="flight_parameters_capture_px4.log",
+                routine_steps=_routine_steps(config=config),
+                physics_tick_hook=physics_tick,
+                post_takeoff_hook=lambda context, host: _deploy_pusher(
+                    context=context, host=host, config=config
+                ),
+                post_routine_hook=post_routine,
+                policy_factory=_policy_factory(config=config),
+                success_label="24-stage flight parameter suite",
+            ),
+        )
 
 
 def main() -> None:
@@ -206,7 +436,7 @@ def main() -> None:
         default_scene=None,
         manage_stage=False,
         extra_python_paths=["isaac/runtime/extensions/px4_sitl_brigde"],
-        test_body=lambda context: _run(context=context),
+        test_body=_run,
         description=__doc__ or "",
     )
 

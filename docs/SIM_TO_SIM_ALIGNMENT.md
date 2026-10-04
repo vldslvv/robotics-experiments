@@ -370,10 +370,12 @@ quality record is failed. The authoritative live gate is:
 make test-integration-alignment-target
 ```
 
-Run the full campaign with:
+Capture publishes unsplit flight datasets; alignment consumption is tracked in
+[the handoff](backlog/flight_parameters_alignment_handoff.md). Run alignment
+against an existing qualified artifact with:
 
 ```bash
-make measure-flight-parameters
+# Alignment currently requires a qualified FlightParameters artifact.
 make align-controllers
 ```
 

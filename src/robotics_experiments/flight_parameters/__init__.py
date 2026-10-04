@@ -12,11 +12,11 @@ from robotics_experiments.flight_parameters._artifact import (
     write_flight_parameters,
 )
 from robotics_experiments.flight_parameters._config import (
-    flight_trials,
+    flight_seeds,
     load_flight_parameters_config,
 )
+from robotics_experiments.flight_parameters._dataset import FlightDataset, load_flight_dataset
 from robotics_experiments.flight_parameters._derive import (
-    derive_flight_parameters,
     evaluate_hover_pose,
     summarize_signal,
 )
@@ -52,12 +52,13 @@ __all__ = [
     "HoverEvaluation",
     "ResponseTraceEvidence",
     "SignalStatistics",
-    "derive_flight_parameters",
+    "FlightDataset",
+    "load_flight_dataset",
     "evaluate_hover_pose",
     "finalize_flight_parameters_bundle",
     "flight_parameters_from_payload",
     "flight_trace_from_payload",
-    "flight_trials",
+    "flight_seeds",
     "load_flight_parameters_config",
     "load_flight_parameters",
     "load_flight_parameters_bundle",
