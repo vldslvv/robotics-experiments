@@ -1,3 +1,315 @@
 defaults:
   - experiment/calibration/x500
   - _self_
+
+flight_parameters:
+  schema_version: 1
+  flight_parameters_id: holybro-x500-v2-hover-v1
+  source_backend: px4-sitl
+  state_source: simulator-ground-truth
+  vehicle: x500_01
+  start_seed: 1001
+  flight_count: 10
+  takeoff_min_climb_m: 1.5
+  preparation:
+    pusher_deployed: true
+    minimum_neutral_s: 3.0
+    stable_hold_s: 0.5
+    timeout_s: 20.0
+    recenter_gain_hz: 1.0
+    recenter_max_speed_mps: 0.8
+    max_linear_speed_mps: 0.02
+    max_angular_speed_radps: 0.03
+    max_tilt_deg: 0.25
+  execution:
+    worker_count: 1
+    gzip_level: 6
+    minimum_free_bytes: 5368709120
+    # Raw producer/harness copies and compression staging per worker.
+    raw_flight_budget_bytes: 1073741824
+    estimated_archive_bytes_per_flight: 105000000
+  stages:
+    - name: hover
+      kind: "hover"
+      control_mode: "auto-loiter"
+      axis: "pose"
+      hold_position: true
+      hover:
+        kind: "hover"
+        mode_transition_timeout_s: 15.0
+        mode_report_max_age_s: 2.5
+        settle_s: 6.0
+        measure_s: 30.0
+        target_position_enu_m: [0.0, 0.0, 2.5]
+        target_yaw_rad: 0.0
+      commands: []
+    - name: fit-forward-low-speed
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "x"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.1, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: fit-lateral-low-speed
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "y"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.1, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, -0.08, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: fit-vertical-low-speed
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "z"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.08], yaw_rate_radps: 0.0, duration_s: 1.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, -0.06], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: fit-yaw-steps
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "yaw"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.35, duration_s: 1.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: -0.25, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: fit-combined-turns
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "combined"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.1, 0.0, 0.0], yaw_rate_radps: 0.3, duration_s: 1.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.1, 0.0], yaw_rate_radps: -0.3, duration_s: 1.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: validation-stage1-approach-brake
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "x"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.08, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: validation-lateral-ramp-reversal
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "y"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.05, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, 0.09, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, -0.06, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: validation-vertical-ramp-reversal
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "z"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.05], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.09], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, -0.05], yaw_rate_radps: 0.0, duration_s: 0.75}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: validation-x-envelope
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "x"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.4, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.8, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [-0.8, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: validation-y-envelope
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "y"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.4, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, 0.8, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, -0.8, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: validation-z-envelope
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "z"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.4], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.8], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, -0.8], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: validation-yaw-ramp-reversal
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "yaw"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.2, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.4, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: -0.3, duration_s: 0.75}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: validation-combined-turns
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "combined"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.08, 0.0, 0.0], yaw_rate_radps: 0.25, duration_s: 1.25}
+        - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+        - {velocity_body_flu_mps: [0.0, -0.08, 0.0], yaw_rate_radps: -0.35, duration_s: 1.25}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: stability-moderate-envelope
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "combined"
+      hold_position: false
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.8, 0.0, 0.0], yaw_rate_radps: 0.6, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, -0.6, 0.3], yaw_rate_radps: -0.5, duration_s: 1.0}
+        - {velocity_body_flu_mps: [-0.5, 0.0, -0.25], yaw_rate_radps: 0.0, duration_s: 1.0}
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+    - name: stability-hover-pose
+      kind: "controller-response"
+      control_mode: "velocity"
+      axis: "combined"
+      hold_position: true
+      commands:
+        - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 30.0}
+    - name: fit-roll-steps
+      kind: "controller-response"
+      control_mode: "ctbr"
+      axis: "roll"
+      hold_position: false
+      commands:
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.35, 0.0, 0.0], duration_s: 0.3}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [-0.35, 0.0, 0.0], duration_s: 0.3}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.7}
+    - name: fit-pitch-steps
+      kind: "controller-response"
+      control_mode: "ctbr"
+      axis: "pitch"
+      hold_position: false
+      commands:
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.35, 0.0], duration_s: 0.3}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, -0.35, 0.0], duration_s: 0.3}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.7}
+    - name: fit-yaw-steps-ctbr
+      kind: "controller-response"
+      control_mode: "ctbr"
+      axis: "yaw"
+      hold_position: false
+      commands:
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.35], duration_s: 0.3}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, -0.35], duration_s: 0.3}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.7}
+    - name: validation-roll-envelope
+      kind: "controller-response"
+      control_mode: "ctbr"
+      axis: "roll"
+      hold_position: false
+      commands:
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.3, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.6, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [-0.6, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [-0.3, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+    - name: validation-pitch-envelope
+      kind: "controller-response"
+      control_mode: "ctbr"
+      axis: "pitch"
+      hold_position: false
+      commands:
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.3, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.6, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, -0.6, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, -0.3, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+    - name: validation-yaw-envelope-ctbr
+      kind: "controller-response"
+      control_mode: "ctbr"
+      axis: "yaw"
+      hold_position: false
+      commands:
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.3], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.6], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, -0.6], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, -0.3], duration_s: 0.2}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+    - name: validation-collective-envelope
+      kind: "controller-response"
+      control_mode: "ctbr"
+      axis: "collective"
+      hold_position: false
+      commands:
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+        - {collective_thrust_normalized: 0.5, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.5}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.5}
+        - {collective_thrust_normalized: 0.64, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.5}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.5}
+    - name: stability-ctbr-combined
+      kind: "controller-response"
+      control_mode: "ctbr"
+      axis: "combined"
+      hold_position: false
+      commands:
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+        - {collective_thrust_normalized: 0.6, body_rate_flu_radps: [0.4, -0.3, 0.2], duration_s: 0.4}
+        - {collective_thrust_normalized: 0.54, body_rate_flu_radps: [-0.4, 0.3, -0.2], duration_s: 0.4}
+        - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.2}
+  stability:
+    # Analysis only; these values never enter capture or derived flight parameters.
+    excursion_horizontal_m: 0.05
+    drift_window_s: 5.0
+    bootstrap_repetitions: 2000
+    bootstrap_seed: 42017
+    confidence: 0.95
+    relative_change_limit: 0.10
+    minimum_flights: 10

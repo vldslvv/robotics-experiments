@@ -30,7 +30,7 @@ def test_capture_routes_host_and_container_paths() -> None:
             "-o",
             "generate-assets",
             "test-integration-flight-parameters-sample",
-            "HYDRA_CONFIG=configs/flight_parameters_x500.yaml",
+            "FLIGHT_CONFIG=configs/flight_parameters_x500.yaml",
             "FLIGHT_PARAMETERS_RUN_ID=test-run",
             "FLIGHT_PARAMETERS_FLIGHT_INDEX=2",
             "FLIGHT_COUNT=10",
@@ -48,6 +48,14 @@ def test_capture_routes_host_and_container_paths() -> None:
         in result.stdout
     )
     assert "flight_parameters_capture.py" in result.stdout
+    assert (
+        f"ROBOTICS_EXPERIMENT_CONFIG_PATH='{REPO_ROOT}/configs/flight_parameters_x500.yaml'"
+        in result.stdout
+    )
+    assert (
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH=/isaac-sim/proj/configs/flight_parameters_x500.yaml"
+        in result.stdout
+    )
 
 
 def test_alignment_prepares_the_existing_reference_from_flight_parameters() -> None:

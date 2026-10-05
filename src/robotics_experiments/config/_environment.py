@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 from robotics_experiments.config._commanding import DriverConfig, RoutineConfig
+from robotics_experiments.config._flight_parameters import _FlightParametersInput
 from robotics_experiments.config._immutability import _FreezableConfig
 from robotics_experiments.config._px4 import Px4BridgeConfig, _Px4RuntimeConfig
 from robotics_experiments.config._rl import RlConfig
@@ -104,3 +105,4 @@ class ExperimentConfig(_FreezableConfig):
     driver: DriverConfig
     flight_benchmark: _FlightBenchmarkConfig
     alignment: _AlignmentConfig
+    flight_parameters: _FlightParametersInput | None

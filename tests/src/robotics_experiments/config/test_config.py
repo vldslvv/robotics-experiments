@@ -117,7 +117,9 @@ def test_default_experiment_has_only_global_root_config():
         "driver",
         "flight_benchmark",
         "alignment",
+        "flight_parameters",
     }
+    assert config.flight_parameters is None
     assert config.flight_benchmark.airborne_duration_s == 5.0
     assert config.alignment.capture.sensor_seed == 42
     assert config.alignment.capture.pusher_deployed is True
@@ -819,20 +821,27 @@ def test_shared_rates_resolve_for_capture_and_alignment(tmp_path, sample_rate):
     rates = {"command_rate_hz": 25.0}
     if sample_rate is not None:
         rates["sample_rate_hz"] = sample_rate
-    OmegaConf.save(OmegaConf.merge(OmegaConf.load(experiment), {"rates": rates}), experiment)
+    flight = OmegaConf.load(_ROOT / "flight_parameters_x500.yaml").flight_parameters
+    OmegaConf.save(
+        OmegaConf.merge(OmegaConf.load(experiment), {"rates": rates, "flight_parameters": flight}),
+        experiment,
+    )
     resolved = load_config(experiment)
     expected_sample_rate = 25.0 if sample_rate is None else sample_rate
     assert resolved.rates.command_rate_hz == 25.0
     assert resolved.rates.sample_rate_hz == expected_sample_rate
     assert resolved.vehicles["x500_01"].pusher.effort_limit_n == 50.0
     assert resolved.vehicles["x500_01"].pusher.velocity_limit_mps == 1.0
-    suite = OmegaConf.load(_ROOT / "flight/holybro_x500_v2_suite.yaml")
-    suite.experiment_config = str(experiment)
-    suite_path = tmp_path / "suite.yaml"
-    OmegaConf.save(suite, suite_path)
-    capture = load_flight_parameters_config(path=suite_path)
+    capture = load_flight_parameters_config(path=experiment)
     assert capture.command_rate_hz == 25.0
     assert capture.sample_rate_hz == expected_sample_rate
+    assert resolved.flight_parameters is not None
+    assert capture.execution is resolved.flight_parameters.execution
+    assert capture.stability is resolved.flight_parameters.stability
+    with pytest.raises(FrozenInstanceError):
+        capture.execution.worker_count = 2
+    with pytest.raises(TypeError):
+        resolved.flight_parameters.stages[0]["hover"]["measure_s"] = 1.0
     definition = OmegaConf.load(_ROOT / "alignment/controllers/px4_sitl_x500_velocity.yaml")
     definition.experiment_config = str(experiment)
     definition_path = tmp_path / "controller.yaml"

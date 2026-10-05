@@ -262,7 +262,7 @@ def _deploy_pusher(*, context: SceneTestContext, host, config: FlightParametersC
 
 def _run(context: SceneTestContext, /) -> None:
     config = load_flight_parameters_config(
-        path=os.environ["FLIGHT_PARAMETERS_CONFIG"],
+        path=os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"],
         flight_count=int(os.environ["FLIGHT_COUNT"]) if os.environ.get("FLIGHT_COUNT") else None,
     )
     index = int(os.environ["FLIGHT_PARAMETERS_FLIGHT_INDEX"])

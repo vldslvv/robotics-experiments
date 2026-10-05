@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from robotics_experiments.config import FlightStabilityConfig
 from robotics_experiments.flight_parameters import (
     FlightParametersConfig,
     StabilityReport,
@@ -88,7 +89,7 @@ def _flights(config: FlightParametersConfig, /) -> tuple[_Flight, ...]:
 
 def _definition(config: FlightParametersConfig, /) -> dict[str, Any]:
     definition = asdict(config)
-    for field in ("execution", "config_fingerprint"):
+    for field in ("execution", "stability", "config_fingerprint"):
         definition.pop(field)
     return definition
 
@@ -168,7 +169,6 @@ def _capture_flight(
     command = (
         *common,
         "test-integration-flight-parameters-sample",
-        f"HYDRA_CONFIG={config.experiment_config}",
         f"FLIGHT_COUNT={config.flight_count}",
         f"FLIGHT_PARAMETERS_RUN_ID={run_dir.name}",
         f"FLIGHT_PARAMETERS_FLIGHT_INDEX={flight.index}",
@@ -438,12 +438,12 @@ def _write_stability_report(*, path: Path, report: StabilityReport) -> None:
 
 
 def _publish_campaign(
-    *, run_dir: Path, comparison_run_dirs: tuple[Path, ...], settings_path: Path
+    *, run_dir: Path, comparison_run_dirs: tuple[Path, ...], settings: FlightStabilityConfig
 ) -> None:
     report = analyze_flight_parameters_stability(
         run_dir=run_dir,
         comparison_run_dirs=comparison_run_dirs,
-        settings_path=settings_path,
+        settings=settings,
     )
     _write_stability_report(
         path=run_dir.parent / "stability" / f"{run_dir.name}.json", report=report
@@ -455,17 +455,16 @@ def _publish_campaign(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path)
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--flight-count", type=int)
-    parser.add_argument(
-        "--stability-config", type=Path, default=Path("configs/flight/stability/default.yaml")
-    )
     parser.add_argument("--compare-run", type=Path, action="append", default=[])
     parser.add_argument("--analyze-run", type=Path)
     parser.add_argument("--analysis-output", type=Path)
     parser.add_argument("--output-root", type=Path, default=Path(".build/flight-parameters"))
     parser.add_argument("--run-id")
     args = parser.parse_args()
+    config_path = args.config.resolve()
+    config = load_flight_parameters_config(path=config_path, flight_count=args.flight_count)
 
     if args.analyze_run is not None:
         if args.analysis_output is None:
@@ -477,18 +476,14 @@ def main() -> None:
         report = analyze_flight_parameters_stability(
             run_dir=args.analyze_run,
             comparison_run_dirs=tuple(args.compare_run),
-            settings_path=args.stability_config,
+            settings=config.stability,
         )
         _write_stability_report(path=output, report=report)
         print(f"Stability: {report.status}; report: {output}")
         return
     if args.analysis_output is not None:
         parser.error("--analysis-output requires --analyze-run")
-    if args.config is None:
-        parser.error("--config is required for capture or resuming publication")
     repo_root = Path.cwd().resolve()
-    config_path = args.config.resolve()
-    config = load_flight_parameters_config(path=config_path, flight_count=args.flight_count)
     created_at = datetime.now(timezone.utc)
     run_id = _run_id(args.run_id or created_at.strftime("%Y%m%dT%H%M%SZ"))
     run_dir = (args.output_root / config.flight_parameters_id / run_id).resolve()
@@ -508,7 +503,7 @@ def main() -> None:
             _publish_campaign(
                 run_dir=run_dir,
                 comparison_run_dirs=tuple(args.compare_run),
-                settings_path=args.stability_config,
+                settings=config.stability,
             )
             return
 
@@ -538,7 +533,7 @@ def main() -> None:
         _publish_campaign(
             run_dir=run_dir,
             comparison_run_dirs=tuple(args.compare_run),
-            settings_path=args.stability_config,
+            settings=config.stability,
         )
 
 

@@ -8,16 +8,11 @@ import math
 import re
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, cast
-
-from omegaconf import OmegaConf
 
 from robotics_experiments.config import load_config
 from robotics_experiments.flight_parameters._models import (
     FlightCommand,
-    FlightExecutionConfig,
     FlightParametersConfig,
-    FlightPreparation,
     FlightStage,
     HoverConfig,
 )
@@ -33,25 +28,20 @@ def flight_seeds(*, config: FlightParametersConfig) -> tuple[int, ...]:
 def load_flight_parameters_config(
     *, path: str | Path, flight_count: int | None = None
 ) -> FlightParametersConfig:
-    """Load physical stages and an optional campaign-size override."""
-    payload = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
-    fields = set(FlightParametersConfig.__annotations__) - {
-        "config_fingerprint",
-        "command_rate_hz",
-        "sample_rate_hz",
-    }
-    if not isinstance(payload, dict) or set(payload) != fields:
-        raise ValueError("flight config fields mismatch")
-    payload = cast(dict[str, Any], payload)
-    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", payload["flight_parameters_id"]) is None:
+    """Resolve physical stages from the same experiment used by the simulator."""
+    experiment = load_config(path)
+    authored = experiment.flight_parameters
+    if authored is None:
+        raise ValueError("experiment requires flight_parameters settings for capture")
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", authored.flight_parameters_id) is None:
         raise ValueError("flight_parameters_id must be a single identifier")
-    if payload["schema_version"] != 1 or payload["source_backend"] != "px4-sitl":
+    if authored.schema_version != 1 or authored.source_backend != "px4-sitl":
         raise ValueError("flight capture requires schema 1 and PX4 SITL")
-    if payload["state_source"] != "simulator-ground-truth":
+    if authored.state_source != "simulator-ground-truth":
         raise ValueError("flight capture requires simulator ground truth")
     stages = []
     commands: tuple[FlightCommand, ...]
-    for item in payload["stages"]:
+    for item in authored.stages:
         if item["kind"] == "hover":
             if item["commands"] or item["control_mode"] != "auto-loiter":
                 raise ValueError("native hover uses AUTO_LOITER and no streamed commands")
@@ -115,18 +105,29 @@ def load_flight_parameters_config(
         raise ValueError("a flight suite starts with one hover followed by response stages")
     if len({stage.name for stage in stages}) != len(stages):
         raise ValueError("flight stage names must be unique")
-    count = payload["flight_count"] if flight_count is None else flight_count
+    count = authored.flight_count if flight_count is None else flight_count
     if type(count) is not int or count <= 0:
         raise ValueError("flight_count must be a positive integer")
-    experiment = load_config(payload["experiment_config"])
+    # Use the same portable path in host and container flight definitions.
+    repo_root = Path(__file__).resolve().parents[3]
+    config_path = (repo_root / path).resolve()
+    experiment_path = (
+        config_path.relative_to(repo_root) if config_path.is_relative_to(repo_root) else config_path
+    )
     config = FlightParametersConfig(
-        **{
-            **payload,
-            "flight_count": count,
-            "stages": tuple(stages),
-            "preparation": FlightPreparation(**payload["preparation"]),
-            "execution": FlightExecutionConfig(**payload["execution"]),
-        },
+        schema_version=authored.schema_version,
+        flight_parameters_id=authored.flight_parameters_id,
+        source_backend=authored.source_backend,
+        state_source=authored.state_source,
+        experiment_config=experiment_path.as_posix(),
+        vehicle=authored.vehicle,
+        start_seed=authored.start_seed,
+        flight_count=count,
+        takeoff_min_climb_m=authored.takeoff_min_climb_m,
+        stages=tuple(stages),
+        preparation=authored.preparation,
+        execution=authored.execution,
+        stability=authored.stability,
         config_fingerprint="",
         command_rate_hz=experiment.rates.command_rate_hz,
         sample_rate_hz=experiment.rates.sample_rate_hz,
@@ -172,7 +173,9 @@ def load_flight_parameters_config(
         < config.preparation.minimum_neutral_s + config.preparation.stable_hold_s
     ):
         raise ValueError("response preparation cannot complete before its readiness interval")
+    definition = asdict(config)
+    definition.pop("stability")
     encoded = json.dumps(
-        asdict(config), sort_keys=True, separators=(",", ":"), allow_nan=False
+        definition, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode()
     return replace(config, config_fingerprint=hashlib.sha256(encoded).hexdigest())

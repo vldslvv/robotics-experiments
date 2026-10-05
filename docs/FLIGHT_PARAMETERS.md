@@ -6,10 +6,13 @@ owns neither dataset splits nor fitted controller or training bounds.
 
 ## Flight definition
 
-`configs/flight/holybro_x500_v2_suite.yaml` owns the complete physical suite:
-vehicle and experiment, `start_seed`, `flight_count`, takeoff height threshold,
-ordered stages, response preparation, and execution settings. The first stage
-defines hover timing, requested pose and PX4 report freshness. Each
+`configs/flight_parameters_x500.yaml` is the single input. It inherits the shared
+calibration environment and owns a `flight_parameters` block containing vehicle
+selection, `start_seed`, `flight_count`, takeoff height threshold, ordered stages,
+response preparation, execution settings and final stability settings. Simulation,
+vehicle and shared rate overrides belong in the same file under their normal
+experiment blocks. The first stage defines hover timing, requested pose and PX4
+report freshness. Each
 response stage defines its name, control mode, axis, optional position hold, and
 ordered commands with durations. Velocity commands use body-FLU velocity and
 yaw rate; CTBR commands use normalized collective thrust and body-FLU rates.
@@ -23,9 +26,9 @@ flight's physical state, PX4 controller history and random stream. There is no
 stage reset or reseeding. A seed identifies a random stream; it does not promise
 bitwise replay of PX4 command activation.
 
-`configs/flight_parameters_x500.yaml` selects the shared X500 calibration
-environment used by capture and alignment. Calibration
-uses simulator ground truth and disables artificial random sensor noise. Small
+Its Hydra defaults select the shared X500 calibration environment also used by
+alignment. Calibration uses simulator ground truth and disables artificial random
+sensor noise. Small
 deterministic pressure and magnetic excitation keeps PX4 sensor initialization
 healthy. Sensor noise and domain randomization during training are separate
 consumer decisions. The recorder rejects a noise-enabled calibration experiment.
@@ -38,18 +41,24 @@ make flight-parameters FLIGHT_COUNT=100
 ```
 
 The optional count overrides the YAML default and changes campaign identity.
-GNU Make's `-n` prints commands; it is not a flight count. The suite's `execution`
-section owns worker count, compression level and storage budgets. Only stability
-settings live separately, in `configs/flight/stability/default.yaml`.
-
-Set parallel captures in `configs/flight/holybro_x500_v2_suite.yaml`:
+GNU Make's `-n` prints commands; it is not a flight count. `FLIGHT_CONFIG` selects
+an alternative complete entrypoint. Capture, simulator startup and controller-state
+reconstruction all use that same file. The `flight_parameters.execution` section
+owns worker count, compression level and storage budgets. Set parallel captures
+in the entrypoint:
 
 ```yaml
-execution:
-  worker_count: 2
+flight_parameters:
+  execution:
+    worker_count: 2
 ```
 
-Shared `rates.command_rate_hz` and `rates.sample_rate_hz` come from the referenced
+`flight_parameters.stability` owns analysis settings. They are passed to the
+analyzer only after collection and processing, and do not enter physical flight
+definitions. The separate analysis report records the resolved settings and their
+content digest.
+
+Shared `rates.command_rate_hz` and `rates.sample_rate_hz` come from the composed
 experiment. The recording rate follows the command rate by default through YAML
 interpolation; an experiment can override recording independently. Response
 commands use the command rate, while every stage records at the sample rate.
@@ -82,8 +91,9 @@ Capture callbacks never invoke stability analysis. The next batch waits for
 every flight in the current batch to finish capture and postprocessing. Worker
 count changes scheduling, not stage commands or seed assignment. `definition.json` records the flight
 configuration, including the requested count, starting seed and resolved rates,
-excluding operational execution settings. Resume requires
-the same physical definition. Validation checks that the requested flights and stages
+excluding execution and stability settings. The recorded experiment path is
+derived from the selected input; it is not a second authored config reference.
+Resume requires the same physical definition. Validation checks that the requested flights and stages
 completed and that retained files are intact. Git state and unrelated repository
 changes do not affect capture validity.
 
@@ -232,6 +242,7 @@ without modifying producer files:
 
 ```sh
 PYTHONPATH=src uv run --with pyulog python make/scripts/run_flight_parameters_campaign.py \
+  --config configs/flight_parameters_x500.yaml \
   --analyze-run .build/flight-parameters/<id>/<current-run> \
   --compare-run .build/flight-parameters/<id>/<comparison-run> \
   --analysis-output .build/flight-parameters-stability/<analysis-run>/stability.json

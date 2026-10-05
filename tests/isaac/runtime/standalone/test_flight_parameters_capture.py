@@ -59,9 +59,7 @@ def test_complete_suite_preserves_one_policy_state_and_fixed_preparations(
     monkeypatch, sample_rate
 ) -> None:
     module = _load_script(monkeypatch)
-    config = load_flight_parameters_config(
-        path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
-    )
+    config = load_flight_parameters_config(path=REPO_ROOT / "configs/flight_parameters_x500.yaml")
     config = replace(config, sample_rate_hz=sample_rate)
     adapter = _adapter(module=module, config=config)
     assert adapter.policy_rate_hz == config.command_rate_hz == 20.0
@@ -88,9 +86,7 @@ def test_complete_suite_preserves_one_policy_state_and_fixed_preparations(
 
 def test_early_readiness_keeps_window_fixed_and_late_readiness_fails(monkeypatch) -> None:
     module = _load_script(monkeypatch)
-    config = load_flight_parameters_config(
-        path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
-    )
+    config = load_flight_parameters_config(path=REPO_ROOT / "configs/flight_parameters_x500.yaml")
     adapter = _adapter(module=module, config=config)
     state = adapter.initial_state
     for time_us in (0, 3_000_000, 3_500_000, 19_950_000):
@@ -108,9 +104,7 @@ def test_early_readiness_keeps_window_fixed_and_late_readiness_fails(monkeypatch
 @pytest.mark.parametrize("mode", ["velocity", "ctbr"])
 def test_rotational_commands_preserve_body_flu_signs(monkeypatch, mode) -> None:
     module = _load_script(monkeypatch)
-    config = load_flight_parameters_config(
-        path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
-    )
+    config = load_flight_parameters_config(path=REPO_ROOT / "configs/flight_parameters_x500.yaml")
     stage = next(stage for stage in config.stages[1:] if stage.control_mode == mode)
     command = replace(stage.commands[0], yaw_rate_radps=0.2, body_rate_flu_radps=(0.1, 0.2, 0.3))
     config = replace(config, stages=(config.stages[0], replace(stage, commands=(command,))))

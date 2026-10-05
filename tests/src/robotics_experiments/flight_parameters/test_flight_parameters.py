@@ -30,19 +30,16 @@ from robotics_experiments.flight_parameters.px4_evidence import (
 from tests.support.paths import REPO_ROOT
 
 
-def _config(tmp_path: Path, repetitions: int = 2, /):
-    payload = cast(
-        dict[str, Any],
-        OmegaConf.to_container(
-            OmegaConf.load(REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml")
-        ),
+def _config(repetitions: int = 2, /):
+    config = load_flight_parameters_config(path=REPO_ROOT / "configs/flight_parameters_x500.yaml")
+    hover = replace(config.hover, mode_transition_timeout_s=3.0, settle_s=2.0, measure_s=1.0)
+    return replace(
+        config,
+        flight_count=repetitions,
+        start_seed=1,
+        stages=(replace(config.stages[0], hover=hover), *config.stages[1:]),
+        sample_rate_hz=2.0,
     )
-    payload["flight_count"] = repetitions
-    payload["start_seed"] = 1
-    payload["stages"][0]["hover"].update(mode_transition_timeout_s=3.0, settle_s=2.0, measure_s=1.0)
-    path = tmp_path / "flight.yaml"
-    path.write_text(OmegaConf.to_yaml(OmegaConf.create(payload)))
-    return replace(load_flight_parameters_config(path=path), sample_rate_hz=2.0)
 
 
 def _array(values, dtype=float):
@@ -138,7 +135,7 @@ def _raw(config) -> RawFlightTrace:
 
 @pytest.mark.parametrize("sample_rate", [2.0, 4.0])
 def test_px4_verification_selects_only_auto_loiter_samples(tmp_path: Path, sample_rate) -> None:
-    config = replace(_config(tmp_path, 1), sample_rate_hz=sample_rate)
+    config = replace(_config(1), sample_rate_hz=sample_rate)
     verification, trace = verify_px4_hover_evidence(
         config=config,
         raw=_raw(config),
@@ -165,7 +162,7 @@ def test_px4_verification_selects_only_auto_loiter_samples(tmp_path: Path, sampl
 
 
 def test_px4_verification_window_does_not_follow_loiter_report_time(tmp_path: Path) -> None:
-    config = _config(tmp_path)
+    config = _config()
     traces = []
     for loiter_time in (12_500_000, 13_000_000):
         log = _parsed_log()
@@ -186,7 +183,7 @@ def test_px4_verification_window_does_not_follow_loiter_report_time(tmp_path: Pa
 
 
 def test_px4_verification_rejects_late_loiter_without_moving_window(tmp_path: Path) -> None:
-    config = _config(tmp_path)
+    config = _config()
     log = _parsed_log()
     log.vehicle_status["timestamp"][2] = 13_500_000
     with pytest.raises(ValueError, match="transition exceeded the configured timeout"):
@@ -202,7 +199,7 @@ def test_px4_verification_rejects_late_loiter_without_moving_window(tmp_path: Pa
 def test_px4_verification_rejects_takeoff_or_navigation_during_measurement(
     tmp_path: Path,
 ) -> None:
-    config = _config(tmp_path, 1)
+    config = _config(1)
     with pytest.raises(ValueError, match="left AUTO_LOITER"):
         verify_px4_hover_evidence(
             config=config,
@@ -239,7 +236,7 @@ def test_px4_verification_rejects_takeoff_or_navigation_during_measurement(
 
 
 def test_external_offboard_commands_after_hover_are_allowed(tmp_path: Path) -> None:
-    config = _config(tmp_path)
+    config = _config()
     log = _parsed_log(commands=(400, 22, 192))
     log.vehicle_command["timestamp"][-1] = 16_100_000
     verification, _ = verify_px4_hover_evidence(
@@ -249,9 +246,7 @@ def test_external_offboard_commands_after_hover_are_allowed(tmp_path: Path) -> N
 
 
 def test_canonical_suite_preserves_physical_commands_and_seed_order() -> None:
-    config = load_flight_parameters_config(
-        path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
-    )
+    config = load_flight_parameters_config(path=REPO_ROOT / "configs/flight_parameters_x500.yaml")
     assert config.flight_count == 10
     assert len(config.stages) == 24
     assert config.stages[0].kind == "hover"
@@ -283,12 +278,12 @@ def test_canonical_suite_preserves_physical_commands_and_seed_order() -> None:
 def test_invalid_campaign_size_fails(count) -> None:
     with pytest.raises(ValueError, match="flight_count"):
         load_flight_parameters_config(
-            path=REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml", flight_count=count
+            path=REPO_ROOT / "configs/flight_parameters_x500.yaml", flight_count=count
         )
 
 
 def test_count_override_changes_identity_without_changing_stages() -> None:
-    path = REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml"
+    path = REPO_ROOT / "configs/flight_parameters_x500.yaml"
     a = load_flight_parameters_config(path=path)
     b = load_flight_parameters_config(path=path, flight_count=23)
     assert a.stages == b.stages
@@ -440,21 +435,27 @@ def test_stability_resamples_whole_flights_and_requires_comparison_batches(tmp_p
     a = _dataset(root=tmp_path, run_id="run-a")
     b = _dataset(root=tmp_path, run_id="run-b")
     c = _dataset(root=tmp_path, run_id="run-c", seed_offset=100)
-    settings = REPO_ROOT / "configs/flight/stability/default.yaml"
+    settings = _config().stability
     report = analyze_flight_parameters_stability(
-        run_dir=a, comparison_run_dirs=(), settings_path=settings
+        run_dir=a, comparison_run_dirs=(), settings=settings
     )
     assert report.status == "insufficient-evidence"
+    assert (
+        report.settings_sha256
+        == hashlib.sha256(
+            json.dumps(asdict(settings), sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
     assert report.runs[0].hover[0].sample_count == 200
     assert report.runs[0].response[0].flight_count == 10
     report = analyze_flight_parameters_stability(
-        run_dir=a, comparison_run_dirs=(b, c), settings_path=settings
+        run_dir=a, comparison_run_dirs=(b, c), settings=settings
     )
     assert report.status == "pass"
     assert report.comparisons[0].population[0].current_flights == 10
     bad = _dataset(root=tmp_path, run_id="bad", shift=0.1)
     report = analyze_flight_parameters_stability(
-        run_dir=bad, comparison_run_dirs=(a,), settings_path=settings
+        run_dir=bad, comparison_run_dirs=(a,), settings=settings
     )
     assert report.status == "fail"
     assert report.runs[0].hover[0].excursion_flight_count == 10
@@ -535,9 +536,11 @@ def test_campaign_identity_and_resume_preserve_evidence(
 
     monkeypatch.setitem(globals_, "_publish_campaign", interrupted_analysis)
     monkeypatch.chdir(tmp_path)
+    for name in ("base.yaml", "experiment", "airframes"):
+        (tmp_path / name).symlink_to(REPO_ROOT / "configs" / name)
     config_path = tmp_path / "flight.yaml"
     config_path.write_text(
-        (REPO_ROOT / "configs/flight/holybro_x500_v2_suite.yaml")
+        (REPO_ROOT / "configs/flight_parameters_x500.yaml")
         .read_text()
         .replace("worker_count: 1", f"worker_count: {workers}")
     )
@@ -576,6 +579,7 @@ def test_campaign_identity_and_resume_preserve_evidence(
     }
     definition = json.loads((directory.parents[1] / "definition.json").read_text())
     assert definition["flight_count"] == flight_count and len(definition["stages"]) == 24
+    assert "execution" not in definition and "stability" not in definition
     dataset = load_flight_dataset(directory.parents[1])
     assert [(flight.flight_index, flight.seed) for flight in dataset.flights] == [
         (index, definition["start_seed"] + index) for index in range(flight_count)

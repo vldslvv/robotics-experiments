@@ -9,6 +9,11 @@ exported here.
 from robotics_experiments.config._commanding import RoutineStepConfig
 from robotics_experiments.config._curriculum import CurriculumConfig, CurriculumStageConfig
 from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
+from robotics_experiments.config._flight_parameters import (
+    FlightExecutionConfig,
+    FlightPreparation,
+    FlightStabilityConfig,
+)
 from robotics_experiments.config._px4 import Px4BridgeConfig
 from robotics_experiments.config._rl import (
     HoverTaskConfig,
@@ -52,6 +57,9 @@ __all__ = [
     "BoundingBox",
     "DroneSpawnConfig",
     "ExperimentConfig",
+    "FlightExecutionConfig",
+    "FlightPreparation",
+    "FlightStabilityConfig",
     "HoverTaskConfig",
     "IsaacLabVehicleConfig",
     "LightSwitchConfig",

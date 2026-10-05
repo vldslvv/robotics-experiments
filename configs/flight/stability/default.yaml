@@ -1,8 +1,0 @@
-# Analysis only; these values never enter capture or derived flight parameters.
-excursion_horizontal_m: 0.05
-drift_window_s: 5.0
-bootstrap_repetitions: 2000
-bootstrap_seed: 42017
-confidence: 0.95
-relative_change_limit: 0.10
-minimum_flights: 10

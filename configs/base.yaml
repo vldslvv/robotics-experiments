@@ -10,6 +10,8 @@ rates:
   command_rate_hz: 20.0
   sample_rate_hz: ${rates.command_rate_hz}
 
+flight_parameters: null
+
 flight_benchmark:
   airborne_duration_s: 5.0
 

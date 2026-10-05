@@ -45,15 +45,19 @@ Specialized experiment entrypoints stay at the config root:
 `flight_benchmark.yaml` / `flight_benchmark_takeoff_quad.yaml` wrap the circle
 and single-drone flights with longer cold-start bridge deadlines. The two calibration experiments inherit the common environment in
 `experiment/calibration/x500.yaml`, including deterministic sensor settings and
-high-rate logging. Training curricula and stage experiments remain under
-`configs/train/`.
+high-rate logging. The flight entrypoint also contains the complete
+`flight_parameters` block: identity, seed/count, preparation, stages, execution
+and final stability settings. Other experiments use `flight_parameters: null`.
+The core loader composes and freezes this block; the flight module owns physical
+validation and final analysis. Training curricula and stage experiments remain
+under `configs/train/`.
 
 ## Root structure
 
 The root contains only execution-wide configuration:
 
-- `sim`, `rates`, `switches`, `rl`, `scene`, `driver`, `flight_benchmark`, and
-  `alignment`;
+- `sim`, `rates`, `switches`, `rl`, `scene`, `driver`, `flight_benchmark`,
+  `alignment`, and optional `flight_parameters`;
 - `vehicles`, an ordered mapping of complete per-vehicle configs.
 
 `configs/base.yaml` composes the global groups only. Vehicle-specific `spawn`,
@@ -100,9 +104,9 @@ reproducibility must still be verified with replicate captures.
 `driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and
 `rates.command_rate_hz` drives capture commands, alignment and new training.
 `rates.sample_rate_hz` defaults to `${rates.command_rate_hz}` in `base.yaml` and
-may be overridden independently for recording. Flight suites and alignment
-definitions resolve these values from their referenced experiment rather than
-authoring separate rate literals. Switch activation runs every physics step
+may be overridden independently for recording. Flight capture resolves these
+values from its single experiment entrypoint; alignment definitions resolve them
+from their referenced experiment. Switch activation runs every physics step
 using `switches.model.confirmation_s`, independently of policy cadence. Exported artifacts own evaluation and
 deployment policy rate. All rates must be finite and positive; authored or
 artifact policy cadence and setpoint rates cannot exceed the driver rate, and

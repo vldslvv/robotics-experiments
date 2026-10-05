@@ -5,14 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
-from omegaconf import OmegaConf
 
+from robotics_experiments.config import FlightStabilityConfig
 from robotics_experiments.flight_parameters._dataset import (
     FlightDataset,
     _hover_trace,
@@ -29,17 +29,6 @@ from robotics_experiments.flight_parameters._models import (
 )
 
 __all__: list[str] = []
-
-
-@dataclass(frozen=True)
-class _Settings:
-    excursion_horizontal_m: float
-    drift_window_s: float
-    bootstrap_repetitions: int
-    bootstrap_seed: int
-    confidence: float
-    relative_change_limit: float
-    minimum_flights: int
 
 
 @dataclass(frozen=True)
@@ -128,18 +117,15 @@ class StabilityReport:
 
     artifact_kind: str
     schema_version: int
-    settings: _Settings
+    settings: FlightStabilityConfig
     settings_sha256: str
     runs: tuple[_RunSummary, ...]
     comparisons: tuple[_Comparison, ...]
     status: str
 
 
-def _settings(path: Path, /) -> _Settings:
-    payload = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
-    if not isinstance(payload, dict) or set(payload) != set(_Settings.__annotations__):
-        raise ValueError("stability settings fields mismatch")
-    payload = cast(dict[str, Any], payload)
+def _validate_settings(settings: FlightStabilityConfig, /) -> None:
+    payload = asdict(settings)
     for key, value in payload.items():
         if isinstance(value, bool) or not isinstance(value, int | float) or not np.isfinite(value):
             raise ValueError(f"stability {key} must be finite numeric")
@@ -150,7 +136,6 @@ def _settings(path: Path, /) -> _Settings:
             raise ValueError(f"stability {key} must be positive")
     if not 0 < payload["confidence"] < 1 or not 0 < payload["relative_change_limit"] < 1:
         raise ValueError("stability confidence and relative change limit must be between 0 and 1")
-    return _Settings(**payload)
 
 
 def _digest(path: Path, /) -> str:
@@ -169,7 +154,7 @@ def _horizontal(trace: FlightTrace, /) -> np.ndarray:
 
 
 def _hover_summary(
-    *, identity: str, traces: tuple[FlightTrace, ...], settings: _Settings
+    *, identity: str, traces: tuple[FlightTrace, ...], settings: FlightStabilityConfig
 ) -> _HoverSummary:
     by_signal: dict[tuple[str, str], list[np.ndarray]] = {}
     excursion_samples = excursion_flights = excursion_count = 0
@@ -367,7 +352,7 @@ def _population(
     signal: str,
     reference: tuple[np.ndarray, ...],
     current: tuple[np.ndarray, ...],
-    settings: _Settings,
+    settings: FlightStabilityConfig,
 ) -> tuple[_PopulationComparison, ...]:
     a, b = reference, current
     if (
@@ -464,7 +449,7 @@ def _response_population(
     *,
     reference: tuple[dict[str, Any], ...],
     current: tuple[dict[str, Any], ...],
-    settings: _Settings,
+    settings: FlightStabilityConfig,
 ) -> tuple[_PopulationComparison, ...]:
     # Each profile is repeated in independent flights. Profiles and their time
     # samples within one flight never count as independent repetitions.
@@ -551,10 +536,10 @@ def _load_run(
 
 
 def analyze_flight_parameters_stability(
-    *, run_dir: Path, comparison_run_dirs: tuple[Path, ...], settings_path: Path
+    *, run_dir: Path, comparison_run_dirs: tuple[Path, ...], settings: FlightStabilityConfig
 ) -> StabilityReport:
     """Analyze finished unsplit flights; exact sample differences are diagnostic."""
-    settings = _settings(settings_path)
+    _validate_settings(settings)
     paths = tuple(path.resolve(strict=True) for path in (run_dir, *comparison_run_dirs))
     if len(set(paths)) != len(paths):
         raise ValueError("stability comparisons require distinct producer runs")
@@ -713,7 +698,11 @@ def analyze_flight_parameters_stability(
         artifact_kind="robotics-experiments-flight-parameters-stability",
         schema_version=1,
         settings=settings,
-        settings_sha256=_digest(settings_path),
+        settings_sha256=hashlib.sha256(
+            json.dumps(
+                asdict(settings), sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
+        ).hexdigest(),
         runs=tuple(summaries),
         comparisons=tuple(comparisons),
         status=status,

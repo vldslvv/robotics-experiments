@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from robotics_experiments.config import (
+    FlightExecutionConfig,
+    FlightPreparation,
+    FlightStabilityConfig,
+)
+
 __all__: list[str] = []
 
 Vector3 = tuple[float, float, float]
@@ -22,17 +28,6 @@ class HoverConfig:
     measure_s: float
     target_position_enu_m: Vector3
     target_yaw_rad: float
-
-
-@dataclass(frozen=True)
-class FlightExecutionConfig:
-    """Campaign scheduling, compression and storage settings."""
-
-    worker_count: int
-    gzip_level: int
-    minimum_free_bytes: int
-    raw_flight_budget_bytes: int
-    estimated_archive_bytes_per_flight: int
 
 
 @dataclass(frozen=True)
@@ -60,21 +55,6 @@ class FlightStage:
 
 
 @dataclass(frozen=True)
-class FlightPreparation:
-    """Fixed response preparation schedule and readiness requirements."""
-
-    pusher_deployed: bool
-    minimum_neutral_s: float
-    stable_hold_s: float
-    timeout_s: float
-    recenter_gain_hz: float
-    recenter_max_speed_mps: float
-    max_linear_speed_mps: float
-    max_angular_speed_radps: float
-    max_tilt_deg: float
-
-
-@dataclass(frozen=True)
 class FlightParametersConfig:
     """Strict v1 input contract for one flight-parameter campaign."""
 
@@ -90,6 +70,7 @@ class FlightParametersConfig:
     stages: tuple[FlightStage, ...]
     preparation: FlightPreparation
     execution: FlightExecutionConfig
+    stability: FlightStabilityConfig
     command_rate_hz: float
     sample_rate_hz: float
     config_fingerprint: str
