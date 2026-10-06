@@ -1060,10 +1060,6 @@ class _TraceFileEvaluator:
         if self._path == path and self._payload is not None:
             return self._payload
         payload, offsets, failures = _index_candidate_diagnostics(path=path)
-        run_dir = path.parent if self._set_name == "train" else path.parent.parent
-        source_digest = json.loads((run_dir / "dataset.json").read_text())["source_digest"]
-        if payload["source_digest"] != source_digest:
-            raise RuntimeError(f"{path} was evaluated against a different reference recording")
         self._path = path
         self._payload = payload
         self._candidate_offsets = offsets
@@ -1111,14 +1107,6 @@ class _TraceFileEvaluator:
             path = run_dir / "target_candidates.json"
             key = _fingerprint(asdict(settings))
             payload = self._load_candidate_payload(path=path)
-        if payload.get("set_name") != self._set_name:
-            raise RuntimeError(f"{path} was captured for a different recording set")
-        if payload.get("schema_version") != _TRACE_SCHEMA_VERSION:
-            raise RuntimeError(f"{path} has an unsupported trace schema")
-        if payload.get("controller_id") != definition.controller_id:
-            raise RuntimeError(f"{path} was captured for a different controller")
-        if payload.get("definition_fingerprint") != definition.definition_fingerprint:
-            raise RuntimeError(f"{path} was captured from a different definition")
         if self._backend == "px4-sitl":
             raw_traces = payload.get(key)
         else:

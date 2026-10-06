@@ -1,33 +1,23 @@
-"""Strict flight-parameters trace, artifact, bundle, and publication IO."""
+"""Strict capture trace and numeric hover-summary parsing."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import math
-import os
-from dataclasses import asdict, fields
-from datetime import datetime
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
-from robotics_experiments.flight_parameters._evidence import (
-    flight_evidence_sha256,
-    resolve_flight_evidence,
-)
 from robotics_experiments.flight_parameters._models import (
     FlightParameters,
-    FlightParametersBundle,
     FlightTrace,
     HoverParameters,
-    HoverTraceStatistics,
     HoverVerification,
     Px4CommandEvent,
     Px4ModeEvent,
     Px4PositionGoalEvent,
     RawFlightTrace,
-    ResponseParameters,
-    ResponseTraceEvidence,
     SignalStatistics,
     UpperBound,
     VectorBounds,
@@ -38,7 +28,6 @@ __all__: list[str] = []
 _TRACE_KIND = "robotics-experiments-flight-parameters-trace"
 _RAW_TRACE_KIND = "robotics-experiments-flight-parameters-raw-trace"
 _VERIFICATION_KIND = "robotics-experiments-flight-parameters-px4-hover-verification"
-_FLIGHT_PARAMETERS_KIND = "robotics-experiments-flight-parameters"
 
 
 def _object(value: Any, name: str, /) -> dict[str, Any]:
@@ -97,14 +86,6 @@ def _quaternion(value: Any, name: str, /) -> tuple[float, float, float, float]:
     return result  # type: ignore[return-value]
 
 
-def _sha256(path: Path, /) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _digest(value: Any, name: str, /) -> str:
     result = _string(value, name)
     if len(result) != 64 or any(character not in "0123456789abcdef" for character in result):
@@ -112,24 +93,10 @@ def _digest(value: Any, name: str, /) -> str:
     return result
 
 
-def _artifact_fingerprint(payload: dict[str, Any], /) -> str:
-    """Return the canonical SHA-256 for a payload without its fingerprint."""
-
-    value = dict(payload)
-    value.pop("artifact_fingerprint", None)
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def _verification_fingerprint(payload: dict[str, Any], /) -> str:
     value = dict(payload)
     value.pop("verification_fingerprint", None)
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _evidence_fingerprint(fingerprints: tuple[str, ...], /) -> str:
-    encoded = json.dumps(fingerprints, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -350,8 +317,6 @@ def hover_verification_from_payload(value: Any, /) -> HoverVerification:
     if payload["artifact_kind"] != _VERIFICATION_KIND or payload["schema_version"] != 1:
         raise ValueError("hover verification is not the supported verification-v1 contract")
     fingerprint = _digest(payload["verification_fingerprint"], "verification_fingerprint")
-    if fingerprint != _verification_fingerprint(payload):
-        raise ValueError("hover verification fingerprint does not match its payload")
     raw_commands = payload["command_events"]
     raw_modes = payload["mode_events"]
     raw_goals = payload["position_goal_events"]
@@ -511,401 +476,31 @@ def _statistics_list(value: Any, name: str, /) -> tuple[SignalStatistics, ...]:
     return result
 
 
-def _hover_trace_statistics(value: Any, name: str, /) -> HoverTraceStatistics:
-    payload = _object(value, name)
-    _exact_dataclass(payload, HoverTraceStatistics, name)
-    full_window = _statistics_list(payload["full_window"], f"{name}.full_window")
-    policy_window = _statistics_list(payload["policy_window"], f"{name}.policy_window")
-    if tuple(item.name for item in full_window) != tuple(item.name for item in policy_window):
-        raise ValueError(f"{name} windows must use the same ordered signals")
-    full_count = _integer(
-        payload["full_window_sample_count"], f"{name}.full_window_sample_count", positive=True
-    )
-    policy_count = _integer(
-        payload["policy_window_sample_count"],
-        f"{name}.policy_window_sample_count",
-        positive=True,
-    )
-    if policy_count >= full_count:
-        raise ValueError(f"{name} policy window must exclude a non-empty warmup")
-    return HoverTraceStatistics(
-        trial_index=_integer(payload["trial_index"], f"{name}.trial_index", positive=True),
-        set_name=_set_name(payload["set_name"]),
-        seed=_seed(payload["seed"]),
-        full_window_sample_count=full_count,
-        policy_window_start_s=_finite(
-            payload["policy_window_start_s"], f"{name}.policy_window_start_s", positive=True
-        ),
-        policy_window_sample_count=policy_count,
-        full_window=full_window,
-        policy_window=policy_window,
-    )
-
-
-def _relative_path(value: Any, name: str, /) -> str:
-    result = Path(_string(value, name))
-    if result.is_absolute() or ".." in result.parts:
-        raise ValueError(f"{name} must be a relative bundle path")
-    return result.as_posix()
-
-
-def _response_trace(value: Any, name: str, /) -> ResponseTraceEvidence:
-    payload = _object(value, name)
-    _exact_dataclass(payload, ResponseTraceEvidence, name)
-    return ResponseTraceEvidence(
-        repetition=_integer(payload["repetition"], f"{name}.repetition", positive=True),
-        set_name=_set_name(payload["set_name"]),
-        seed=_seed(payload["seed"]),
-        profile_count=_integer(payload["profile_count"], f"{name}.profile_count", positive=True),
-        reference_path=_relative_path(payload["reference_path"], f"{name}.reference_path"),
-        reference_sha256=_digest(payload["reference_sha256"], f"{name}.reference_sha256"),
-        ulog_path=_relative_path(payload["ulog_path"], f"{name}.ulog_path"),
-        ulog_sha256=_digest(payload["ulog_sha256"], f"{name}.ulog_sha256"),
-        bridge_log_path=_relative_path(payload["bridge_log_path"], f"{name}.bridge_log_path"),
-        bridge_log_sha256=_digest(payload["bridge_log_sha256"], f"{name}.bridge_log_sha256"),
-    )
-
-
 def flight_parameters_from_payload(value: Any, /) -> FlightParameters:
-    """Validate an in-memory exact flight-parameters-v1 payload."""
-
+    """Validate the exact numeric hover summary shared by alignment and policies."""
     payload = _object(value, "flight parameters")
     _exact_dataclass(payload, FlightParameters, "flight parameters")
-    if payload["artifact_kind"] != _FLIGHT_PARAMETERS_KIND or payload["schema_version"] != 1:
-        raise ValueError("flight parameters is not the supported schema-1 contract")
-    if payload["behavior_kinds"] != ["hover", "controller-response"]:
-        raise ValueError("flight parameters behavior_kinds do not match schema 1")
-    fingerprint = _string(payload["artifact_fingerprint"], "artifact_fingerprint")
-    if fingerprint != _artifact_fingerprint(payload):
-        raise ValueError("flight parameters artifact_fingerprint does not match its payload")
     hover_payload = _object(payload["hover"], "hover")
     _exact_dataclass(hover_payload, HoverParameters, "hover")
     hover = HoverParameters(
-        position_error_enu_m=_vector_bounds(
-            hover_payload["position_error_enu_m"], "hover.position_error_enu_m"
-        ),
+        position_error_enu_m=_vector_bounds(hover_payload["position_error_enu_m"], "position"),
+        attitude_error_rpy_rad=_vector_bounds(hover_payload["attitude_error_rpy_rad"], "attitude"),
         horizontal_position_error_m=_upper_bound(
-            hover_payload["horizontal_position_error_m"],
-            "hover.horizontal_position_error_m",
+            hover_payload["horizontal_position_error_m"], "horizontal"
         ),
-        position_error_m=_upper_bound(hover_payload["position_error_m"], "hover.position_error_m"),
-        attitude_error_rpy_rad=_vector_bounds(
-            hover_payload["attitude_error_rpy_rad"], "hover.attitude_error_rpy_rad"
-        ),
-        tilt_error_rad=_upper_bound(hover_payload["tilt_error_rad"], "hover.tilt_error_rad"),
-        orientation_error_rad=_upper_bound(
-            hover_payload["orientation_error_rad"], "hover.orientation_error_rad"
-        ),
-        trace_statistics=tuple(
-            _hover_trace_statistics(item, f"hover.trace_statistics[{index}]")
-            for index, item in enumerate(hover_payload["trace_statistics"])
-        )
-        if isinstance(hover_payload["trace_statistics"], list)
-        else (),
-        acceptance_limits=_statistics_list(
-            hover_payload["acceptance_limits"], "hover.acceptance_limits"
-        ),
+        position_error_m=_upper_bound(hover_payload["position_error_m"], "position norm"),
+        tilt_error_rad=_upper_bound(hover_payload["tilt_error_rad"], "tilt"),
+        orientation_error_rad=_upper_bound(hover_payload["orientation_error_rad"], "orientation"),
+        acceptance_limits=_statistics_list(hover_payload["acceptance_limits"], "acceptance limits"),
     )
-    if not hover.trace_statistics:
-        raise ValueError("hover.trace_statistics must be a non-empty list")
-    if tuple(item.trial_index for item in hover.trace_statistics) != tuple(
-        range(1, len(hover.trace_statistics) + 1)
-    ):
-        raise ValueError("hover.trace_statistics must contain ordered trial indices")
-    response_payload = _object(payload["response"], "response")
-    _exact_dataclass(response_payload, ResponseParameters, "response")
-    if response_payload["kind"] != "controller-response":
-        raise ValueError("response kind must be 'controller-response'")
-    raw_response_traces = response_payload["traces"]
-    if not isinstance(raw_response_traces, list) or not raw_response_traces:
-        raise ValueError("response.traces must be a non-empty list")
-    response_traces = tuple(
-        _response_trace(item, f"response.traces[{index}]")
-        for index, item in enumerate(raw_response_traces)
-    )
-    for items in (hover.trace_statistics, response_traces):
-        if {item.set_name for item in items} != {"fit", "validation", "acceptance"}:
-            raise ValueError("flight evidence must include fit, validation, and acceptance sets")
-    seeds = tuple(item.seed for item in (*hover.trace_statistics, *response_traces))
-    if len(set(seeds)) != len(seeds):
-        raise ValueError("flight evidence must use distinct seeds for every flight")
-    response_repetitions = _integer(
-        response_payload["repetitions"], "response.repetitions", positive=True
-    )
-    if len(response_traces) != response_repetitions or tuple(
-        trace.repetition for trace in response_traces
-    ) != tuple(range(1, response_repetitions + 1)):
-        raise ValueError("response traces must cover every ordered repetition")
-    response = ResponseParameters(
-        kind="controller-response",
-        repetitions=response_repetitions,
-        traces=response_traces,
-    )
-    created_at_utc = _string(payload["created_at_utc"], "created_at_utc")
-    if not created_at_utc.endswith("Z"):
-        raise ValueError("created_at_utc must be an ISO-8601 UTC timestamp ending in Z")
-    try:
-        datetime.fromisoformat(created_at_utc.removesuffix("Z") + "+00:00")
-    except ValueError as exc:
-        raise ValueError("created_at_utc must be an ISO-8601 UTC timestamp") from exc
-    if type(payload["source_dirty"]) is not bool:
-        raise ValueError("source_dirty must be boolean")
-    hover_trial_count = _integer(payload["hover_trial_count"], "hover_trial_count", positive=True)
-    if len(hover.trace_statistics) != hover_trial_count:
-        raise ValueError("hover trace statistics must cover every trial")
     return FlightParameters(
-        artifact_kind=_FLIGHT_PARAMETERS_KIND,
-        schema_version=1,
-        flight_parameters_id=_string(payload["flight_parameters_id"], "flight_parameters_id"),
         run_id=_string(payload["run_id"], "run_id"),
-        created_at_utc=created_at_utc,
-        behavior_kinds=("hover", "controller-response"),
-        source_backend=_string(payload["source_backend"], "source_backend"),
-        state_source=_string(payload["state_source"], "state_source"),
-        experiment_config=_string(payload["experiment_config"], "experiment_config"),
-        vehicle=_string(payload["vehicle"], "vehicle"),
-        config_fingerprint=_string(payload["config_fingerprint"], "config_fingerprint"),
-        experiment_fingerprint=_string(payload["experiment_fingerprint"], "experiment_fingerprint"),
-        vehicle_fingerprint=_string(payload["vehicle_fingerprint"], "vehicle_fingerprint"),
-        source_image=_string(payload["source_image"], "source_image"),
-        source_commit=_string(payload["source_commit"], "source_commit"),
-        source_dirty=payload["source_dirty"],
-        evidence_fingerprint=_string(payload["evidence_fingerprint"], "evidence_fingerprint"),
-        hover_trial_count=hover_trial_count,
-        hover_sample_count=_integer(
-            payload["hover_sample_count"], "hover_sample_count", positive=True
-        ),
-        settle_s=_finite(payload["settle_s"], "settle_s", positive=True),
-        measure_s=_finite(payload["measure_s"], "measure_s", positive=True),
         sample_rate_hz=_finite(payload["sample_rate_hz"], "sample_rate_hz", positive=True),
         policy_warmup_s=_finite(payload["policy_warmup_s"], "policy_warmup_s", positive=True),
+        policy_window_s=_finite(payload["policy_window_s"], "policy_window_s", positive=True),
         position_margin_m=_finite(payload["position_margin_m"], "position_margin_m", positive=True),
         attitude_margin_rad=_finite(
             payload["attitude_margin_rad"], "attitude_margin_rad", positive=True
         ),
         hover=hover,
-        response=response,
-        artifact_fingerprint=fingerprint,
     )
-
-
-def _resolve_flight_parameters_path(path: str | Path, /) -> Path:
-    """Resolve an artifact file or immutable/publication bundle directory."""
-
-    artifact_path = Path(path)
-    return artifact_path / "flight_parameters.json" if artifact_path.is_dir() else artifact_path
-
-
-def load_flight_parameters(path: str | Path, /) -> FlightParameters:
-    """Load an exact flight-parameters-v1 artifact."""
-
-    artifact_path = _resolve_flight_parameters_path(path)
-    try:
-        return flight_parameters_from_payload(json.loads(artifact_path.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot load flight parameters {artifact_path}: {exc}") from exc
-
-
-def write_flight_parameters(*, flight_parameters: FlightParameters, run_dir: Path) -> Path:
-    """Write one new immutable flight-parameters payload."""
-
-    run_dir.mkdir(parents=True, exist_ok=True)
-    path = run_dir / "flight_parameters.json"
-    if path.exists():
-        raise FileExistsError(path)
-    pending = path.with_name(path.name + ".pending")
-    with pending.open("w", encoding="utf-8") as stream:
-        json.dump(
-            asdict(flight_parameters),
-            stream,
-            allow_nan=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        stream.write("\n")
-    load_flight_parameters(pending)
-    pending.replace(path)
-    return path
-
-
-def finalize_flight_parameters_bundle(run_dir: Path, /) -> Path:
-    """Inventory and validate every immutable payload in a completed run."""
-
-    flight_parameters = load_flight_parameters(run_dir)
-    manifest_path = run_dir / "manifest.json"
-    if manifest_path.exists():
-        raise FileExistsError(f"flight parameters manifest already exists: {manifest_path}")
-    pending = manifest_path.with_name("manifest.json.pending")
-    payloads = sorted(path for path in run_dir.rglob("*") if path.is_file() and path != pending)
-    if not payloads or not (run_dir / "flight_parameters.json").is_file():
-        raise ValueError("flight parameters bundle has no artifact payload")
-    manifest = {
-        "schema_version": 1,
-        "flight_parameters_id": flight_parameters.flight_parameters_id,
-        "run_id": flight_parameters.run_id,
-        "files": [
-            {
-                "role": (
-                    "flight-parameters" if path.name == "flight_parameters.json" else "evidence"
-                ),
-                "path": path.relative_to(run_dir).as_posix(),
-                "size_bytes": path.stat().st_size,
-                "sha256": _sha256(path),
-            }
-            for path in payloads
-        ],
-    }
-    with pending.open("w", encoding="utf-8") as stream:
-        json.dump(manifest, stream, allow_nan=False, separators=(",", ":"), sort_keys=True)
-        stream.write("\n")
-    _validate_bundle(bundle=run_dir, manifest_path=pending)
-    pending.replace(manifest_path)
-    return manifest_path
-
-
-def _validate_bundle(*, bundle: Path, manifest_path: Path) -> None:
-    flight_parameters = load_flight_parameters(bundle)
-    try:
-        manifest = _object(json.loads(manifest_path.read_text(encoding="utf-8")), "manifest")
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot load flight parameters manifest {manifest_path}: {exc}") from exc
-    if set(manifest) != {"schema_version", "flight_parameters_id", "run_id", "files"}:
-        raise ValueError("flight parameters manifest fields mismatch")
-    if (
-        manifest["schema_version"] != 1
-        or manifest["flight_parameters_id"] != flight_parameters.flight_parameters_id
-        or manifest["run_id"] != flight_parameters.run_id
-    ):
-        raise ValueError("flight parameters manifest identity mismatch")
-    entries = manifest["files"]
-    if not isinstance(entries, list) or not entries:
-        raise ValueError("flight parameters manifest files must be a non-empty list")
-    inventoried: set[Path] = set()
-    for index, raw_entry in enumerate(entries):
-        entry = _object(raw_entry, f"manifest.files[{index}]")
-        if set(entry) != {"role", "path", "size_bytes", "sha256"}:
-            raise ValueError(f"manifest.files[{index}] fields mismatch")
-        relative = Path(_string(entry["path"], f"manifest.files[{index}].path"))
-        if relative.is_absolute() or ".." in relative.parts or relative == Path("manifest.json"):
-            raise ValueError("flight parameters manifest paths must be relative payload paths")
-        if relative in inventoried:
-            raise ValueError(f"flight parameters manifest duplicates {relative}")
-        inventoried.add(relative)
-        path = bundle / relative
-        if not path.is_file() or path.stat().st_size != entry["size_bytes"]:
-            raise ValueError(f"flight parameters manifest size mismatch for {relative}")
-        if _sha256(path) != entry["sha256"]:
-            raise ValueError(f"flight parameters manifest hash mismatch for {relative}")
-    payloads = {
-        path.relative_to(bundle)
-        for path in bundle.rglob("*")
-        if path.is_file() and path != manifest_path
-    }
-    if inventoried != payloads:
-        raise ValueError("flight parameters manifest does not inventory every payload exactly once")
-    verification_fingerprints = []
-    for trial_index in range(1, flight_parameters.hover_trial_count + 1):
-        trial = bundle / "evidence" / f"trial-{trial_index:03d}"
-        raw_path = trial / "raw_trace.json"
-        ulog_path = resolve_flight_evidence(trial / "flight.ulg")
-        bridge_path = resolve_flight_evidence(trial / "bridge.log")
-        verification_path = trial / "hover_verification.json"
-        trace_path = trial / "trace.json"
-        if not all(
-            path.is_file()
-            for path in (raw_path, ulog_path, bridge_path, verification_path, trace_path)
-        ):
-            raise ValueError(f"flight parameters trial {trial_index} lacks verified hover evidence")
-        raw = load_raw_flight_trace(raw_path)
-        verification = load_hover_verification(verification_path)
-        trace = load_flight_trace(trace_path)
-        if (
-            raw.flight_parameters_id != flight_parameters.flight_parameters_id
-            or raw.campaign_run_id != flight_parameters.run_id
-            or raw.trial_index != trial_index
-            or verification.flight_parameters_id != flight_parameters.flight_parameters_id
-            or verification.campaign_run_id != flight_parameters.run_id
-            or verification.trial_index != trial_index
-            or trace.flight_parameters_id != flight_parameters.flight_parameters_id
-            or trace.campaign_run_id != flight_parameters.run_id
-            or trace.trial_index != trial_index
-        ):
-            raise ValueError(f"flight parameters trial {trial_index} evidence identity mismatch")
-        if verification.raw_trace_sha256 != _sha256(raw_path):
-            raise ValueError(f"flight parameters trial {trial_index} raw trace digest mismatch")
-        if verification.ulog_sha256 != flight_evidence_sha256(ulog_path):
-            raise ValueError(f"flight parameters trial {trial_index} ULog digest mismatch")
-        if trace.verification_fingerprint != verification.verification_fingerprint:
-            raise ValueError(f"flight parameters trial {trial_index} verification link mismatch")
-        statistics = flight_parameters.hover.trace_statistics[trial_index - 1]
-        if (raw.set_name, raw.seed) != (trace.set_name, trace.seed) or (
-            trace.set_name,
-            trace.seed,
-        ) != (statistics.set_name, statistics.seed):
-            raise ValueError(f"flight parameters trial {trial_index} set or seed mismatch")
-        verification_fingerprints.append(verification.verification_fingerprint)
-    response_fingerprints: list[str] = []
-    for trace in flight_parameters.response.traces:
-        for relative, expected_digest in (
-            (trace.reference_path, trace.reference_sha256),
-            (trace.ulog_path, trace.ulog_sha256),
-            (trace.bridge_log_path, trace.bridge_log_sha256),
-        ):
-            path = bundle / relative
-            if not path.is_file() or flight_evidence_sha256(path) != expected_digest:
-                raise ValueError(
-                    f"flight parameters response repetition {trace.repetition} hash mismatch "
-                    f"for {relative}"
-                )
-            response_fingerprints.append(expected_digest)
-        reference = _object(
-            json.loads((bundle / trace.reference_path).read_text()), "response reference"
-        )
-        if (reference.get("set_name"), reference.get("seed")) != (trace.set_name, trace.seed):
-            raise ValueError(f"response repetition {trace.repetition} set or seed mismatch")
-        samples = reference.get("traces")
-        if not isinstance(samples, list) or len(samples) != trace.profile_count:
-            raise ValueError(f"response repetition {trace.repetition} profile count mismatch")
-    if flight_parameters.evidence_fingerprint != _evidence_fingerprint(
-        tuple(verification_fingerprints) + tuple(response_fingerprints)
-    ):
-        raise ValueError("flight parameters evidence fingerprint mismatch")
-
-
-def validate_flight_parameters_bundle(run_dir: str | Path, /) -> None:
-    """Validate artifact identity plus exact manifest coverage and hashes."""
-
-    bundle = Path(run_dir)
-    _validate_bundle(bundle=bundle, manifest_path=bundle / "manifest.json")
-
-
-def load_flight_parameters_bundle(*, path: str | Path) -> FlightParametersBundle:
-    """Resolve and validate one immutable measurement bundle exactly once."""
-
-    run_dir = Path(path).resolve(strict=True)
-    if not run_dir.is_dir():
-        raise ValueError(f"flight parameters bundle must be a directory, got {run_dir}")
-    validate_flight_parameters_bundle(run_dir)
-    flight_parameters_path = run_dir / "flight_parameters.json"
-    manifest_path = run_dir / "manifest.json"
-    return FlightParametersBundle(
-        run_dir=run_dir,
-        flight_parameters=load_flight_parameters(flight_parameters_path),
-        flight_parameters_digest=_sha256(flight_parameters_path),
-        manifest_digest=_sha256(manifest_path),
-    )
-
-
-def publish_flight_parameters(run_dir: str | Path, /) -> Path:
-    """Atomically advance the relative ``latest`` link after bundle validation."""
-
-    immutable_run = Path(run_dir).resolve()
-    validate_flight_parameters_bundle(immutable_run)
-    root = immutable_run.parent
-    link = root / "latest"
-    relative_target = os.path.relpath(immutable_run, start=root)
-    temporary = root / f".latest.{os.getpid()}.tmp"
-    temporary.unlink(missing_ok=True)
-    temporary.symlink_to(relative_target, target_is_directory=True)
-    os.replace(temporary, link)
-    return link

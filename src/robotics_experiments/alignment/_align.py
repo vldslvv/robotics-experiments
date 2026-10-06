@@ -19,7 +19,6 @@ import robotics_experiments.alignment._metrics as metrics_module
 import robotics_experiments.controller.actuation as controller_actuation
 from robotics_experiments.alignment._evaluation import evaluate_response
 from robotics_experiments.alignment._flight_parameters import (
-    load_alignment_dataset,
     training_hover_limits,
 )
 from robotics_experiments.alignment._io import (
@@ -42,7 +41,7 @@ from robotics_experiments.alignment._models import (
     SettingValue,
 )
 from robotics_experiments.config import load_config
-from robotics_experiments.flight_parameters import FlightDataset
+from robotics_experiments.flight_parameters import FlightDataset, load_flight_selection
 
 __all__: list[str] = []
 
@@ -697,14 +696,9 @@ def align(
     """Fit on train flights, select on validation, and evaluate frozen settings on test."""
     _validate_pair(target, reference)
     run_dir = Path(os.environ["ROBOTICS_ALIGNMENT_RUN_DIR"])
-    dataset, membership = load_alignment_dataset(run_dir / "dataset.json")
+    dataset, membership = load_flight_selection(run_dir / "dataset.json")
     criteria = load_config(target.experiment_config).alignment.evaluation
-    hover_limits = training_hover_limits(
-        dataset=dataset,
-        membership=membership,
-        position_margin_m=criteria.hover_position_margin_m,
-        attitude_margin_rad=criteria.hover_attitude_margin_rad,
-    )
+    hover_limits = training_hover_limits(membership=membership)
     reference_traces = reference.evaluator.evaluate(
         definition=reference,
         settings=reference.base_settings,

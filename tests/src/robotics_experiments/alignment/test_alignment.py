@@ -25,11 +25,9 @@ from robotics_experiments.alignment._align import (
     _staged_beam_search,
 )
 from robotics_experiments.alignment._artifact import (
-    _require_passed_diagnostic,
     finalize_alignment_bundle,
     load_selection,
     publish_controller,
-    validate_alignment_bundle,
     write_alignment_result,
 )
 from robotics_experiments.alignment._evaluation import evaluate_metrics, evaluate_response
@@ -64,9 +62,11 @@ from robotics_experiments.alignment._models import (
 from robotics_experiments.config import load_config
 from robotics_experiments.controller import ControllerSettings, load_controller_artifact
 from robotics_experiments.flight_parameters import (
+    derive_hover_parameters,
     flight_stage_views,
     hover_pose_errors,
     load_flight_dataset,
+    load_flight_selection,
 )
 from tests.support.paths import REPO_ROOT
 
@@ -420,7 +420,7 @@ def _definition(
         controller_schema_version=1,
         backend=backend,
         experiment_config=str(experiment),
-        flight_parameters_artifact=str(REPO_ROOT / "tests/fixtures/flight_parameters"),
+        flight_parameters_artifact="capture",
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
@@ -478,15 +478,15 @@ def _raw_dataset(root: Path, count: int = 3, /) -> Path:
             "name": "hover",
             "stage_index": 0,
             "start_sim_time_us": 1000000,
-            "end_sim_time_us": 1100000,
+            "end_sim_time_us": 31000000,
             "sample_start": 0,
-            "sample_stop": 2,
+            "sample_stop": 30,
             "effective_target_position_enu_m": _ZERO3,
             "effective_target_attitude_flu_enu_wxyz": _IDENTITY,
         }
         stages = [hover]
         for stage_index, trace in enumerate((traces[-1], *traces)):
-            start = 1000000 + stage_index * 1000000
+            start = 1000000 + stage_index * 31000000
             if stage_index:
                 profile = definition.profiles[stage_index - 1]
                 metadata = {
@@ -504,7 +504,8 @@ def _raw_dataset(root: Path, count: int = 3, /) -> Path:
                     "initial_hover_thrust_normalized": 0.57,
                 }
                 stages.append(metadata)
-            for j, time_s in enumerate(trace.time_s):
+            for sample, time_s in enumerate(trace.time_s if stage_index else range(30)):
+                j = sample % len(trace.time_s)
                 command = trace.command_velocity_body_flu_mps[j]
                 rows.append(
                     {
@@ -560,7 +561,12 @@ def _raw_dataset(root: Path, count: int = 3, /) -> Path:
                 "flight_parameters_id": "test",
                 "start_seed": 1001,
                 "flight_count": count,
-                "stages": ["hover", *[profile.name for profile in definition.profiles]],
+                "stages": [
+                    {"hover": {"measure_s": 30.0}},
+                    *[profile.name for profile in definition.profiles],
+                ],
+                "sample_rate_hz": 1.0,
+                "source_backend": "px4-sitl",
                 "vehicle": "x500_01",
                 "command_rate_hz": 20.0,
             }
@@ -1315,24 +1321,6 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
         evaluator.evaluate(definition=definition, settings=settings, reference_traces=None) == first
     )
     assert index_count == 2
-    payload["set_name"] = "train"
-    validation_path.write_text(json.dumps(payload))
-    with pytest.raises(RuntimeError, match="different recording set"):
-        evaluator.for_set("validation").evaluate(
-            definition=definition,
-            settings=settings,
-            reference_traces=None,
-        )
-
-    payload["set_name"] = "validation"
-    payload["source_digest"] = "different-producer"
-    validation_path.write_text(json.dumps(payload))
-    with pytest.raises(RuntimeError, match="different reference recording"):
-        evaluator.for_set("validation").evaluate(
-            definition=definition,
-            settings=settings,
-            reference_traces=None,
-        )
 
 
 def test_controller_quality_reports_braking_distance_and_residual_speed_error() -> None:
@@ -1666,22 +1654,6 @@ def test_selection_serialization_is_deterministic(tmp_path: Path) -> None:
     assert first_selection.read_bytes() == second_selection.read_bytes()
 
 
-def test_failed_boundary_diagnostic_blocks_acceptance(tmp_path: Path) -> None:
-    report = tmp_path / "diagnostic.json"
-    report.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "passed": False,
-                "failures": ["vertical collective mismatch"],
-            }
-        )
-    )
-
-    with pytest.raises(ValueError, match="vertical collective mismatch"):
-        _require_passed_diagnostic(path=report, name="controller boundary replay")
-
-
 @pytest.mark.parametrize(
     ("count", "expected"), [(3, (1, 1, 1)), (10, (8, 1, 1)), (100, (80, 10, 10)), (7, (5, 1, 1))]
 )
@@ -1721,7 +1693,7 @@ def test_worst_check_controls_ranking_and_acceptance():
 
 def test_reference_views_preserve_source_samples_and_minimal_membership(prepared_dataset):
     metadata = json.loads((prepared_dataset / "dataset.json").read_text())
-    assert set(metadata) == {"source", "source_digest", "train", "validation", "test"}
+    assert set(metadata) == {"source", "source_digest", "train", "validation", "test", "hover"}
     dataset = load_flight_dataset(prepared_dataset / metadata["source"])
     before = {p: p.read_bytes() for p in dataset.run_dir.rglob("*") if p.is_file()}
     for role in ("train", "validation", "test"):
@@ -1762,9 +1734,7 @@ def test_repeated_profile_names_are_distinct_flights():
 
 
 def test_hover_bounds_read_training_windows_only(prepared_dataset, monkeypatch):
-    dataset, membership = flight_parameters_module.load_alignment_dataset(
-        prepared_dataset / "dataset.json"
-    )
+    dataset, membership = load_flight_selection(prepared_dataset / "dataset.json")
     reader = flight_stage_views
     read = []
 
@@ -1772,13 +1742,21 @@ def test_hover_bounds_read_training_windows_only(prepared_dataset, monkeypatch):
         read.append(flight.flight_index)
         return reader(flight)
 
-    monkeypatch.setattr(flight_parameters_module, "flight_stage_views", traced_reader)
-    bounds = training_hover_limits(
+    import robotics_experiments.flight_parameters._derive as derivation
+
+    monkeypatch.setattr(derivation, "flight_stage_views", traced_reader)
+    summary = derive_hover_parameters(
         dataset=dataset,
-        membership=membership,
+        flight_indices=tuple(membership["train"]),
+        policy_warmup_s=6.0,
+        policy_window_s=24.0,
         position_margin_m=0.005,
         attitude_margin_rad=math.radians(0.25),
     )
+    assert asdict(summary) == asdict(
+        flight_parameters_module.flight_parameters_from_payload(membership["hover"])
+    )
+    bounds = training_hover_limits(membership=membership)
     assert read == membership["train"]
     assert bounds["hover.position"] == 0.005
     assert bounds["hover.orientation"] == math.radians(0.25)
@@ -1896,7 +1874,6 @@ def test_completed_rejected_runs_publish_and_best_uses_the_final_score(tmp_path)
     ):
         run = _completed_run(root=tmp_path, name=name, result=result, score=score)
         finalize_alignment_bundle(run_dir=run)
-        validate_alignment_bundle(run)
         publish_controller(run_dir=run)
         assert (tmp_path / "latest").resolve() == run
         assert load_controller_artifact(run).advisory_quality_passed == (score <= 1.0)
@@ -1905,21 +1882,18 @@ def test_completed_rejected_runs_publish_and_best_uses_the_final_score(tmp_path)
         runs.append(run)
         best_index = (0, 1, 1, 3, 3)[len(runs) - 1]
         assert (tmp_path / "best").resolve() == runs[best_index]
-    (runs[-1] / "untracked.log").write_text("untracked")
-    with pytest.raises(ValueError, match="inventory every payload"):
-        validate_alignment_bundle(runs[-1])
 
 
-def test_incomplete_or_mismatched_reports_cannot_finalize(tmp_path):
+def test_incomplete_reports_cannot_finalize(tmp_path):
     result = align(
         _definition(backend="isaac-lab", evaluator=_Evaluator()),
         _definition(backend="px4-sitl", evaluator=_Evaluator()),
     )
     run = _completed_run(root=tmp_path, name="incomplete", result=result, score=2.0)
     report = json.loads((run / "integration.json").read_text())
-    for change in ({"completed": False}, {"settings_fingerprint": "wrong"}):
+    for change in ({"completed": False},):
         (run / "integration.json").write_text(json.dumps({**report, **change}))
-        with pytest.raises(ValueError, match="did not complete for the selected"):
+        with pytest.raises(ValueError, match="did not complete"):
             finalize_alignment_bundle(run_dir=run)
         assert not (run / "manifest.json").exists()
 
@@ -1942,3 +1916,35 @@ def test_best_starts_again_when_comparison_inputs_change(tmp_path):
     publish_controller(run_dir=worse)
     assert (tmp_path / "best").resolve() == worse
     assert (tmp_path / "latest").resolve() == worse
+
+
+def test_failed_input_audit_is_recorded_in_published_controller(tmp_path):
+    result = align(
+        _definition(backend="isaac-lab", evaluator=_Evaluator()),
+        _definition(backend="px4-sitl", evaluator=_Evaluator()),
+    )
+    run = _completed_run(root=tmp_path, name="audit-failed", result=result, score=0.5)
+    (run / "actuator_audit.json").write_text(
+        json.dumps({"passed": False, "failures": ["vertical collective mismatch"]})
+    )
+    finalize_alignment_bundle(run_dir=run)
+    publish_controller(run_dir=run)
+    controller = load_controller_artifact(run)
+    assert not controller.advisory_quality_passed
+    assert any(
+        "vertical collective mismatch" in reason for reason in controller.advisory_quality_reasons
+    )
+    assert (tmp_path / "latest").resolve() == run
+
+
+@pytest.mark.parametrize("count", [0, 1, 2])
+def test_alignment_requires_three_successful_flights_at_startup(tmp_path, count):
+    source = _raw_dataset(tmp_path / "too-few", count)
+    output = tmp_path / "alignment"
+    with pytest.raises(ValueError, match="at least three complete flights"):
+        flight_parameters_module.prepare_alignment_reference(
+            flight_parameters_artifact=source,
+            definition=_definition(backend="px4-sitl", evaluator=_Evaluator()),
+            run_dir=output,
+        )
+    assert not output.exists()

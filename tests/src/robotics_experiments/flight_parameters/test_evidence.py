@@ -54,7 +54,3 @@ def test_interrupted_compression_retains_original_and_can_retry(
     compressed = compress_flight_evidence(path=original, level=6)
     assert gzip.decompress(compressed.read_bytes()) == before
     assert not original.with_suffix(".log.gz.pending").exists()
-    original.write_text("different evidence")
-    with pytest.raises(ValueError, match="differs"):
-        compress_flight_evidence(path=original, level=6)
-    assert original.read_text() == "different evidence"

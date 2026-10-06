@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from robotics_experiments.config import RlPlateauCriteriaConfig
-from robotics_experiments.flight_parameters import SignalStatistics, load_flight_parameters
+from robotics_experiments.flight_parameters import SignalStatistics
 from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation, RewardMean
 from robotics_experiments.rl.press import (
     create_press_acceptance_criteria,
@@ -22,11 +22,10 @@ from robotics_experiments.rl.training.progress import (
     select_best_evaluation,
 )
 from robotics_experiments.rl.training.publication import publish_policy_labels
+from tests.support.flight_parameters import HOVER_PARAMETERS
 from tests.support.paths import REPO_ROOT
 
-_FLIGHT_PARAMETERS = load_flight_parameters(
-    REPO_ROOT / "tests/fixtures/flight_parameters/flight_parameters.json"
-)
+_FLIGHT_PARAMETERS = HOVER_PARAMETERS
 
 
 def _acceptance_criteria(config):
@@ -180,27 +179,27 @@ def test_comparison_fingerprint_tracks_effective_press_settings(*, stage_name: s
     fingerprint = _press_comparison_fingerprint(
         config=config,
         contract=contract,
-        flight_parameters_fingerprint="envelope-a",
+        alignment_comparison_fingerprint="envelope-a",
     )
     assert fingerprint == _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, max_body_velocity_mps=3.0),
-        flight_parameters_fingerprint="envelope-a",
+        alignment_comparison_fingerprint="envelope-a",
     )
     assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, obs_dim=contract.obs_dim + 1),
-        flight_parameters_fingerprint="envelope-a",
+        alignment_comparison_fingerprint="envelope-a",
     )
     assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=contract,
-        flight_parameters_fingerprint="envelope-b",
+        alignment_comparison_fingerprint="envelope-b",
     )
     assert fingerprint != _press_comparison_fingerprint(
         config=replace(config, rl=replace(config.rl, episode_length_s=50.0)),
         contract=contract,
-        flight_parameters_fingerprint="envelope-a",
+        alignment_comparison_fingerprint="envelope-a",
     )
 
 

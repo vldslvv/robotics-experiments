@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import fields, replace
-from pathlib import Path
 
 import numpy as np
 
@@ -12,7 +11,6 @@ from robotics_experiments.config import (
     PressApproachVelocityReferenceConfig,
     load_config,
 )
-from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.press import (
     HandoffGate,
     PressApproachExecutionParams,
@@ -23,6 +21,7 @@ from robotics_experiments.rl.press import (
     advance_press_approach_execution,
     initial_press_approach_execution_state,
 )
+from tests.support.flight_parameters import HOVER_PARAMETERS
 from tests.support.paths import REPO_ROOT
 
 _GOAL = PressApproachGoalConfig(
@@ -58,9 +57,7 @@ _GATE = HandoffGate(
     body_z_alignment_min=0.965926,
     estimator_health_min=0.80,
 )
-_ENVELOPE = load_flight_parameters(
-    Path(__file__).parents[4] / "fixtures/flight_parameters/flight_parameters.json"
-)
+_ENVELOPE = HOVER_PARAMETERS
 
 
 def _observation(

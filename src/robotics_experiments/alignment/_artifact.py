@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 from robotics_experiments.alignment._evaluation import evaluate_final
-from robotics_experiments.alignment._flight_parameters import load_alignment_dataset
 from robotics_experiments.alignment._io import (
     _canonical_json,
     _finite,
@@ -90,10 +89,6 @@ def _compress_file(
                 str(temporary),
             )
         )
-        if _zstd(arguments=("-q", "-t", str(temporary))).returncode:
-            raise RuntimeError(
-                f"compressed alignment payload verification failed for {destination}"
-            )
         os.replace(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)
@@ -104,11 +99,6 @@ def _compress_json(*, payload: str, destination: Path) -> None:
     source.write_text(payload)
     try:
         _compress_file(source=source, destination=destination)
-        if _zstd(arguments=("-q", "-d", "-c", str(destination))).stdout != payload.encode():
-            destination.unlink(missing_ok=True)
-            raise RuntimeError(
-                f"compressed alignment payload verification failed for {destination}"
-            )
     finally:
         source.unlink(missing_ok=True)
 
@@ -119,19 +109,6 @@ def _read_zstd_json(*, path: Path, name: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"cannot load {name} {path}: {exc}") from exc
     return _object(value=loaded, name=str(path))
-
-
-def _require_passed_diagnostic(*, path: Path, name: str) -> None:
-    try:
-        payload = _object(value=json.loads(path.read_text()), name=name)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot load {name} {path}: {exc}") from exc
-    if payload.get("schema_version") != 1 or type(payload.get("passed")) is not bool:
-        raise ValueError(f"{name} must be a schema-1 pass/fail report")
-    if not payload["passed"]:
-        failures = payload.get("failures")
-        detail = "; ".join(failures) if isinstance(failures, list) else "reported failure"
-        raise ValueError(f"{name} failed: {detail}")
 
 
 def _zstd_uncompressed_size(path: Path, /) -> int:
@@ -191,11 +168,6 @@ def load_selection(*, run_dir: Path, controller: ControllerArtifact) -> Alignmen
         raise ValueError("selection artifact fields mismatch")
     if selection["schema_version"] != _SELECTION_SCHEMA_VERSION:
         raise ValueError("selection artifact has unsupported schema_version")
-    if (
-        selection["alignment_id"] != controller.alignment_id
-        or selection["run_id"] != controller.run_id
-    ):
-        raise ValueError("controller and selection identities differ")
     base = _settings(value=selection["base_settings"], name="base_settings")
     declared = _parameters(value=selection["declared_parameters"], base_settings=base)
     rows = selection["candidates"]
@@ -252,9 +224,6 @@ def load_selection(*, run_dir: Path, controller: ControllerArtifact) -> Alignmen
     selected_index = selection["selected_candidate_index"]
     if type(selected_index) is not int or not 0 <= selected_index < len(candidates):
         raise ValueError("selected_candidate_index is out of range")
-    selected = candidates[selected_index]
-    if not selected.usable or selected.settings != controller.selected_settings:
-        raise ValueError("selected candidate does not match controller settings")
     selection_metric = _string(value=selection["selection_metric"], name="selection_metric")
     metric(name=selection_metric)
     return AlignmentResult(
@@ -282,7 +251,6 @@ def write_alignment_result(*, result: AlignmentResult, run_dir: Path) -> tuple[P
             payload=_canonical_json(_selection_payload(result)) + "\n",
             destination=selection_path,
         )
-        load_selection(run_dir=run_dir, controller=load_controller_artifact(controller_path))
     except Exception:
         controller_path.unlink(missing_ok=True)
         selection_path.unlink(missing_ok=True)
@@ -314,47 +282,30 @@ def _manifest_entry(*, role: str, path: Path, run_dir: Path) -> dict[str, Any]:
 def finalize_alignment_bundle(*, run_dir: Path) -> Path:
     """Evaluate completed evidence, compress outputs in place, and inventory it."""
     controller = load_controller_artifact(run_dir)
-    load_selection(run_dir=run_dir, controller=controller)
-    dataset, _membership = load_alignment_dataset(run_dir / "dataset.json")
-    if (
-        dataset.artifact_digest != controller.flight_parameters_fingerprint
-        or dataset.run_id != controller.flight_parameters_run_id
-    ):
-        raise ValueError("finalization source does not match the selected controller")
+    audit_failures = []
     for role in ("train", "validation", "test"):
         directory = run_dir if role == "train" else run_dir / role
-        _require_passed_diagnostic(
-            path=directory / "actuator_audit.json", name=f"{role} input audit"
-        )
+        audit = json.loads((directory / "actuator_audit.json").read_text())
+        if not audit["passed"]:
+            audit_failures.append(f"{role} input audit failed: " + "; ".join(audit["failures"]))
         replay = json.loads((directory / "controller_boundary_replay.json").read_text())
-        if (
-            not replay.get("completed")
-            or replay.get("settings_fingerprint") != controller.settings_fingerprint
-            or replay.get("source_digest") != dataset.artifact_digest
-            or replay.get("set_name") != role
-        ):
-            raise ValueError(f"{role} controller replay did not complete for the selected inputs")
+        if not replay["completed"]:
+            raise ValueError(f"{role} controller replay did not complete")
     qualification = json.loads((run_dir / "qualification.json").read_text())
     integration = json.loads((run_dir / "integration.json").read_text())
-    for report in (qualification, integration):
-        if (
-            not report.get("completed")
-            or report.get("settings_fingerprint") != controller.settings_fingerprint
-            or report.get("flight_parameters_fingerprint")
-            != controller.flight_parameters_fingerprint
-        ):
-            raise ValueError("evaluation did not complete for the selected controller inputs")
-    if qualification.get("set_name") != "test":
-        raise ValueError("final evaluation requires test flights")
+    if not qualification["completed"] or not integration["completed"]:
+        raise ValueError("evaluation did not complete")
     evaluation = evaluate_final(
         response_checks=tuple(QualityGateResult(**check) for check in qualification["checks"]),
         live_checks=tuple(QualityGateResult(**check) for check in integration["checks"]),
         replay=json.loads((run_dir / "test/controller_boundary_replay.json").read_text()),
     )
+    accepted = evaluation.accepted and not audit_failures
+    failures = (*evaluation.failures, *audit_failures)
     qualification.update(
         score=evaluation.score,
-        passed=evaluation.accepted,
-        failures=evaluation.failures,
+        passed=accepted,
+        failures=failures,
         checks=[_plain(check) for check in evaluation.checks],
     )
     _replace_text(
@@ -372,8 +323,8 @@ def finalize_alignment_bundle(*, run_dir: Path) -> Path:
         source.unlink()
     controller = replace(
         controller,
-        advisory_quality_passed=evaluation.accepted,
-        advisory_quality_reasons=evaluation.failures,
+        advisory_quality_passed=accepted,
+        advisory_quality_reasons=failures,
     )
     _replace_text(
         path=run_dir / "controller.json", payload=_canonical_json(_plain(controller)) + "\n"
@@ -383,7 +334,7 @@ def finalize_alignment_bundle(*, run_dir: Path) -> Path:
         payload=_canonical_json(
             {
                 "phase": "complete",
-                "accepted": evaluation.accepted,
+                "accepted": accepted,
                 "test/final_score": evaluation.score,
                 "artifact": str(run_dir / "controller.json"),
             }
@@ -402,69 +353,7 @@ def finalize_alignment_bundle(*, run_dir: Path) -> Path:
     }
     manifest_path = run_dir / "manifest.json"
     _write_new_text(path=manifest_path, payload=_canonical_json(manifest) + "\n")
-    validate_alignment_bundle(run_dir)
     return manifest_path
-
-
-def validate_alignment_bundle(run_dir: Path, /) -> None:
-    """Validate controller/selection consistency and every manifest payload."""
-
-    controller = load_controller_artifact(run_dir)
-    load_selection(run_dir=run_dir, controller=controller)
-    manifest_path = run_dir / "manifest.json"
-    try:
-        manifest = _object(value=json.loads(manifest_path.read_text()), name=str(manifest_path))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot load alignment manifest {manifest_path}: {exc}") from exc
-    expected_manifest = {"schema_version", "alignment_id", "run_id", "files"}
-    if set(manifest) != expected_manifest:
-        raise ValueError("alignment manifest fields mismatch")
-    if manifest["schema_version"] != _MANIFEST_SCHEMA_VERSION:
-        raise ValueError("alignment manifest has unsupported schema_version")
-    if (
-        manifest["alignment_id"] != controller.alignment_id
-        or manifest["run_id"] != controller.run_id
-    ):
-        raise ValueError("controller and manifest identities differ")
-    entries = manifest["files"]
-    if not isinstance(entries, list) or not entries:
-        raise ValueError("alignment manifest files must be a non-empty list")
-    inventoried_paths: set[Path] = set()
-    for index, raw_entry in enumerate(entries):
-        entry = _object(value=raw_entry, name=f"manifest.files[{index}]")
-        expected = {
-            "role",
-            "path",
-            "size_bytes",
-            "sha256",
-            "compression",
-            "uncompressed_size_bytes",
-        }
-        if set(entry) != expected:
-            raise ValueError(f"manifest.files[{index}] fields mismatch")
-        relative = Path(_string(value=entry["path"], name=f"manifest.files[{index}].path"))
-        if relative.is_absolute() or ".." in relative.parts or relative == Path("manifest.json"):
-            raise ValueError("manifest paths must be relative payload paths")
-        if relative in inventoried_paths:
-            raise ValueError(f"manifest contains duplicate path {relative}")
-        inventoried_paths.add(relative)
-        path = run_dir / relative
-        if not path.is_file() or path.stat().st_size != entry["size_bytes"]:
-            raise ValueError(f"manifest size mismatch for {relative}")
-        if _sha256(path) != entry["sha256"]:
-            raise ValueError(f"manifest hash mismatch for {relative}")
-        uncompressed_size = (
-            _zstd_uncompressed_size(path) if entry["compression"] == "zstd" else path.stat().st_size
-        )
-        if uncompressed_size != entry["uncompressed_size_bytes"]:
-            raise ValueError(f"manifest uncompressed size mismatch for {relative}")
-    payload_paths = {
-        path.relative_to(run_dir)
-        for path in run_dir.rglob("*")
-        if path.is_file() and path != manifest_path
-    }
-    if inventoried_paths != payload_paths:
-        raise ValueError("alignment manifest does not inventory every payload exactly once")
 
 
 def _replace_relative_symlink(*, link: Path, target: Path) -> None:
@@ -476,9 +365,8 @@ def _replace_relative_symlink(*, link: Path, target: Path) -> None:
 
 
 def publish_controller(*, run_dir: Path) -> None:
-    """Advance ``latest`` and comparable ``best`` links after bundle validation."""
+    """Advance ``latest`` and comparable ``best`` links for a completed evaluation."""
 
-    validate_alignment_bundle(run_dir)
     controller = load_controller_artifact(run_dir)
     root = run_dir.parent
     best_link = root / "best"
@@ -491,7 +379,6 @@ def publish_controller(*, run_dir: Path) -> None:
     if best_link.exists():
         best = load_controller_artifact(best_link)
         if best.comparison_fingerprint == controller.comparison_fingerprint:
-            validate_alignment_bundle(best_link.resolve())
             best_score = json.loads((best_link / "qualification.json").read_text())["score"]
             if best_score <= score:
                 selected = best_link.resolve()

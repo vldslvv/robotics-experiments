@@ -92,11 +92,9 @@ def _preflight_policy_artifacts(
                 if contract.curriculum_stage == "hover":
                     load_hover_reset_bounds(
                         path=_artifact_path(
-                            artifact=config.rl.inputs.flight_parameters_artifact,
+                            artifact=metadata.dataset_path,
                             repo_root=repo_root,
                         ).resolve(strict=True),
-                        run_id=metadata.flight_parameters.run_id,
-                        digest=metadata.flight_parameters_digest,
                     )
             policies.append(
                 _ConfiguredPolicy(
@@ -159,11 +157,9 @@ def _press_approach_adapter(
             handoff_gate,
             hover_reset_bounds=load_hover_reset_bounds(
                 path=_artifact_path(
-                    artifact=config.rl.inputs.flight_parameters_artifact,
+                    artifact=loaded.metadata.dataset_path,
                     repo_root=repo_root,
                 ).resolve(strict=True),
-                run_id=loaded.metadata.flight_parameters.run_id,
-                digest=loaded.metadata.flight_parameters_digest,
             ),
         )
     feedback = config.rl.press.handoff

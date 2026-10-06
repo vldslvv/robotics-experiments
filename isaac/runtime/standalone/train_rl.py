@@ -3,14 +3,14 @@
 import argparse
 import json
 import os
+import pickle
 import signal
+import sys
 from pathlib import Path
 
 import torch
 
 from robotics_experiments.config import load_config, load_curriculum_config
-from robotics_experiments.rl.workflow import _load_pinned_policy_inputs
-from robotics_experiments.switches import SwitchAsset
 from robotics_experiments.workflows.isaac_lab.curriculum import run_curriculum
 from robotics_experiments.workflows.isaac_lab.training import LearnerCheckpoint, run_attempt
 
@@ -34,11 +34,6 @@ def main() -> None:
     parser.add_argument("--attempt-index", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--monitoring-dir", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--update-offset", type=int, help=argparse.SUPPRESS)
-    parser.add_argument("--controller-artifact", type=Path, help=argparse.SUPPRESS)
-    parser.add_argument("--controller-artifact-digest", help=argparse.SUPPRESS)
-    parser.add_argument("--flight-parameters-artifact", type=Path, help=argparse.SUPPRESS)
-    parser.add_argument("--flight-parameters-artifact-digest", help=argparse.SUPPRESS)
-    parser.add_argument("--switch-asset", type=json.loads, help=argparse.SUPPRESS)
     args, _unknown = parser.parse_known_args()
     for number in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(number, _interrupt)
@@ -58,38 +53,20 @@ def main() -> None:
     if any(
         value is None
         for value in (
-            args.switch_asset,
             args.attempt_index,
             args.monitoring_dir,
             args.update_offset,
-            args.controller_artifact,
-            args.controller_artifact_digest,
-            args.flight_parameters_artifact,
-            args.flight_parameters_artifact_digest,
         )
     ):
-        parser.error(
-            "attempt workers require their index, monitoring directory, update offset "
-            "and pinned evidence paths/digests"
-        )
+        parser.error("attempt workers require their index, monitoring directory and update offset")
     config = load_config(config_path)
     if (
         not 0 <= args.attempt_index < len(config.rl.training.attempt_seeds)
         or args.update_offset < 0
     ):
         parser.error("invalid attempt index or update offset")
-    inputs = _load_pinned_policy_inputs(
-        config=config,
-        switch_asset=SwitchAsset(
-            path=Path(args.switch_asset["path"]),
-            fingerprint=args.switch_asset["fingerprint"],
-            usd_digest=args.switch_asset["usd_digest"],
-        ),
-        controller_path=args.controller_artifact,
-        controller_digest=args.controller_artifact_digest,
-        flight_parameters_path=args.flight_parameters_artifact,
-        flight_parameters_digest=args.flight_parameters_artifact_digest,
-    )
+    # The parent supplies its prepared inputs over this private subprocess pipe.
+    inputs = pickle.load(sys.stdin.buffer)
     encoded = os.environ.get("RL_INITIAL_LEARNER")
     learner = LearnerCheckpoint(**json.loads(encoded)) if encoded else None
     from isaaclab.app import AppLauncher

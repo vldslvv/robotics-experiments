@@ -29,7 +29,11 @@ from robotics_experiments.controller import (
     load_controller_artifact,
     resolve_controller_path,
 )
-from robotics_experiments.flight_parameters import FlightParameters, load_flight_parameters_bundle
+from robotics_experiments.flight_parameters import (
+    FlightParameters,
+    flight_parameters_from_payload,
+    load_flight_selection,
+)
 from robotics_experiments.rl.hover import HoverResetSamples, load_hover_reset_samples
 from robotics_experiments.switches import SwitchAsset, load_switch_asset
 
@@ -46,6 +50,7 @@ class PolicyInputs:
     flight_parameters: FlightParameters
     flight_parameters_path: Path
     flight_parameters_digest: str
+    dataset_path: Path
     switch_asset: SwitchAsset
     hover_reset_samples: HoverResetSamples
 
@@ -81,6 +86,7 @@ def prepare_policy_inputs(
     repo_root: Path,
     controller_artifact: str | Path | None = None,
     flight_parameters_artifact: str | Path | None = None,
+    procedural_smoke: bool = False,
 ) -> PolicyInputs:
     """Load, validate, match, and pin the policy-training inputs."""
 
@@ -110,7 +116,7 @@ def prepare_policy_inputs(
         )
     if controller_mismatches:
         raise ValueError("controller artifact is incompatible: " + "; ".join(controller_mismatches))
-    if not controller.advisory_quality_passed:
+    if not procedural_smoke and not controller.advisory_quality_passed:
         raise ValueError(
             "controller artifact failed its quality checks: "
             + "; ".join(controller.advisory_quality_reasons)
@@ -120,58 +126,31 @@ def prepare_policy_inputs(
         authored=flight_parameters_artifact or config.rl.inputs.flight_parameters_artifact,
         repo_root=repo_root,
     )
-    bundle = load_flight_parameters_bundle(path=flight_parameters_path)
-    flight_parameters = bundle.flight_parameters
-    flight_mismatches = []
-    if flight_parameters.vehicle != vehicle_label:
-        flight_mismatches.append(f"vehicle {flight_parameters.vehicle!r} != {vehicle_label!r}")
-    if flight_parameters.source_backend != "px4-sitl":
-        flight_mismatches.append(
-            f"source backend {flight_parameters.source_backend!r} != 'px4-sitl'"
-        )
-    if flight_parameters.run_id != controller.flight_parameters_run_id:
-        flight_mismatches.append("run ID does not match the controller qualification")
-    if flight_parameters.artifact_fingerprint != controller.flight_parameters_fingerprint:
-        flight_mismatches.append("artifact fingerprint does not match the controller qualification")
-    if flight_mismatches:
-        raise ValueError("flight parameters are incompatible: " + "; ".join(flight_mismatches))
-
+    dataset_path = controller_path.parent / "dataset.json"
+    dataset, selection = load_flight_selection(dataset_path)
+    if flight_parameters_path.resolve(strict=True) not in (
+        dataset.run_dir,
+        dataset.run_dir / "flight_parameters.json",
+    ):
+        raise ValueError("capture source does not match the controller's dataset.json")
+    if (
+        dataset.definition["vehicle"] != vehicle_label
+        or dataset.definition["source_backend"] != "px4-sitl"
+    ):
+        raise ValueError("capture vehicle or source backend is incompatible")
+    parameters = flight_parameters_from_payload(selection["hover"])
     return PolicyInputs(
         switch_asset=load_switch_asset(model=config.switches.model, repo_root=repo_root),
         controller=controller,
         controller_path=controller_path,
         controller_digest=_file_sha256(controller_path),
-        flight_parameters=flight_parameters,
-        flight_parameters_path=bundle.run_dir,
-        flight_parameters_digest=bundle.flight_parameters_digest,
-        hover_reset_samples=load_hover_reset_samples(bundle=bundle),
-    )
-
-
-def _load_pinned_policy_inputs(
-    *,
-    config: ExperimentConfig,
-    switch_asset: SwitchAsset,
-    controller_path: Path,
-    controller_digest: str,
-    flight_parameters_path: Path,
-    flight_parameters_digest: str,
-) -> PolicyInputs:
-    """Load campaign inputs after verifying their process-boundary identity."""
-
-    resolved_controller = controller_path.resolve(strict=True)
-    if _file_sha256(resolved_controller) != controller_digest:
-        raise ValueError("controller artifact changed after campaign preparation")
-    bundle = load_flight_parameters_bundle(path=flight_parameters_path)
-    if bundle.flight_parameters_digest != flight_parameters_digest:
-        raise ValueError("flight parameters changed after campaign preparation")
-    return PolicyInputs(
-        switch_asset=load_switch_asset(model=config.switches.model, expected=switch_asset),
-        controller=load_controller_artifact(resolved_controller),
-        controller_path=resolved_controller,
-        controller_digest=controller_digest,
-        flight_parameters=bundle.flight_parameters,
-        flight_parameters_path=bundle.run_dir,
-        flight_parameters_digest=flight_parameters_digest,
-        hover_reset_samples=load_hover_reset_samples(bundle=bundle),
+        flight_parameters=parameters,
+        flight_parameters_path=dataset.run_dir,
+        flight_parameters_digest=dataset.artifact_digest,
+        dataset_path=dataset_path,
+        hover_reset_samples=load_hover_reset_samples(
+            dataset=dataset,
+            flight_indices=tuple(selection["train"]),
+            flight_parameters=parameters,
+        ),
     )

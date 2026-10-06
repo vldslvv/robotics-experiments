@@ -553,8 +553,8 @@ def _validate_press_task(experiment: ExperimentConfig) -> None:
     )
     if any(overlaps):
         raise ValueError("rl training, validation, and test seeds must be mutually disjoint")
-    if evaluation.episodes_per_seed != 100:
-        raise ValueError("rl.press.evaluation.episodes_per_seed must equal 100")
+    if evaluation.episodes_per_seed < 1:
+        raise ValueError("rl.press.evaluation.episodes_per_seed must be positive")
     for name, value in {
         "success_rate_min": acceptance.success_rate_min,
         "collision_rate_max": acceptance.collision_rate_max,

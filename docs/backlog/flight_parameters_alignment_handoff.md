@@ -7,15 +7,12 @@ hover bounds from native training-flight windows. See
 
 Remaining work:
 
-1. Adapt RL's qualified flight-parameter and reset-population reader to the raw
-   dataset and alignment-owned bounds, preserving exact source lineage and using
-   only training flights. RL currently requires its existing qualified artifact.
-2. Remove duplicated physical commands from controller definitions by reading the
+1. Remove duplicated physical commands from controller definitions by reading the
    canonical flight suite. Capture owns physical instructions; alignment owns
    profile interpretation and acceptance criteria.
-3. Validate the trained hover policy in PX4 after trajectory calibration. Keep
+2. Validate the trained hover policy in PX4 after trajectory calibration. Keep
    training noise and domain randomization separate from noise-free capture.
-4. Establish a new statistical baseline only after adequate repeated-seed and
+3. Establish a new statistical baseline only after adequate repeated-seed and
    disjoint-seed capture campaigns pass stability checks. A three-flight
    integration run is not evidence of distribution stability.
 

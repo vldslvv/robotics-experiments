@@ -11,10 +11,11 @@ import numpy as np
 import torch
 
 from robotics_experiments.flight_parameters import (
+    FlightDataset,
     FlightParameters,
-    FlightParametersBundle,
-    load_flight_parameters_bundle,
-    load_flight_trace,
+    flight_parameters_from_payload,
+    flight_stage_views,
+    load_flight_selection,
 )
 
 __all__ = [
@@ -192,106 +193,53 @@ def _multiply_quaternions(first: np.ndarray, second: np.ndarray, /) -> np.ndarra
     )
 
 
-def load_hover_reset_samples(*, bundle: FlightParametersBundle) -> HoverResetSamples:
-    """Load complete final-window states from each validated hover trace.
-
-    Position, attitude, and recorded world velocities come from the same sample
-    index in fitting flights. Validation and acceptance flights remain held out.
-    """
-
-    flight_parameters = bundle.flight_parameters
-    position_errors: list[tuple[float, float, float]] = []
-    attitude_errors: list[tuple[float, float, float, float]] = []
-    linear_velocities: list[tuple[float, float, float]] = []
-    angular_velocities: list[tuple[float, float, float]] = []
-    for statistics in flight_parameters.hover.trace_statistics:
-        if statistics.set_name != "fit":
+def load_hover_reset_samples(
+    *, dataset: FlightDataset, flight_indices: tuple[int, ...], flight_parameters: FlightParameters
+) -> HoverResetSamples:
+    """Read final-window states at paired original indices from training flights."""
+    count = round(flight_parameters.policy_window_s * flight_parameters.sample_rate_hz)
+    positions, attitudes, linear, angular = [], [], [], []
+    for flight in dataset.flights:
+        if flight.flight_index not in flight_indices:
             continue
-        trial_index = statistics.trial_index
-        trace = load_flight_trace(
-            bundle.run_dir / "evidence" / f"trial-{trial_index:03d}" / "trace.json"
-        )
-        target_position = np.asarray(trace.target_position_enu_m)
-        target_attitude = _normalize_quaternion(np.asarray(trace.target_attitude_flu_enu_wxyz))
-        target_attitude_inverse = target_attitude * np.asarray((1.0, -1.0, -1.0, -1.0))
-        policy_sample_count = statistics.policy_window_sample_count
-        positions = np.asarray(trace.position_enu_m, dtype=np.float64)
-        attitudes = np.asarray(trace.attitude_flu_enu_wxyz, dtype=np.float64)
-        attitudes /= np.linalg.norm(attitudes, axis=-1, keepdims=True)
-        trial_linear_velocities = np.asarray(trace.linear_velocity_enu_mps, dtype=np.float64)
-        trial_angular_velocities = np.asarray(trace.angular_velocity_enu_radps, dtype=np.float64)
-        for position, attitude, linear_velocity, angular_velocity in zip(
-            positions[-policy_sample_count:],
-            attitudes[-policy_sample_count:],
-            trial_linear_velocities[-policy_sample_count:],
-            trial_angular_velocities[-policy_sample_count:],
+        view = flight_stage_views(flight)[0]
+        target = np.asarray(view["effective_target_position_enu_m"])
+        inverse = _normalize_quaternion(
+            np.asarray(view["effective_target_attitude_flu_enu_wxyz"])
+        ) * (1.0, -1.0, -1.0, -1.0)
+        for position, attitude, velocity, rate in zip(
+            view["position_enu_m"][-count:],
+            view["attitude_flu_enu_wxyz"][-count:],
+            view["linear_velocity_enu_mps"][-count:],
+            view["angular_velocity_enu_radps"][-count:],
             strict=True,
         ):
-            position_error = np.asarray(position) - target_position
-            position_errors.append(
-                (
-                    float(position_error[0]),
-                    float(position_error[1]),
-                    float(position_error[2]),
-                )
-            )
-            relative_attitude = _normalize_quaternion(
-                _multiply_quaternions(
-                    target_attitude_inverse,
-                    _normalize_quaternion(np.asarray(attitude)),
-                )
-            )
-            if relative_attitude[0] < 0.0:
-                relative_attitude = -relative_attitude
-            attitude_errors.append(
-                (
-                    float(relative_attitude[0]),
-                    float(relative_attitude[1]),
-                    float(relative_attitude[2]),
-                    float(relative_attitude[3]),
-                )
-            )
-            linear_velocities.append(
-                (
-                    float(linear_velocity[0]),
-                    float(linear_velocity[1]),
-                    float(linear_velocity[2]),
-                )
-            )
-            angular_velocities.append(
-                (
-                    float(angular_velocity[0]),
-                    float(angular_velocity[1]),
-                    float(angular_velocity[2]),
-                )
-            )
-    expected_samples = sum(
-        trace.policy_window_sample_count
-        for trace in flight_parameters.hover.trace_statistics
-        if trace.set_name == "fit"
-    )
-    if len(position_errors) != expected_samples:
-        raise ValueError(
-            f"hover reset sample count {len(position_errors)} does not match "
-            f"flight parameters {expected_samples}"
-        )
-    if not position_errors:
-        raise ValueError("flight parameters contain no policy-window hover reset samples")
+            relative = _normalize_quaternion(_multiply_quaternions(inverse, np.asarray(attitude)))
+            if relative[0] < 0.0:
+                relative = -relative
+            positions.append(tuple(np.asarray(position) - target))
+            attitudes.append(tuple(relative))
+            linear.append(tuple(velocity))
+            angular.append(tuple(rate))
+    if not positions or len(positions) != count * len(flight_indices):
+        raise ValueError("training flights do not contain the complete hover reset population")
     return HoverResetSamples(
-        position_error_enu_m=tuple(position_errors),
-        attitude_error_flu_enu_wxyz=tuple(attitude_errors),
-        linear_velocity_enu_mps=tuple(linear_velocities),
-        angular_velocity_enu_radps=tuple(angular_velocities),
+        position_error_enu_m=tuple(positions),
+        attitude_error_flu_enu_wxyz=tuple(attitudes),
+        linear_velocity_enu_mps=tuple(linear),
+        angular_velocity_enu_radps=tuple(angular),
     )
 
 
 @lru_cache(maxsize=None)
-def load_hover_reset_bounds(*, path: Path, run_id: str, digest: str) -> HoverResetBounds:
-    """Validate immutable producer data before the bridge starts ticking."""
-    bundle = load_flight_parameters_bundle(path=path)
-    if bundle.flight_parameters_digest != digest or bundle.flight_parameters.run_id != run_id:
-        raise ValueError("hover handoff flight bundle does not match the policy's pinned input")
-    return load_hover_reset_samples(bundle=bundle).bounds()
+def load_hover_reset_bounds(*, path: Path) -> HoverResetBounds:
+    """Load training reset bounds before the bridge starts ticking."""
+    dataset, selection = load_flight_selection(path)
+    return load_hover_reset_samples(
+        dataset=dataset,
+        flight_indices=tuple(selection["train"]),
+        flight_parameters=flight_parameters_from_payload(selection["hover"]),
+    ).bounds()
 
 
 def _as_array(*, values: tuple[float, ...], reference: ArrayT) -> ArrayT:

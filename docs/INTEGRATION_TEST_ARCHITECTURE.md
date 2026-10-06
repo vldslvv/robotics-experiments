@@ -86,11 +86,11 @@ only after all flights complete. See `docs/FLIGHT_PARAMETERS.md`.
   independent of Stage 1's contact-failure termination. The gate
   selects the production press experiment config so its scripted post-contact
   ramp retains the authority required to cross the real latch threshold; it
-  resolves the config's accepted controller and complete flight-parameters
-  bundle to immutable run paths, validates their shared qualification lineage,
+  resolves the config's accepted controller, matching capture and alignment
+  selection to immutable run paths, validates their shared qualification lineage,
   and reports those canonical inputs before constructing the environment. It
   does not load or execute the policy named by that config. Its environment
-  receives the fitting-flight reset samples and explicit evaluation mode,
+  receives the training-flight reset samples and explicit evaluation mode,
   matching the production constructor contract. It is part of
   `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-approach-routine` runs the Stage 1 deployment

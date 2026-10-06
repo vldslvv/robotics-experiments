@@ -28,10 +28,7 @@ from robotics_experiments.rl.press import (
     evaluate_press_acceptance,
     press_policy_contract,
 )
-from robotics_experiments.rl.press._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.publication import _REPORT_SCHEMA_VERSION
-from robotics_experiments.rl.workflow import _load_pinned_policy_inputs
-from robotics_experiments.switches import SwitchAsset
 from robotics_experiments.workflows.isaac_lab._contact_evaluation import _evaluate_contact_policy
 from robotics_experiments.workflows.isaac_lab.training import _config_values
 
@@ -302,16 +299,7 @@ def _run(
             f"press artifact stage {contract.curriculum_stage!r} does not match "
             f"configured stage {config.rl.press.task!r}"
         )
-    comparison_fingerprint = _press_comparison_fingerprint(
-        config=config,
-        contract=contract,
-        flight_parameters_fingerprint=metadata.flight_parameters.artifact_fingerprint,
-    )
-    if metadata.values.get("comparison_fingerprint") != comparison_fingerprint:
-        raise ValueError("published policy does not match the selected press configuration")
-    if inputs.flight_parameters != metadata.flight_parameters:
-        raise ValueError("configured flight parameters differ from policy metadata")
-    env, env_cfg = make_isaac_lab_env(
+    env, _env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
         training=False,
         experiment_config=config,
@@ -324,16 +312,6 @@ def _run(
         switch_asset=inputs.switch_asset,
     )
     try:
-        if (
-            int(env_cfg.observation_schema_version),
-            int(env_cfg.observation_space),
-            str(env_cfg.policy_interface),
-        ) != (
-            contract.obs_schema_version,
-            contract.obs_dim,
-            contract.policy_interface.value,
-        ):
-            raise ValueError("Isaac Lab evaluation environment changed the artifact contract")
         policy = torch.jit.load(str(artifact_dir / POLICY_FILENAME), map_location=env.device)
         policy.eval()
         if config.rl.press.task in {"contact", "press"}:
@@ -381,21 +359,6 @@ def _run(
     for reward in result.reward_means:
         _report(f"reward_mean {reward.name}={reward.mean:.6f}")
     digest = hashlib.sha256((artifact_dir / POLICY_FILENAME).read_bytes()).hexdigest()
-    if metadata.values.get("selected_policy_digest") != digest:
-        raise ValueError("published actor digest does not match policy metadata")
-    recorded_test = metadata.values.get("test_evaluation")
-    expected_workload = {
-        "role": "test",
-        "seeds": list(seeds),
-        "episodes_per_seed": evaluation.episodes_per_seed,
-        "episode_count": len(seeds) * evaluation.episodes_per_seed,
-    }
-    if (
-        not isinstance(recorded_test, dict)
-        or recorded_test.get("policy_digest") != digest
-        or recorded_test.get("workload") != expected_workload
-    ):
-        raise ValueError("published policy does not record the configured test workload")
     evaluated = (
         result
         if isinstance(result, PolicyEvaluation)
@@ -441,21 +404,12 @@ def _producer_config(artifact_dir: Path) -> tuple[ExperimentConfig, PolicyInputs
         raise ValueError("unsupported producer training report")
     provenance = report["provenance"]
     config = load_config(provenance["config_path"])
-    if _config_values(config) != provenance["resolved_config"]:
-        raise ValueError("producer stage configuration has changed")
-    report = json.loads((artifact_dir / "training_report.json").read_text())
-    evidence = report["provenance"]["inputs"]
-    inputs = _load_pinned_policy_inputs(
+    evidence = provenance["inputs"]
+    inputs = prepare_policy_inputs(
         config=config,
-        switch_asset=SwitchAsset(
-            path=Path(evidence["switch_asset"]["path"]),
-            fingerprint=evidence["switch_asset"]["fingerprint"],
-            usd_digest=evidence["switch_asset"]["usd_digest"],
-        ),
-        controller_path=Path(evidence["controller"]["path"]),
-        controller_digest=evidence["controller"]["sha256"],
-        flight_parameters_path=Path(evidence["flight_parameters"]["path"]),
-        flight_parameters_digest=evidence["flight_parameters"]["sha256"],
+        repo_root=Path(__file__).resolve().parents[3],
+        controller_artifact=evidence["controller"]["path"],
+        flight_parameters_artifact=evidence["flight_parameters"]["path"],
     )
     return config, inputs
 

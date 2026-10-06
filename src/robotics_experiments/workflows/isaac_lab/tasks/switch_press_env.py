@@ -47,7 +47,6 @@ from robotics_experiments.rl.press.contact import (
 from robotics_experiments.switches import (
     ButtonLatchState,
     SwitchAsset,
-    load_switch_asset,
     step_button_latch,
 )
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
@@ -162,11 +161,7 @@ def make_switch_press_env_cfg(
         switch_cfg=ArticulationCfg(
             prim_path=_SWITCH_PRIM_PATH,
             spawn=UsdFileCfg(
-                usd_path=str(
-                    load_switch_asset(
-                        model=experiment_config.switches.model, expected=switch_asset
-                    ).path
-                ),
+                usd_path=str(switch_asset.path),
                 collision_props=sim_utils.CollisionPropertiesCfg(
                     collision_enabled=reset.physical_contact_enabled
                 ),

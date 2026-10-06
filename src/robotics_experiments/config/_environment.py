@@ -80,6 +80,8 @@ class _AlignmentEvaluationConfig(_FreezableConfig):
 
     response_limits: dict[str, float]
     live_limits: dict[str, float]
+    policy_warmup_s: float
+    policy_window_s: float
     hover_position_margin_m: float
     hover_attitude_margin_rad: float
 

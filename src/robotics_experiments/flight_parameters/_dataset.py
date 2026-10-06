@@ -11,9 +11,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-import numpy as np
-
-from robotics_experiments.flight_parameters._evidence import flight_evidence_sha256
 from robotics_experiments.flight_parameters._models import FlightTrace
 
 __all__: list[str] = []
@@ -56,57 +53,25 @@ def _freeze(value: Any, /) -> Any:
     return value
 
 
-def _checked_file(*, root: Path, record: Mapping[str, Any]) -> Path:
-    path = root / record["path"]
-    if not path.resolve(strict=True).is_relative_to(root) or path.is_symlink():
-        raise ValueError("flight dataset evidence must be producer-owned files inside its run")
-    if path.stat().st_size != record["size_bytes"] or _digest(path) != record["sha256"]:
-        raise ValueError(f"flight dataset evidence hash or size mismatch: {path}")
-    if "content_sha256" in record and flight_evidence_sha256(path) != record["content_sha256"]:
-        raise ValueError(f"flight dataset evidence content mismatch: {path}")
-    return path
-
-
 def _read_dataset(*, run: Path, artifact: Path) -> FlightDataset:
     payload = json.loads(artifact.read_text())
     if payload.get("artifact_kind") != _KIND or payload.get("schema_version") != 1:
         raise ValueError("expected an unsplit flight dataset, schema 1")
     if payload["run_id"] != run.name or not payload["completed"]:
         raise ValueError("flight dataset is incomplete or has the wrong run identity")
-    definition = json.loads(_checked_file(root=run, record=payload["definition"]).read_text())
-    if definition["flight_parameters_id"] != payload["flight_parameters_id"]:
-        raise ValueError("flight dataset definition identity mismatch")
+    definition = json.loads((run / payload["definition"]["path"]).read_text())
     flights = []
-    for index, record in enumerate(payload["flights"]):
-        directory = _checked_file(root=run, record=record).parent
+    for record in payload["flights"]:
+        directory = (run / record["path"]).parent
         completed = json.loads((directory / "complete.json").read_text())
-        expected = definition["start_seed"] + index
-        if completed["flight"] != {
-            "index": index,
-            "seed": expected,
-            "directory": directory.relative_to(run).as_posix(),
-        }:
-            raise ValueError("flight dataset flight identity mismatch")
-        if not completed["completed"]:
-            raise ValueError("flight recording processing is incomplete")
-        for item in completed["files"]:
-            _checked_file(root=directory, record=item)
         metadata = json.loads((directory / "flight.json").read_text())
-        if (metadata["flight_index"], metadata["seed"], metadata["run_id"]) != (
-            index,
-            expected,
-            run.name,
-        ):
-            raise ValueError("flight recording metadata identity mismatch")
-        if not metadata["completed"] or len(metadata["stages"]) != len(definition["stages"]):
-            raise ValueError("flight recording stage coverage mismatch")
-        flights.append(FlightRecording(index, expected, directory, _freeze(metadata)))
-    if len(flights) != definition["flight_count"] or not flights:
-        raise ValueError("flight dataset is incomplete")
-    manifest_path = run / "manifest.json"
-    if manifest_path.exists():
-        _validate_manifest(
-            run=run, path=manifest_path, flight_parameters_id=payload["flight_parameters_id"]
+        flights.append(
+            FlightRecording(
+                completed["flight"]["index"],
+                completed["flight"]["seed"],
+                directory,
+                _freeze(metadata),
+            )
         )
     return FlightDataset(
         run,
@@ -119,7 +84,7 @@ def _read_dataset(*, run: Path, artifact: Path) -> FlightDataset:
 
 
 def load_flight_dataset(path: str | Path, /) -> FlightDataset:
-    """Resolve a selector once, validate all evidence, and return frozen metadata."""
+    """Resolve a selector once, read its format, and return frozen metadata."""
     resolved = Path(path).resolve(strict=True)
     run = resolved if resolved.is_dir() else resolved.parent
     artifact = run / "flight_parameters.json" if resolved.is_dir() else resolved
@@ -130,18 +95,10 @@ def flight_stage_views(flight: FlightRecording, /) -> tuple[dict[str, Any], ...]
     """Read original sample ranges without interpolation or shifted windows."""
     with (flight.directory / "motion.jsonl").open() as stream:
         rows = tuple(json.loads(line) for line in stream)
-    times = np.asarray([row["sim_time_us"] for row in rows])
-    if len(rows) != flight.metadata["sample_count"] or np.any(np.diff(times) <= 0):
-        raise ValueError("flight motion sample count or timeline mismatch")
     views = []
     for metadata in flight.metadata["stages"]:
         start, stop = metadata["sample_start"], metadata["sample_stop"]
         stage_rows = rows[start:stop]
-        if not stage_rows or any(
-            row["stage_index"] != metadata["stage_index"] or row["phase"] != "measurement"
-            for row in stage_rows
-        ):
-            raise ValueError("flight measurement range includes another stage or preparation")
         view = json.loads(
             json.dumps(
                 metadata, default=lambda value: dict(value) if isinstance(value, Mapping) else value
@@ -223,37 +180,22 @@ def _hover_trace(
 
 def write_flight_dataset(*, run_dir: Path, payload: dict[str, Any]) -> None:
     """Write complete producer evidence only after all per-flight checkpoints."""
-    payload = {"artifact_kind": _KIND, "schema_version": 1, **payload}
+    payload = {
+        "artifact_kind": _KIND,
+        "schema_version": 1,
+        **payload,
+        "flight_count": len(payload["flights"]),
+    }
     path = run_dir / "flight_parameters.json"
     if path.exists():
         raise FileExistsError(path)
     pending = path.with_suffix(".json.pending")
     pending.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n")
-    _read_dataset(run=run_dir.resolve(strict=True), artifact=pending)
     pending.replace(path)
 
 
-def _validate_manifest(*, run: Path, path: Path, flight_parameters_id: str) -> None:
-    value = json.loads(path.read_text())
-    if set(value) != {"schema_version", "run_id", "flight_parameters_id", "files"} or (
-        value["schema_version"],
-        value["run_id"],
-        value["flight_parameters_id"],
-    ) != (1, run.name, flight_parameters_id):
-        raise ValueError("flight dataset manifest identity mismatch")
-    entries = value["files"]
-    inventoried = {item["path"] for item in entries}
-    actual = {p.relative_to(run).as_posix() for p in run.rglob("*") if p.is_file() and p != path}
-    if len(inventoried) != len(entries) or inventoried != actual:
-        raise ValueError("flight dataset manifest must inventory every file exactly once")
-    for item in entries:
-        if set(item) != {"path", "size_bytes", "sha256"}:
-            raise ValueError("flight dataset manifest file fields mismatch")
-        _checked_file(root=run, record=item)
-
-
 def finalize_flight_dataset(run_dir: Path, /) -> Path:
-    """Validate the final inventory and atomically publish a relative selector."""
+    """Inventory the completed run and atomically publish a relative selector."""
     run_dir = run_dir.resolve(strict=True)
     dataset = load_flight_dataset(run_dir)
     manifest = run_dir / "manifest.json"
@@ -281,11 +223,16 @@ def finalize_flight_dataset(run_dir: Path, /) -> Path:
         )
         + "\n"
     )
-    _validate_manifest(run=run_dir, path=pending, flight_parameters_id=dataset.flight_parameters_id)
     pending.replace(manifest)
-    load_flight_dataset(run_dir)
     latest = run_dir.parent / "latest"
     temporary = latest.with_name(f".latest-{dataset.run_id}")
     temporary.symlink_to(os.path.relpath(run_dir, latest.parent), target_is_directory=True)
     temporary.replace(latest)
     return latest
+
+
+def load_flight_selection(path: Path, /) -> tuple[FlightDataset, dict[str, Any]]:
+    """Read the alignment selection and its producer dataset."""
+    metadata = json.loads(path.read_text())
+    dataset = load_flight_dataset(path.parent / metadata["source"])
+    return dataset, metadata

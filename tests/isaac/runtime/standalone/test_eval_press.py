@@ -14,16 +14,14 @@ import pytest
 
 from robotics_experiments.flight_parameters import (
     SignalStatistics,
-    load_flight_parameters,
     summarize_signal,
 )
 from tests.support.controller_fakes import _controller_settings
+from tests.support.flight_parameters import HOVER_PARAMETERS
 from tests.support.paths import REPO_ROOT
 from tests.support.press_evaluation_fakes import PressEvaluationEnv, ZeroPressPolicy
 
-_FLIGHT_PARAMETERS = load_flight_parameters(
-    REPO_ROOT / "tests/fixtures/flight_parameters/flight_parameters.json"
-)
+_FLIGHT_PARAMETERS = HOVER_PARAMETERS
 
 
 def _contract():
@@ -357,7 +355,6 @@ def test_hover_statistics_pool_samples_across_episodes_and_seeds(*, monkeypatch)
 
 def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: Path) -> None:
     evaluator = _load_eval_press_module()
-    monkeypatch.setattr(evaluator, "_press_comparison_fingerprint", lambda **_kwargs: "comparison")
     import robotics_experiments.workflows.isaac_lab as workflow
     from robotics_experiments.rl.evaluation import RewardMean
 
@@ -443,6 +440,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
             contract=_contract(),
             controller_settings=_controller_settings(),
             flight_parameters=_FLIGHT_PARAMETERS,
+            controller_comparison_fingerprint="test-comparison",
             values={
                 "comparison_fingerprint": "comparison",
                 "selected_checkpoint_iteration": 10,
@@ -488,7 +486,6 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
 
 def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     evaluator = _load_eval_press_module()
-    monkeypatch.setattr(evaluator, "_press_comparison_fingerprint", lambda **_kwargs: "comparison")
     import robotics_experiments.workflows.isaac_lab as workflow
 
     close_calls: list[bool] = []
@@ -512,6 +509,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
             contract=_contract(),
             controller_settings=_controller_settings(),
             flight_parameters=_FLIGHT_PARAMETERS,
+            controller_comparison_fingerprint="test-comparison",
             values={
                 "comparison_fingerprint": "comparison",
                 "selected_checkpoint_iteration": 10,

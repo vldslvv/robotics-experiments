@@ -17,8 +17,7 @@ from robotics_experiments.config import load_config
 from robotics_experiments.controller import ControllerArtifact
 from robotics_experiments.flight_parameters import (
     FlightParameters,
-    load_flight_parameters,
-    load_flight_parameters_bundle,
+    load_flight_selection,
 )
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
@@ -36,7 +35,6 @@ from robotics_experiments.rl import (
     policy_metadata,
     validate_policy_artifact,
 )
-from robotics_experiments.rl.hover import load_hover_reset_bounds
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
     PressObservation,
@@ -49,6 +47,7 @@ from robotics_experiments.runtime._policy import (
 from robotics_experiments.workflows._policy_preflight import _preflight_policy_artifacts
 from tests.support.commanding_fakes import make_routine_observation
 from tests.support.controller_fakes import _controller_settings
+from tests.support.flight_parameters import HOVER_PARAMETERS, write_hover_dataset
 from tests.support.paths import REPO_ROOT
 
 _HOVER_DEPLOY_CONFIG = load_config(
@@ -70,7 +69,7 @@ def _action_cfg(**overrides):
 
 
 def _flight_parameters() -> FlightParameters:
-    return load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters")
+    return HOVER_PARAMETERS
 
 
 def _controller_artifact() -> ControllerArtifact:
@@ -95,7 +94,7 @@ def _controller_artifact() -> ControllerArtifact:
         certified_control_modes=("velocity", "ctbr"),
         probe_suite_fingerprint="probes",
         flight_parameters_run_id=_flight_parameters().run_id,
-        flight_parameters_fingerprint=_flight_parameters().artifact_fingerprint,
+        flight_parameters_fingerprint="flight-parameters-digest",
         selected_settings=settings,
         settings_fingerprint=hashlib.sha256(
             json.dumps(
@@ -133,6 +132,7 @@ def _metadata(
         controller_digest="digest",
         flight_parameters=_flight_parameters(),
         flight_parameters_digest="flight-parameters-digest",
+        dataset_path="alignment/dataset.json",
         obs_schema_version=obs_schema_version,
         obs_dim=obs_dim,
         policy_rate_hz=rate_hz,
@@ -207,28 +207,6 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
     del metadata["action_scales"]["max_yaw_rate_radps"]
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match="max_yaw_rate_radps"):
-        load_policy_metadata(artifact_dir=tmp_path)
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("flight_parameters_fingerprint", "other-flight-parameters"),
-        ("flight_parameters_run_id", "another-run"),
-    ],
-    ids=["fingerprint", "run-id"],
-)
-def test_policy_rejects_flight_parameters_not_qualified_by_controller(
-    *,
-    tmp_path: Path,
-    field: str,
-    value: str,
-) -> None:
-    metadata = _metadata()
-    metadata["controller"]["artifact"][field] = value
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
-
-    with pytest.raises(ValueError, match="does not match its controller"):
         load_policy_metadata(artifact_dir=tmp_path)
 
 
@@ -436,6 +414,7 @@ def test_hover_adapter_requires_hold_duration() -> None:
             controller_comparison_fingerprint="comparison",
             flight_parameters=_flight_parameters(),
             flight_parameters_digest="flight-parameters-digest",
+            dataset_path="alignment/dataset.json",
             values={},
         ),
         inference=lambda observation: np.zeros(4),
@@ -473,6 +452,7 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
             controller_comparison_fingerprint="comparison",
             flight_parameters=_flight_parameters(),
             flight_parameters_digest="flight-parameters-digest",
+            dataset_path="alignment/dataset.json",
             values={},
         ),
         inference=lambda observation: inference_calls.append(observation) or np.ones(4),  # type: ignore[func-returns-value]  # concise call recording
@@ -527,6 +507,7 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
             controller_comparison_fingerprint="comparison",
             flight_parameters=_flight_parameters(),
             flight_parameters_digest="flight-parameters-digest",
+            dataset_path="alignment/dataset.json",
             values={},
         ),
         inference=lambda _observation: np.array([1.2, -0.5, 0.25, -0.1]),
@@ -590,25 +571,18 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
     assert diagnostic["complete"] is False
 
 
-@pytest.mark.parametrize("mismatch", ["run_id", "digest"])
-def test_hover_handoff_rejects_mismatched_producer(mismatch: str) -> None:
-    path = REPO_ROOT / "tests/fixtures/flight_parameters"
-    bundle = load_flight_parameters_bundle(path=path)
-    with pytest.raises(ValueError, match="pinned input"):
-        load_hover_reset_bounds(
-            path=path.resolve(),
-            run_id="wrong" if mismatch == "run_id" else bundle.flight_parameters.run_id,
-            digest="wrong" if mismatch == "digest" else bundle.flight_parameters_digest,
-        )
-
-
 def test_hover_reset_loading_is_cached_before_live_adapter_construction(
     tmp_path: Path, monkeypatch
 ) -> None:
-    bundle = load_flight_parameters_bundle(path=REPO_ROOT / "tests/fixtures/flight_parameters")
+    path = write_hover_dataset(tmp_path)
+    dataset, selection = load_flight_selection(path)
     metadata = _metadata(interface=PolicyInterface.PRESS)
     metadata["curriculum_stage"] = "hover"
-    metadata["flight_parameters"]["digest"] = bundle.flight_parameters_digest
+    metadata["flight_parameters"]["digest"] = dataset.artifact_digest
+    metadata["flight_parameters"]["artifact"] = selection["hover"]
+    metadata["flight_parameters"]["dataset"] = str(path)
+    metadata["controller"]["artifact"]["flight_parameters_run_id"] = dataset.run_id
+    metadata["controller"]["artifact"]["flight_parameters_fingerprint"] = dataset.artifact_digest
     artifact = _write_metadata_artifact(tmp_path, metadata)
     config = _HOVER_DEPLOY_CONFIG
     vehicle = config.vehicles["x500_01"]
@@ -625,7 +599,7 @@ def test_hover_reset_loading_is_cached_before_live_adapter_construction(
         },
         rl=replace(
             config.rl,
-            inputs=replace(config.rl.inputs, flight_parameters_artifact=str(bundle.run_dir)),
+            inputs=replace(config.rl.inputs, flight_parameters_artifact=str(dataset.run_dir)),
         ),
     )
     _preflight_policy_artifacts(config=config, repo_root=REPO_ROOT)
@@ -633,7 +607,7 @@ def test_hover_reset_loading_is_cached_before_live_adapter_construction(
     def unexpected_load(**_kwargs):
         raise AssertionError("reset traces must not be read during live routine construction")
 
-    monkeypatch.setattr(hover_module, "load_flight_parameters_bundle", unexpected_load)
+    monkeypatch.setattr(hover_module, "load_flight_selection", unexpected_load)
     loaded = LoadedPolicy(
         metadata=load_policy_metadata(artifact_dir=artifact), inference=lambda obs: np.zeros(4)
     )

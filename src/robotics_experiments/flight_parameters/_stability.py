@@ -355,13 +355,11 @@ def _population(
     settings: FlightStabilityConfig,
 ) -> tuple[_PopulationComparison, ...]:
     a, b = reference, current
-    if (
-        not a
-        or not b
-        or any(
-            values.ndim != 1 or not values.size or not np.all(np.isfinite(values))
-            for values in (*a, *b)
-        )
+    if not a or not b:
+        return ()
+    if any(
+        values.ndim != 1 or not values.size or not np.all(np.isfinite(values))
+        for values in (*a, *b)
     ):
         raise ValueError("stability requires nonempty finite scalar flight signals")
     rng = np.random.default_rng(settings.bootstrap_seed)
@@ -570,12 +568,14 @@ def analyze_flight_parameters_stability(
                         ("campaign", hover),
                         *((_identity(t), (t,)) for t in hover),
                     )
+                    if traces
                 ),
                 response=tuple(
                     _response_summary(profile=name, signal=signal, flights=response)
                     for name, signal in (
                         (trace["name"], signal)
-                        for trace in response[0]["traces"]
+                        for flight in response[:1]
+                        for trace in flight["traces"]
                         for signal in _response_signals(trace)
                     )
                 ),
@@ -601,18 +601,25 @@ def analyze_flight_parameters_stability(
             key: value
             for key, value in reference_dataset.definition.items()
             if key not in {"start_seed", "flight_count"}
-        } and all(
-            current_dataset.flights[0].metadata[field]
-            == reference_dataset.flights[0].metadata[field]
-            for field in ("sample_rate_hz", "controller_state_method")
-        )
-        current_stages = current_dataset.flights[0].metadata["stages"]
-        reference_stages = reference_dataset.flights[0].metadata["stages"]
-        compatible = compatible and tuple(
-            (t["name"], t["control_mode"], t["commands"], t["hover"]) for t in current_stages
-        ) == tuple(
-            (t["name"], t["control_mode"], t["commands"], t["hover"]) for t in reference_stages
-        )
+        }
+        for current_flight, reference_flight in zip(
+            current_dataset.flights[:1], reference_dataset.flights[:1], strict=False
+        ):
+            compatible = (
+                compatible
+                and all(
+                    current_flight.metadata[field] == reference_flight.metadata[field]
+                    for field in ("sample_rate_hz", "controller_state_method")
+                )
+                and tuple(
+                    (t["name"], t["control_mode"], t["commands"], t["hover"])
+                    for t in current_flight.metadata["stages"]
+                )
+                == tuple(
+                    (t["name"], t["control_mode"], t["commands"], t["hover"])
+                    for t in reference_flight.metadata["stages"]
+                )
+            )
         differences = []
         if relationship == "identical" and compatible:
             for a, b in zip(reference_hover, current_hover, strict=True):
@@ -668,7 +675,7 @@ def analyze_flight_parameters_stability(
             _response_population(
                 reference=reference_response, current=current_response, settings=settings
             )
-            if compatible
+            if compatible and reference_response and current_response
             else ()
         )
         comparisons.append(

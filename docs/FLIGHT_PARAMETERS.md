@@ -78,13 +78,13 @@ for each batch (up to execution.worker_count flights in parallel):
     -> verify PX4 state and extract stage metadata
     -> reconstruct response controller states from ULog
     -> lossless compression and hashes -> completion checkpoint
-    -> remove verified raw log duplicates
+    -> remove raw log duplicates
   collect completed-flight results before starting the next batch
 
 after all flights:
   aggregate ordered completion records -> write unsplit dataset metadata
   -> final stability analysis in a separate report
-  -> validate file integrity -> finalize immutable run -> publish latest
+  -> inventory the completed run -> publish latest
 ```
 
 Capture callbacks never invoke stability analysis. The next batch waits for
@@ -93,9 +93,11 @@ count changes scheduling, not stage commands or seed assignment. `definition.jso
 configuration, including the requested count, starting seed and resolved rates,
 excluding execution and stability settings. The recorded experiment path is
 derived from the selected input; it is not a second authored config reference.
-Resume requires the same physical definition. Validation checks that the requested flights and stages
-completed and that retained files are intact. Git state and unrelated repository
-changes do not affect capture validity.
+Resume requires the same physical definition. A flight exception is logged with
+its index, seed and traceback; that flight is excluded while the others continue.
+The dataset records the successful count and preserves original indices and seeds.
+If every flight fails, capture publishes an empty dataset and stability reports
+insufficient evidence. Alignment checks its minimum data requirement at startup.
 
 The host runner uses functions with explicit inputs and frozen configuration,
 flight and completion records. `_flights(config)` assigns work;
@@ -163,19 +165,19 @@ initial physical and reconstructed controller states remain attached to its
 measurement boundary. Full-rate evidence is compressed losslessly after each
 flight; the runner does not accumulate an entire campaign of uncompressed logs.
 
-Compression writes a temporary archive, verifies its decompressed SHA-256 and
-atomically installs it. `complete.json` records the flight identity, completion
-result and retained file inventory. File hashes protect archive integrity and
-resumption; they do not classify capture behavior. Only then are matching
-uncompressed logs and private harness copies removed. The closed harness bridge log must match the recorder's prefix; teardown
-records are retained. Failed captures remain under `failed/`.
+Compression writes a temporary archive and atomically installs it. Exceptions
+are reported as flight failures. `complete.json` records the flight identity,
+completion result and retained file inventory. After compression succeeds,
+uncompressed logs and private harness copies are removed. The complete closed
+harness bridge log includes teardown records.
 
 A successful `capture.json` lets interrupted processing reuse raw capture.
-A validated `complete.json` skips capture and processing. Corrupt checkpoints
-fail rather than silently recapturing. Resume with the original explicit
+A `complete.json` skips capture and processing. Resume with the original explicit
 `FLIGHT_PARAMETERS_RUN_ID`; the flight definition, count and seeds must still
-match. After the dataset header exists, resume retries final analysis and
-publication. Finalized runs cannot be modified or resumed.
+match. An interrupted capture is retained under `failed/` before explicit resume
+starts that flight again. Flights are not automatically retried. After the dataset
+header exists, resume retries final analysis and publication. Finalized runs
+cannot be modified or resumed.
 
 Before dispatch the runner reserves space for all remaining archives, active
 raw flights and compression staging, plus the configured free-space reserve.
@@ -186,25 +188,26 @@ completed evidence and stops dispatch. This estimate does not bound failure logs
 
 `FlightDataset`, read through `load_flight_dataset(path)`, is an immutable unsplit
 schema-1 artifact with kind `robotics-experiments-flight-dataset`. The reader
-resolves selectors once, freezes metadata and validates completed-flight files,
-input identity, hashes and an exact final manifest. The header contains the producer ID, run, a `completed` result and ordered
-flight checkpoint references. `definition.json` contains the authored flight
-parameters; per-flight metadata contains seeds, stage boundaries, measured
-initial states and sample ranges. Successful completion requires every requested
-flight and stage, hover verification and response controller-state extraction.
-Source, environment and capture-method fingerprints are not part of the dataset.
+resolves selectors once, checks the header format and reads frozen metadata.
+The header contains the producer ID, run, `completed`, the successful
+`flight_count`, and ordered flight checkpoint references. `definition.json`
+retains the requested count and authored parameters. Per-flight metadata contains
+seeds, stage boundaries, measured initial states and sample ranges. Each included
+flight completed capture, hover verification and response controller-state
+extraction. Flight indices may have gaps and the flight collection may be empty.
 
-Publication advances the relative `<id>/latest` symlink only after all flights,
-postprocessing and the manifest validate. `latest` means complete evidence,
-not stable evidence or a qualified baseline. There is no automatic `best` or
-baseline designation.
+Publication advances the relative `<id>/latest` symlink after collection,
+postprocessing and final analysis. `latest` identifies the completed campaign;
+its successful count and stability report describe the available evidence.
+There is no automatic `best` or baseline designation.
 
-The distinct `FlightParameters` contract represents consumer-qualified hover
-bounds used by the existing RL workflow. RL still requires that contract;
-there is no compatibility adapter or evidence migration. Alignment consumes
-the raw dataset, assigns whole flights to train, validation and test, and derives
-its bounds from training flights only. See
-[the alignment handoff](backlog/flight_parameters_alignment_handoff.md).
+`FlightParameters` is the numeric training-hover summary stored in alignment's
+`dataset.json` and embedded in policy metadata. Its shared derivation uses only
+the selected training flights: complete native-hover windows supply pose bounds,
+and the configured final policy windows supply per-flight statistics and paired
+reset states. Raw evidence remains in this capture. There is no separate qualified
+flight bundle. See [controller alignment](SIM_TO_SIM_ALIGNMENT.md) and
+[reinforcement learning](RL_WORKFLOW.md).
 
 ## Final stability analysis
 

@@ -19,8 +19,8 @@ observation, handoff, reward, task, and progress contracts live under
 lazy `robotics_experiments.workflows.isaac_lab` package.
 
 RL never imports alignment. It consumes the accepted schema-1 controller
-artifact produced by alignment and the independently published matching
-schema-1 flight parameters. It does not reopen raw alignment traces. Task/env
+artifact produced by alignment, its `dataset.json`, and the matching
+`FlightDataset` capture. It reads original training-flight samples in place. Task/env
 package imports stay lazy. Runtime interface dispatch and adapter composition
 belong in `runtime/_policy.py`, not commanding or the fleet orchestrator.
 Task-owned action scales need not equal alignment probe scales.
@@ -41,18 +41,18 @@ if acceptance.passed:
     publish_policy(policy=selected, evaluation=evaluation, ...)
 ```
 
-Preparation validates each producer artifact once, confirms the controller was
-qualified with that exact flight-parameter run and fingerprint, and pins the
-resolved paths and digests, including the generated switch definition. The
-coordinator then creates the press acceptance criteria once from
-`rl.press.acceptance` and the measured hover limits. The
-campaign report records those criteria before training starts.
+Preparation checks basic input formats, source selection, vehicle, action and
+rate compatibility once at training startup. It resolves controller, capture,
+alignment dataset and switch paths, and derives paired reset samples from the
+training flights. Alignment metadata supplies the numeric hover summary.
+The coordinator creates press acceptance criteria from `rl.press.acceptance`
+and the measured hover limits and records them before training starts.
 
-Workers receive the pinned paths and digests and confirm the files have not
-changed before constructing Isaac Lab. Training reads the producer files in
-place and never copies or mutates them. Invalid input creates no run directory
-or attempt process. A worker that exits without its report is recorded as a
-failed attempt.
+Workers receive prepared `PolicyInputs`: attempt workers through their private
+stdin pipe, evaluation workers through multiprocessing arguments. They consume
+those values directly. Capture, alignment and training run sequentially with
+fixed inputs; workers do not rehash or compare producer outputs. Producer files
+remain in place. Worker exceptions, crashes and missing reports remain failures.
 
 The registered tasks are `Isaac-Drone-Hover-Direct-v1` and
 `Isaac-Switch-Press-Direct-v1`. Both use the normalized controller interface. The
@@ -150,8 +150,7 @@ The schema-1 policy metadata field `curriculum_stage` continues to record this
 task identity; it never stores curriculum labels. Existing artifacts are immutable.
 
 The hover stage starts around the common 0.48 m press target using paired poses
-drawn directly from every final policy window in the pinned flight-parameter
-traces. Position and attitude from one measured sample always stay together;
+drawn directly from the final policy windows of the alignment training flights. Position and attitude from one measured sample always stay together;
 the reset distribution adds no synthetic noise. Validation and acceptance
 require 30 continuous seconds inside that measured envelope. Hover training
 minimizes pose error throughout collection, including after a qualifying hold.
@@ -163,20 +162,19 @@ Success uses only the measured position and pose bounds: asymmetric ENU axis
 bounds, horizontal and 3D position bounds, roll/pitch/yaw bounds, tilt, and full
 orientation error. Speed is observable but is not part of the hover acceptance
 predicate. Contact or another flight
-failure still terminates the episode. Training resolves the envelope bundle
-once and policy metadata pins its exact fingerprint and digest, so a later
-`latest` measurement cannot change an active campaign.
+failure still terminates the episode. Training resolves the capture and alignment selection once. Policy metadata
+embeds the numeric hover summary and records the canonical dataset path and
+capture digest, so later publication labels cannot change an active campaign.
 
-Hover deployment derives its handoff bounds from the same fitting-flight
+Hover deployment derives its handoff bounds from the same training-flight
 policy-window states returned by `load_hover_reset_samples` for PPO resets.
-The runtime validates the selected flight bundle against the policy's embedded
-run ID and digest before reading these states. This work runs during startup
-validation and is cached by canonical bundle path, run ID, and digest so routine
-construction cannot stall live PX4 lockstep by rereading the traces.
+The runtime reads the policy's recorded alignment selection at startup. Reset
+bounds are cached by canonical dataset path so routine construction cannot stall
+live PX4 lockstep by rereading the traces.
 It uses their asymmetric ENU
 position extrema, horizontal/total position maxima, relative roll/pitch/yaw
 extrema, tilt/orientation maxima, and ENU linear/angular velocity extrema.
-No margins or validation/acceptance flights expand this region. These are
+No margins or validation/test flights expand this region. These are
 bounds on a paired empirical population, not a claim that every combination
 within the bounds was sampled. Approach deployment retains the navigation
 reset bounds from `rl.press.handoff`.
@@ -277,9 +275,9 @@ attempt campaign and refinement stopping rules remain unchanged.
 
 `initial_learner` optionally names a producer `training_report.json`, including a
 compatible failed or interrupted run. Acceptance of this input is not required.
-Before training, checkpoint tensors must match the exact exported actor and its
-normalizer. Controller and flight evidence, observation/action contract, network
-dimensions, activation and normalization must be compatible. The full press
+At curriculum startup, the initial learner's observation/action contract, network
+dimensions, activation and normalization must be compatible. Restoration loads
+the checkpoint directly; it does not compare tensors against the exported actor. The full press
 curriculum enables normalization in every stage; stage ordering never overrides
 this compatibility check. Producer files remain immutable.
 
@@ -389,7 +387,7 @@ Each measured hover reset is one complete state from one trace index: ENU
 position error, relative attitude, ENU linear velocity, and ENU angular
 velocity. Both velocities are recorded directly from the simulator snapshot
 alongside pose, then selected using the same final-window sample indices.
-Only fitting flights populate resets; recorded validation and acceptance flights
+Only training flights populate resets; recorded validation and test flights
 remain held out. Policy validation and final test continue to use their separate
 configured evaluation seeds. The environment restores
 all four values together; it does not replace measured motion with zero. The
@@ -405,7 +403,7 @@ make eval-press HYDRA_CONFIG=configs/train/stage/press_hover_quad.yaml \
   EVAL_ARGS=--hover-feasibility
 ```
 
-This mode loads the same accepted controller, fitting-flight reset samples,
+This mode loads the same accepted controller, training-flight reset samples,
 selected stage duration, action interface, and production evaluation logic as
 training validation. It uses the configured validation workload and acceptance
 criteria. It does not load a trained
@@ -441,6 +439,12 @@ make train-rl HYDRA_CONFIG=configs/train/press_hover_quad.yaml \
   TRAIN_ARGS=--procedural-smoke
 ```
 
+Procedural smoke also permits a structurally valid controller whose recorded
+quality decision is rejected. Source, vehicle, action and rate checks still
+apply. Ordinary training requires an accepted controller. Smoke never runs the
+reserved test workload or publishes a policy; completion requires the stage
+report status `procedural_smoke_complete`.
+
 To check restoration, set `initial_learner` in a new curriculum to that smoke
 stage's `training_report.json` and run with `--procedural-smoke`. An unaccepted
 smoke learner is a valid compatible initializer. Neither check uses reserved test
@@ -471,7 +475,7 @@ by `training_report.json`. The wrapper waits for the first reset metric before
 reporting the monitor ready. It skips automatic post-training evaluation when
 training fails. Explicit evaluation can still select an earlier published stage.
 Normal `eval-press` resolves the published artifact once, uses its producing stage
-configuration and pinned evidence, and rejects a changed stage configuration.
+configuration and recorded producer inputs.
 `--hover-feasibility` instead requires an explicit stage experiment.
 
 Trackio uses the `training/`, `validation/`, `test/`, and `system/`
@@ -566,7 +570,7 @@ remains unsupported.
 Task reset mixtures and acceptance requirements affect comparison;
 curriculum labels and ordering do not. Complete resolved configuration, runtime
 versions and pinned input lineage appear once in the stage's `provenance`.
-Workers verify this configuration and the pinned producer digests before training.
+Workers consume the prepared inputs directly.
 
 The experiment record supports comparing a small number of consecutive policy
 runs. Training does not collect Git commits, working-tree state or container
@@ -578,10 +582,10 @@ disjoint final workload authored in the stage configuration. The resulting raw
 Every applicable check is independently binding: finite traces, task success,
 collision, minimum range, other physical failures, and the flight-parameters
 maximum, RMSE, p95, and p99 limit for every required hover error signal. Hover
-statistics use only episodes that complete the 30-second hold. They cover the final 24 seconds of
-each episode's actual successful hold, ending at its completion time. Earlier recovery, the first six seconds of
-the hold (the artifact-configured policy warmup), failed episodes, and
-post-completion samples are excluded. The evaluator retains pose history on the
+statistics use only episodes that complete the 30-second hold. They cover the
+configured final statistics window of each episode's actual successful hold,
+ending at its completion time. Earlier recovery, the configured warmup, failed
+episodes, and post-completion samples are excluded. The evaluator retains pose history on the
 GPU and transfers it once per seed; seeds, reset order, episode counts, and
 aggregation follow the configured workload. Changing the statistics population
 requires a new comparison fingerprint; historical artifacts remain immutable.
@@ -597,8 +601,11 @@ seeds. For each signal it computes maximum absolute error, `sqrt(mean(x^2))`,
 and the 95th and 99th percentiles of `abs(x)` using NumPy's default linear
 interpolation. These are sample-level statistics, not averages of episode
 RMSEs or percentiles. Each successful hold contributes the same number of
-samples. Reference limits are the largest corresponding **per-flight**
-policy-window statistic plus the artifact's authored margin. They are
+samples. Reference limits are the largest corresponding **training-flight**
+policy-window statistic plus the alignment-configured margin.
+`alignment.evaluation.policy_warmup_s` and `policy_window_s` explicitly preserve
+the six-second warmup and final 24-second window. Their sum must equal the
+captured measurement and evaluated hold durations. They are
 conservative limits applied to the pooled policy statistics; no per-episode
 RMSE or percentile acceptance requirement is added.
 
@@ -624,13 +631,12 @@ for a completed valid evaluation.
 A policy artifact is exactly `policy.pt` plus `policy_meta.json`. Metadata uses
 the strict schema-1 `robotics-experiments-policy` contract and records policy
 interface, observation/action contracts, cadence, controller artifact and
-digest, flight-parameters artifact and digest, comparison fingerprint,
+digest, alignment dataset path, numeric hover summary and capture digest, comparison fingerprint,
 and training phase provenance. Older policy schemas and
-policies without complete controller and flight-parameters provenance are
+policies without complete controller and capture provenance are
 unsupported.
 
-On acceptance, publication copies the already-tested actor bytes and verifies
-their digest. Metadata and the report record both workloads, selected and tested
+On acceptance, publication copies the already-tested actor bytes. Metadata and the report record both workloads, selected and tested
 digests, raw metrics, required values, individual results, overall status, and
 failure reasons. An accepted campaign automatically advances `latest`; `best`
 advances only for a strictly better validation selection metric within the same
@@ -679,7 +685,7 @@ normalized velocity intent through the OFFBOARD adapter.
 
 For a deployable press hover/approach policy, correct behavior is a controlled,
 contact-free move to the task-owned range center followed by a stable hover inside the complete envelope
-embedded from the pinned flight-parameters artifact. Deploy-time completion
+derived from the alignment training flights. Deploy-time completion
 uses that exact envelope for the configured 600 continuous samples, matching
 evaluation and training qualification counters. It should not touch the
 switch, climb away, or perform a learned retreat. The routine's later `goto` step owns any return motion.

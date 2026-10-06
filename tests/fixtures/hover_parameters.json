@@ -1,0 +1,172 @@
+{
+  "run_id": "fixture",
+  "sample_rate_hz": 20.0,
+  "policy_warmup_s": 6.0,
+  "position_margin_m": 0.01,
+  "attitude_margin_rad": 0.01,
+  "hover": {
+    "acceptance_limits": [
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "position_error_enu_x",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "m"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "position_error_enu_y",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "m"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "position_error_enu_z",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "m"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "horizontal_position_error",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "m"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "position_error",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "m"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "attitude_error_roll",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "rad"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "attitude_error_pitch",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "rad"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "attitude_error_yaw",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "rad"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "tilt_error",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "rad"
+      },
+      {
+        "maximum": 0.01,
+        "maximum_absolute": 0.01,
+        "minimum": -0.01,
+        "name": "orientation_error",
+        "p95_absolute": 0.01,
+        "p99_absolute": 0.01,
+        "rmse": 0.01,
+        "unit": "rad"
+      }
+    ],
+    "attitude_error_rpy_rad": {
+      "lower": [
+        -0.1,
+        -0.1,
+        -0.1
+      ],
+      "observed_max": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "observed_min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "upper": [
+        0.1,
+        0.1,
+        0.1
+      ]
+    },
+    "horizontal_position_error_m": {
+      "observed_max": 0.0,
+      "upper": 0.1
+    },
+    "orientation_error_rad": {
+      "observed_max": 0.0,
+      "upper": 0.1
+    },
+    "position_error_enu_m": {
+      "lower": [
+        -0.1,
+        -0.1,
+        -0.1
+      ],
+      "observed_max": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "observed_min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "upper": [
+        0.1,
+        0.1,
+        0.1
+      ]
+    },
+    "position_error_m": {
+      "observed_max": 0.0,
+      "upper": 0.1
+    },
+    "tilt_error_rad": {
+      "observed_max": 0.0,
+      "upper": 0.1
+    }
+  },
+  "policy_window_s": 24.0
+}

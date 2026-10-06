@@ -512,6 +512,11 @@ def evaluate_press_approach_policy(
     rewards: dict[str, tuple[float, int]] = {}
     hover_samples: dict[str, list[np.ndarray]] = {name: [] for name in _HOVER_SIGNAL_UNITS}
     policy_warmup_steps = round(flight_parameters.policy_warmup_s / float(env.step_dt))
+    if (
+        policy_warmup_steps + round(flight_parameters.policy_window_s / float(env.step_dt))
+        != hold_steps
+    ):
+        raise ValueError("hover hold must equal the configured warmup plus statistics window")
     if policy_warmup_steps >= hold_steps:
         raise ValueError("flight-parameters policy warmup must be shorter than the hold")
     for seed in seeds:

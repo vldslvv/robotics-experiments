@@ -19,7 +19,7 @@ from robotics_experiments.config import (
     RlTrainingPhaseConfig,
     load_switch_model,
 )
-from robotics_experiments.flight_parameters import load_flight_parameters
+from robotics_experiments.rl import HoverResetSamples
 from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
 from robotics_experiments.rl.press import create_press_acceptance_criteria
 from robotics_experiments.rl.training import rsl_rl
@@ -33,6 +33,7 @@ from robotics_experiments.switches import SwitchAsset
 from robotics_experiments.workflows.isaac_lab import curriculum
 from robotics_experiments.workflows.isaac_lab import training as train_rl
 from robotics_experiments.workflows.isaac_lab.training import _file_sha256
+from tests.support.flight_parameters import HOVER_PARAMETERS
 from tests.support.paths import REPO_ROOT
 
 
@@ -52,7 +53,7 @@ def _phase(
 
 
 def _inputs(tmp_path: Path):
-    flight_parameters = load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters")
+    flight_parameters = HOVER_PARAMETERS
     return SimpleNamespace(
         switch_asset=SwitchAsset(
             path=tmp_path / "switch.usda",
@@ -65,18 +66,24 @@ def _inputs(tmp_path: Path):
             comparison_fingerprint="controller-fingerprint",
         ),
         controller_path=tmp_path / "resolved/controller.json",
+        dataset_path=tmp_path / "resolved/dataset.json",
         controller_digest="controller-digest",
         flight_parameters=flight_parameters,
         flight_parameters_path=tmp_path / "resolved/flight-parameters",
         flight_parameters_digest="flight-parameters-digest",
-        hover_reset_samples=SimpleNamespace(summary=lambda **_kwargs: {"sample_count": 1.0}),
+        hover_reset_samples=HoverResetSamples(
+            position_error_enu_m=((0.0, 0.0, 0.0),),
+            attitude_error_flu_enu_wxyz=((1.0, 0.0, 0.0, 0.0),),
+            linear_velocity_enu_mps=((0.0, 0.0, 0.0),),
+            angular_velocity_enu_radps=((0.0, 0.0, 0.0),),
+        ),
     )
 
 
 def _acceptance_criteria(config):
     return create_press_acceptance_criteria(
         config=config.rl.press,
-        flight_parameters=load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters"),
+        flight_parameters=HOVER_PARAMETERS,
     )
 
 
@@ -244,7 +251,7 @@ def test_experiment_provenance_records_resolved_configuration_and_inputs(
             "path": str(inputs.flight_parameters_path),
             "run_id": inputs.flight_parameters.run_id,
             "sha256": "flight-parameters-digest",
-            "fingerprint": inputs.flight_parameters.artifact_fingerprint,
+            "dataset": str(inputs.dataset_path),
         },
     }
 
@@ -604,36 +611,20 @@ def saved_learner(monkeypatch, tmp_path):
     return train_rl, config, inputs, report_path, runner
 
 
-@pytest.mark.parametrize("change", ["bytes", "actor", "normalization", "optimizer", "architecture"])
-def test_initial_learner_rejects_corruption_or_incompatibility(saved_learner, change):
+def test_initial_learner_rejects_incompatible_architecture(saved_learner):
     train_rl, config, inputs, report_path, _runner = saved_learner
-    learner = train_rl.pin_learner(report_path=report_path)  # noqa: SLF001
-    checkpoint = Path(learner.checkpoint)
-    if change == "bytes":
-        checkpoint.write_bytes(b"changed")
-    elif change == "architecture":
-        config = replace(
-            config,
-            rl=replace(
-                config.rl,
-                press=replace(
-                    config.rl.press, policy=replace(config.rl.press.policy, activation="relu")
-                ),
+    learner = train_rl.pin_learner(report_path=report_path)
+    config = replace(
+        config,
+        rl=replace(
+            config.rl,
+            press=replace(
+                config.rl.press, policy=replace(config.rl.press.policy, activation="relu")
             ),
-        )
-    else:
-        payload = torch.load(checkpoint, weights_only=True)
-        if change == "optimizer":
-            del payload["optimizer_state_dict"]
-        else:
-            key = "actor.weight" if change == "actor" else "actor_obs_normalizer._mean"
-            payload["model_state_dict"][key] += 1
-        torch.save(payload, checkpoint)
-        learner = replace(learner, checkpoint_digest=_file_sha256(checkpoint))  # noqa: SLF001
-    with pytest.raises(
-        ValueError, match="changed|incompatible|complete|does not match|differs|digest"
-    ):
-        train_rl.validate_learner(learner=learner, config=config, inputs=inputs)  # noqa: SLF001
+        ),
+    )
+    with pytest.raises(ValueError, match="incompatible"):
+        train_rl.validate_learner(learner=learner, config=config, inputs=inputs)
 
 
 @pytest.mark.parametrize("status", ["validation_failed", "test_failed", "interrupted", "training"])
@@ -653,18 +644,6 @@ def test_switch_profile_change_preserves_complete_learner_compatibility(*, saved
     config = replace(config, switches=replace(config.switches, model=nominal))
     learner = module.pin_learner(report_path=path)
     module.validate_learner(learner=learner, config=config, inputs=inputs)
-
-
-def test_attempt_worker_receives_exact_switch_asset(*, tmp_path):
-    inputs = _inputs(tmp_path)
-    command = train_rl._attempt_worker_command(  # noqa: SLF001
-        inputs=inputs,
-        attempt_index=0,
-        procedural_smoke=True,
-        monitoring_dir=tmp_path / "monitoring",
-        update_offset=0,
-    )
-    assert json.loads(command[command.index("--switch-asset") + 1]) == inputs.switch_asset.record()
 
 
 @pytest.mark.parametrize(
@@ -777,6 +756,7 @@ def test_curriculum_forwards_exact_learner_and_stops(
         "error",
         "missing",
         "refinement",
+        "procedural_smoke_complete",
     ],
 )
 def test_training_campaign_selection_and_failures(monkeypatch, tmp_path, outcome):
@@ -842,6 +822,13 @@ def test_training_campaign_selection_and_failures(monkeypatch, tmp_path, outcome
         def __exit__(self, *_args):
             return False
 
+        def communicate(self, *, input):
+            import pickle
+
+            prepared = pickle.loads(input)
+            assert prepared == _inputs(tmp_path)
+            self.returncode = self.wait()
+
         def wait(self, **_kwargs):
             if not self.waited and self.index == 1:
                 self.waited = True
@@ -886,7 +873,7 @@ def test_training_campaign_selection_and_failures(monkeypatch, tmp_path, outcome
         run_dir=run_dir,
         monitoring_dir=tmp_path / "monitoring",
         update_offset=50,
-        procedural_smoke=False,
+        procedural_smoke=outcome == "procedural_smoke_complete",
     )
     result = None
     if outcome in {"interrupted", "error", "missing"}:
@@ -911,6 +898,13 @@ def test_training_campaign_selection_and_failures(monkeypatch, tmp_path, outcome
     if tested:
         assert tested[0]["selection"].attempt_index == 1
         assert report["test_evaluation"]["policy_digest"] == report["selected"]["policy_digest"]
+
+    if outcome == "procedural_smoke_complete":
+        assert report["acceptance"] is None and report["test_evaluation"] is None
+        assert not (run_dir / "policy.pt").exists()
+        assert not (run_dir.parent / "latest").exists()
+        with pytest.raises(ValueError, match="only an accepted stage"):
+            train_rl.publish_training(result=result, curriculum_run_id="smoke", passed_stages=[])
 
 
 def test_checkpoint_rng_is_safe_evidence_and_does_not_replace_new_attempt_seed(saved_learner):
@@ -1080,3 +1074,84 @@ def test_cleanup_preserves_primary_exception():
             _close_resource(SimpleNamespace(close=fail))
     with pytest.raises(RuntimeError, match="cleanup"):
         _close_resource(SimpleNamespace(close=fail))
+
+
+def test_evaluation_worker_consumes_prepared_inputs(monkeypatch, tmp_path):
+    from queue import Queue
+
+    from robotics_experiments.config import load_config
+
+    config_path = REPO_ROOT / "configs/train/stage/press_hover_quad.yaml"
+    config = load_config(config_path)
+    inputs = _inputs(tmp_path)
+    contract = object()
+    closed = []
+    built = []
+    actors = []
+    tasks, results = Queue(), Queue()
+    tasks.put((1, str(tmp_path / "model.pt"), str(tmp_path / "actor"), "actor-digest"))
+    tasks.put(None)
+    evaluation = PolicyEvaluation(
+        iteration=1,
+        checkpoint_path=tmp_path / "model.pt",
+        policy_digest="actor-digest",
+        metrics=(),
+        reward_means=(),
+        source="fresh-validation",
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "isaaclab.app",
+        SimpleNamespace(
+            AppLauncher=lambda **_kwargs: SimpleNamespace(
+                app=SimpleNamespace(close=lambda: closed.append("app"))
+            )
+        ),
+    )
+
+    def build(**kwargs):
+        built.append(kwargs)
+        return SimpleNamespace(device="cpu", close=lambda: closed.append("env")), None
+
+    def load(path, *, map_location):
+        actors.append((path, map_location))
+        return SimpleNamespace(eval=lambda: None)
+
+    def evaluate(**kwargs):
+        assert kwargs["flight_parameters"] is inputs.flight_parameters
+        assert kwargs["seeds"] == tuple(config.rl.press.evaluation.validation_seeds)
+        return "rollout"
+
+    monkeypatch.setattr(train_rl, "_build_env", build)
+    monkeypatch.setattr(train_rl.torch.jit, "load", load)
+    monkeypatch.setattr(
+        train_rl,
+        "TelemetrySampler",
+        lambda **_kwargs: SimpleNamespace(
+            start=lambda **_kwargs: None, finish=lambda **_kwargs: {"status": "complete"}
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "robotics_experiments.workflows.isaac_lab",
+        SimpleNamespace(
+            evaluate_press_approach_policy=evaluate,
+            press_policy_evaluation=lambda **_kwargs: evaluation,
+        ),
+    )
+    train_rl._evaluation_worker_main(  # noqa: SLF001 - process entrypoint contract
+        config_path=str(config_path),
+        inputs=inputs,
+        contract=contract,
+        task_queue=tasks,
+        result_queue=results,
+        workload_role="validation",
+    )
+    assert results.get_nowait() == ("ready", None)
+    assert results.get_nowait() == ("evaluation", (evaluation, {"status": "complete"}))
+    assert built[0]["hover_reset_samples"] is inputs.hover_reset_samples
+    assert built[0]["switch_asset"] is inputs.switch_asset
+    assert built[0]["controller_settings"] is inputs.controller.selected_settings
+    assert built[0]["policy_contract"] is contract
+    assert actors == [(str(tmp_path / "actor/policy.pt"), "cpu")]
+    assert closed == ["env", "app"]

@@ -8,7 +8,6 @@ import torch
 
 from robotics_experiments.config import load_config, load_curriculum_config
 from robotics_experiments.environment.switches import SwitchState, apply_button_sample
-from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation
 from robotics_experiments.rl.press.contact import (
     initial_press_contact_state,
@@ -19,6 +18,7 @@ from robotics_experiments.rl.press.evaluation import (
     create_press_acceptance_criteria,
     evaluate_press_acceptance,
 )
+from tests.support.flight_parameters import HOVER_PARAMETERS
 from tests.support.paths import REPO_ROOT
 
 
@@ -141,7 +141,7 @@ def test_contact_acceptance_requires_real_contact_and_retreat_populations():
     config = load_config(REPO_ROOT / "configs/train/stage/press_easy_quad.yaml")
     criteria = create_press_acceptance_criteria(
         config=config.rl.press,
-        flight_parameters=load_flight_parameters(REPO_ROOT / "tests/fixtures/flight_parameters"),
+        flight_parameters=HOVER_PARAMETERS,
     )
     values = {requirement.metric: requirement.required for requirement in criteria.requirements}
     evaluation = PolicyEvaluation(

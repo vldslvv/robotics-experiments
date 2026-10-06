@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from robotics_experiments.config import (
     FlightExecutionConfig,
@@ -232,7 +231,6 @@ class HoverParameters:
     attitude_error_rpy_rad: VectorBounds
     tilt_error_rad: UpperBound
     orientation_error_rad: UpperBound
-    trace_statistics: tuple["HoverTraceStatistics", ...]
     acceptance_limits: tuple["SignalStatistics", ...]
 
 
@@ -251,86 +249,16 @@ class SignalStatistics:
 
 
 @dataclass(frozen=True)
-class HoverTraceStatistics:
-    """Full-window and policy-window statistics for one hover repetition."""
-
-    trial_index: int
-    set_name: str
-    seed: int
-    full_window_sample_count: int
-    policy_window_start_s: float
-    policy_window_sample_count: int
-    full_window: tuple[SignalStatistics, ...]
-    policy_window: tuple[SignalStatistics, ...]
-
-
-@dataclass(frozen=True)
-class ResponseTraceEvidence:
-    """Lossless files for one general controller-response repetition."""
-
-    repetition: int
-    set_name: str
-    seed: int
-    profile_count: int
-    reference_path: str
-    reference_sha256: str
-    ulog_path: str
-    ulog_sha256: str
-    bridge_log_path: str
-    bridge_log_sha256: str
-
-
-@dataclass(frozen=True)
-class ResponseParameters:
-    """Ordered controller-response evidence retained without reduction."""
-
-    kind: str
-    repetitions: int
-    traces: tuple[ResponseTraceEvidence, ...]
-
-
-@dataclass(frozen=True)
 class FlightParameters:
-    """Strict v1 flight-parameters artifact consumed by alignment and RL."""
+    """Training-flight hover summary stored in alignment and policy metadata."""
 
-    artifact_kind: str
-    schema_version: int
-    flight_parameters_id: str
     run_id: str
-    created_at_utc: str
-    behavior_kinds: tuple[str, ...]
-    source_backend: str
-    state_source: str
-    experiment_config: str
-    vehicle: str
-    config_fingerprint: str
-    experiment_fingerprint: str
-    vehicle_fingerprint: str
-    source_image: str
-    source_commit: str
-    source_dirty: bool
-    evidence_fingerprint: str
-    hover_trial_count: int
-    hover_sample_count: int
-    settle_s: float
-    measure_s: float
     sample_rate_hz: float
     policy_warmup_s: float
+    policy_window_s: float
     position_margin_m: float
     attitude_margin_rad: float
     hover: HoverParameters
-    response: ResponseParameters
-    artifact_fingerprint: str
-
-
-@dataclass(frozen=True)
-class FlightParametersBundle:
-    """One validated immutable measurement resolved from a publication selector."""
-
-    run_dir: Path
-    flight_parameters: FlightParameters
-    flight_parameters_digest: str
-    manifest_digest: str
 
 
 @dataclass(frozen=True)

@@ -33,7 +33,6 @@ from robotics_experiments.alignment._align import (
 from robotics_experiments.alignment._artifact import _PENDING_QUALIFICATION, write_alignment_result
 from robotics_experiments.alignment._evaluation import evaluate_response
 from robotics_experiments.alignment._flight_parameters import (
-    load_alignment_dataset,
     training_hover_limits,
 )
 from robotics_experiments.alignment._io import _fingerprint, _trace, _TraceFileEvaluator
@@ -45,6 +44,7 @@ from robotics_experiments.alignment._models import (
     ProbeTrace,
 )
 from robotics_experiments.config import ExperimentConfig, load_config
+from robotics_experiments.flight_parameters import load_flight_selection
 
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _TARGET_ENV = "ALIGNMENT_TARGET"
@@ -883,6 +883,7 @@ def _worker_main(
     config_path: str,
     target_path: str,
     reference_traces: list[dict[str, Any]],
+    hover_limits: dict[str, float],
     candidate_capacity: int,
     spool_dir: str,
     task_queue,
@@ -901,16 +902,7 @@ def _worker_main(
             _trace(value=trace, name=f"reference[{index}]")
             for index, trace in enumerate(reference_traces)
         )
-        dataset, membership = load_alignment_dataset(
-            Path(os.environ[_RUN_DIR_ENV]) / "dataset.json"
-        )
         criteria = config.alignment.evaluation
-        hover_limits = training_hover_limits(
-            dataset=dataset,
-            membership=membership,
-            position_margin_m=criteria.hover_position_margin_m,
-            attitude_margin_rad=criteria.hover_attitude_margin_rad,
-        )
         # Bound the scene by one flight's profiles, independently of dataset size.
         flight_indices = tuple(dict.fromkeys(trace["flight_index"] for trace in reference_traces))
         trace_batches = [
@@ -1026,6 +1018,7 @@ class _WorkerPool:
         config_path: str,
         target_path: Path,
         reference_traces: list[dict[str, Any]],
+        hover_limits: dict[str, float],
         worker_count: int,
         candidate_capacity: int,
         spool_dir: Path,
@@ -1046,6 +1039,7 @@ class _WorkerPool:
                     "config_path": config_path,
                     "target_path": str(target_path),
                     "reference_traces": reference_traces,
+                    "hover_limits": hover_limits,
                     "candidate_capacity": candidate_capacity,
                     "spool_dir": str(spool_dir),
                     "task_queue": self._task_queues[index],
@@ -1266,6 +1260,9 @@ def _evaluate_fixed_set(
         config_path=os.environ[_CONFIG_PATH_ENV],
         target_path=target_path,
         reference_traces=payload["traces"],
+        hover_limits=training_hover_limits(
+            membership=json.loads((run_dir / "dataset.json").read_text())
+        ),
         worker_count=min(config.alignment.execution.worker_count, len(candidates)),
         candidate_capacity=min(config.alignment.execution.candidate_capacity, len(candidates)),
         spool_dir=spool_dir,
@@ -1328,7 +1325,7 @@ def _run(
     reference_traces = payload.get("traces")
     if not isinstance(reference_traces, list):
         raise ValueError(f"{reference_path} has no traces list")
-    dataset, membership = load_alignment_dataset(run_dir / "dataset.json")
+    dataset, membership = load_flight_selection(run_dir / "dataset.json")
     target = replace(target, flight_parameters_artifact=str(dataset.run_dir))
     reference_definition = replace(
         load_controller_definition(Path(os.environ["ALIGNMENT_REFERENCE"])),
@@ -1336,12 +1333,7 @@ def _run(
     )
     _validate_pair(target, reference_definition)
     criteria = config.alignment.evaluation
-    hover_limits = training_hover_limits(
-        dataset=dataset,
-        membership=membership,
-        position_margin_m=criteria.hover_position_margin_m,
-        attitude_margin_rad=criteria.hover_attitude_margin_rad,
-    )
+    hover_limits = training_hover_limits(membership=membership)
     maximum_expansion = _maximum_candidate_expansion(target)
     worker_count = min(config.alignment.execution.worker_count, maximum_expansion)
     candidate_capacity = min(
@@ -1359,6 +1351,7 @@ def _run(
         config_path=os.environ[_CONFIG_PATH_ENV],
         target_path=target_path,
         reference_traces=reference_traces,
+        hover_limits=hover_limits,
         worker_count=worker_count,
         candidate_capacity=candidate_capacity,
         spool_dir=spool_dir,
@@ -1528,6 +1521,9 @@ def _run_capacity_benchmark(
             config_path=os.environ[_CONFIG_PATH_ENV],
             target_path=target_path,
             reference_traces=raw_reference,
+            hover_limits=training_hover_limits(
+                membership=json.loads((run_dir / "dataset.json").read_text())
+            ),
             worker_count=1,
             candidate_capacity=capacity,
             spool_dir=spool_dir,

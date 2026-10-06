@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, fields, replace
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,7 +14,6 @@ from robotics_experiments.config import (
     PressApproachTerminationConfig,
     PressApproachVelocityReferenceConfig,
 )
-from robotics_experiments.flight_parameters import load_flight_parameters
 from robotics_experiments.rl.press import (
     PressApproachInput,
     PressApproachRewardTerms,
@@ -26,6 +24,7 @@ from robotics_experiments.rl.press import (
     reset_press_approach_state,
     step_press_approach,
 )
+from tests.support.flight_parameters import HOVER_PARAMETERS
 
 _GOAL = PressApproachGoalConfig(
     range_min_m=0.40,
@@ -67,9 +66,7 @@ _TERMINATION = PressApproachTerminationConfig(
     contact_data_capacity_per_body=32,
     contact_force_threshold_n=0.25,
 )
-_ENVELOPE = load_flight_parameters(
-    Path(__file__).parents[4] / "fixtures/flight_parameters/flight_parameters.json"
-)
+_ENVELOPE = HOVER_PARAMETERS
 
 
 def _quat(*, angle_rad: float) -> np.ndarray:

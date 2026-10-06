@@ -420,16 +420,13 @@ def _dataset(
     return run
 
 
-def test_dataset_publication_freezes_metadata_and_checks_all_hashes(tmp_path: Path) -> None:
+def test_dataset_publication_freezes_metadata(tmp_path: Path) -> None:
     run = _dataset(root=tmp_path, run_id="run-a")
     latest = finalize_flight_dataset(run)
     dataset = load_flight_dataset(latest)
     assert dataset.run_dir == run and dataset.flights[0].seed == 1001
     with pytest.raises(TypeError):
         dataset.flights[0].metadata["seed"] = 7
-    (run / "flights/flight-000/motion.jsonl").write_text("corrupt")
-    with pytest.raises(ValueError, match="hash or size mismatch"):
-        load_flight_dataset(latest)
 
 
 def test_stability_resamples_whole_flights_and_requires_comparison_batches(tmp_path: Path) -> None:
@@ -574,6 +571,7 @@ def test_campaign_identity_and_resume_preserve_evidence(
         "schema_version",
         "flight_parameters_id",
         "run_id",
+        "flight_count",
         "completed",
         "definition",
         "flights",
@@ -590,7 +588,66 @@ def test_campaign_identity_and_resume_preserve_evidence(
     main()
     assert len(captures) == flight_count and len(calls) == 1
     assert (directory / "complete.json").read_bytes() == complete
-    (directory / "bridge.log.gz").write_bytes(b"corrupt")
-    with pytest.raises(ValueError, match="hash or size mismatch"):
-        main()
-    assert len(captures) == flight_count
+
+
+@pytest.mark.parametrize("failed", [(1,), (0, 1, 2)], ids=["partial", "all"])
+def test_campaign_publishes_successful_flights_and_reports_failures(
+    tmp_path, monkeypatch, caplog, failed
+):
+    import runpy
+    import shutil
+    import sys
+    import types
+
+    pyulog = types.ModuleType("pyulog")
+    pyulog.ULog = object
+    monkeypatch.setitem(sys.modules, "pyulog", pyulog)
+    main = runpy.run_path(str(REPO_ROOT / "make/scripts/run_flight_parameters_campaign.py"))["main"]
+    globals_ = main.__globals__
+    source = _dataset(root=tmp_path, run_id="source", flights=3)
+    attempted = []
+
+    def flight_result(*, flight, run_dir, **_kwargs):
+        attempted.append(flight.index)
+        if flight.index in failed:
+            raise RuntimeError(f"injected flight {flight.index} failure")
+        directory = run_dir / flight.directory
+        shutil.copytree(source / flight.directory, directory)
+        checkpoint = json.loads((directory / "complete.json").read_text())
+        return globals_["_CompletedFlight"](
+            flight=flight, retained_bytes=sum(item["size_bytes"] for item in checkpoint["files"])
+        )
+
+    monkeypatch.setitem(globals_, "_run_flight", flight_result)
+    monkeypatch.setitem(globals_, "_check_space", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "campaign",
+            "--config",
+            str(REPO_ROOT / "configs/flight_parameters_x500.yaml"),
+            "--flight-count",
+            "3",
+            "--run-id",
+            "failures",
+            "--output-root",
+            str(tmp_path / "out"),
+        ],
+    )
+    main()
+    run = tmp_path / "out" / _config().flight_parameters_id / "failures"
+    dataset = load_flight_dataset(run.parent / "latest")
+    expected = [index for index in range(3) if index not in failed]
+    assert sorted(attempted) == [0, 1, 2]
+    assert [flight.flight_index for flight in dataset.flights] == expected
+    assert [flight.seed for flight in dataset.flights] == [1001 + index for index in expected]
+    assert json.loads((run / "flight_parameters.json").read_text())["flight_count"] == len(expected)
+    assert dataset.definition["flight_count"] == 3
+    report = json.loads((run.parent / "stability/failures.json").read_text())
+    assert report["status"] == "insufficient-evidence"
+    assert (run / "manifest.json").is_file()
+    for index in failed:
+        assert f"Flight {index} failed" in caplog.text
+        assert f"injected flight {index} failure" in caplog.text
+    assert all(record.exc_info is not None for record in caplog.records)

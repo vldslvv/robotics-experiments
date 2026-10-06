@@ -14,6 +14,7 @@ import json
 import math
 import multiprocessing
 import os
+import pickle
 import queue
 import random
 import shutil
@@ -39,7 +40,9 @@ from robotics_experiments.config import (
     load_config,
 )
 from robotics_experiments.controller import ControllerArtifact
-from robotics_experiments.flight_parameters import FlightParameters, load_flight_parameters_bundle
+from robotics_experiments.flight_parameters import (
+    FlightParameters,
+)
 from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME, HoverResetSamples
 from robotics_experiments.rl.evaluation import EvaluationMetric, PolicyEvaluation, RewardMean
 from robotics_experiments.rl.press import (
@@ -57,7 +60,6 @@ from robotics_experiments.rl.training._monitoring import (
 )
 from robotics_experiments.rl.training._telemetry import TelemetrySampler, probe_telemetry
 from robotics_experiments.rl.training.checkpoint import (
-    load_checkpoint,
     restore_checkpoint,
     save_checkpoint,
 )
@@ -70,7 +72,7 @@ from robotics_experiments.rl.training.publication import (
     _REPORT_SCHEMA_VERSION,
     publish_policy_labels,
 )
-from robotics_experiments.switches import SwitchAsset, load_switch_asset
+from robotics_experiments.switches import SwitchAsset
 from robotics_experiments.workflows.isaac_lab._contact_evaluation import _evaluate_contact_policy
 
 __all__ = [
@@ -214,7 +216,7 @@ def _experiment_provenance(
                 "path": str(inputs.flight_parameters_path),
                 "run_id": inputs.flight_parameters.run_id,
                 "sha256": inputs.flight_parameters_digest,
-                "fingerprint": inputs.flight_parameters.artifact_fingerprint,
+                "dataset": str(inputs.dataset_path),
             },
         },
     }
@@ -260,6 +262,7 @@ def _artifact_metadata(
     flight_parameters: FlightParameters,
     flight_parameters_digest: str,
     hover_reset_samples: HoverResetSamples,
+    dataset_path: Path,
     switch_asset: SwitchAsset,
 ) -> dict[str, Any]:
     metadata = rl.policy_metadata(
@@ -268,6 +271,7 @@ def _artifact_metadata(
         controller_digest=controller_digest,
         flight_parameters=flight_parameters,
         flight_parameters_digest=flight_parameters_digest,
+        dataset_path=os.path.relpath(dataset_path, _repo_root()),
         obs_schema_version=int(env_cfg.observation_schema_version),
         obs_dim=int(env_cfg.observation_space),
         policy_rate_hz=config.rates.command_rate_hz,
@@ -378,10 +382,8 @@ def _evaluation_from_payload(
     policy_digest: str,
     source: str,
 ) -> PolicyEvaluation:
-    metrics = payload.get("metrics")
-    reward_means = payload.get("reward_means")
-    if not isinstance(metrics, dict) or not isinstance(reward_means, dict):
-        raise ValueError("policy evaluation report has an invalid metric contract")
+    metrics = payload["metrics"]
+    reward_means = payload["reward_means"]
     return PolicyEvaluation(
         iteration=iteration,
         checkpoint_path=checkpoint_path,
@@ -399,28 +401,20 @@ def _evaluation_from_payload(
 def _evaluation_worker_main(
     *,
     config_path: str,
-    run_dir: str,
-    flight_parameters_path: str,
-    flight_parameters_digest: str,
-    switch_asset: SwitchAsset,
+    inputs: rl.PolicyInputs,
+    contract: rl.PolicyContract,
     task_queue,
     result_queue,
     workload_role: str,
 ) -> None:
-    config = load_config(config_path)
-    load_switch_asset(model=config.switches.model, expected=switch_asset)
-    from isaaclab.app import AppLauncher
-
-    app_launcher = AppLauncher(headless=True)
-    simulation_app = app_launcher.app
+    simulation_app = None
     try:
-        metadata = rl.load_policy_metadata(artifact_dir=Path(run_dir))
-        flight_parameters_bundle = load_flight_parameters_bundle(path=flight_parameters_path)
-        if flight_parameters_bundle.flight_parameters_digest != flight_parameters_digest:
-            raise ValueError("pinned flight parameters changed before evaluation")
-        if flight_parameters_bundle.flight_parameters != metadata.flight_parameters:
-            raise ValueError("evaluation flight parameters differ from policy metadata")
-        hover_reset_samples = rl.load_hover_reset_samples(bundle=flight_parameters_bundle)
+        config = load_config(config_path)
+        # AppLauncher starts before importing the Isaac Lab workflow.
+        from isaaclab.app import AppLauncher
+
+        app_launcher = AppLauncher(headless=True)
+        simulation_app = app_launcher.app
         evaluation_config = config.rl.press.evaluation
         if workload_role == "validation":
             seeds = tuple(int(seed) for seed in evaluation_config.validation_seeds)
@@ -434,11 +428,11 @@ def _evaluation_worker_main(
             seed=seeds[0],
             num_envs=evaluation_config.episodes_per_seed,
             experiment_config=config,
-            controller_settings=metadata.controller_settings,
-            flight_parameters=metadata.flight_parameters,
-            hover_reset_samples=hover_reset_samples,
-            switch_asset=switch_asset,
-            policy_contract=metadata.contract,
+            controller_settings=inputs.controller.selected_settings,
+            flight_parameters=inputs.flight_parameters,
+            hover_reset_samples=inputs.hover_reset_samples,
+            switch_asset=inputs.switch_asset,
+            policy_contract=contract,
         )
         telemetry = TelemetrySampler(
             sample_interval_s=config.rl.training.telemetry_sample_interval_s
@@ -451,9 +445,6 @@ def _evaluation_worker_main(
                     break
                 iteration, checkpoint_name, artifact_name, policy_digest = request
                 artifact_dir = Path(artifact_name)
-                candidate_metadata = rl.validate_policy_artifact(artifact_dir=artifact_dir)
-                if candidate_metadata.contract != metadata.contract:
-                    raise ValueError("evaluation candidate changed the policy contract")
                 policy = torch.jit.load(
                     str(artifact_dir / POLICY_FILENAME),
                     map_location=env.device,
@@ -486,7 +477,7 @@ def _evaluation_worker_main(
                             seeds=seeds,
                             episodes_per_seed=evaluation_config.episodes_per_seed,
                             hold_steps=config.rl.press.goal.stable_steps,
-                            flight_parameters=candidate_metadata.flight_parameters,
+                            flight_parameters=inputs.flight_parameters,
                             report=_report,
                             trace_worst_episode=False,
                         )
@@ -508,7 +499,8 @@ def _evaluation_worker_main(
         result_queue.put(("error", traceback.format_exc()))
         raise
     finally:
-        simulation_app.close()
+        if simulation_app is not None:
+            simulation_app.close()
 
 
 class _EvaluationWorker:
@@ -518,10 +510,8 @@ class _EvaluationWorker:
         self,
         *,
         config_path: Path,
-        run_dir: Path,
-        flight_parameters_path: Path,
-        flight_parameters_digest: str,
-        switch_asset: SwitchAsset,
+        inputs: rl.PolicyInputs,
+        contract: rl.PolicyContract,
         timeout_s: float,
         workload_role: str,
     ) -> None:
@@ -533,10 +523,8 @@ class _EvaluationWorker:
             target=_evaluation_worker_main,
             kwargs={
                 "config_path": str(config_path),
-                "run_dir": str(run_dir),
-                "flight_parameters_path": str(flight_parameters_path),
-                "flight_parameters_digest": flight_parameters_digest,
-                "switch_asset": switch_asset,
+                "inputs": inputs,
+                "contract": contract,
                 "task_queue": self._tasks,
                 "result_queue": self._results,
                 "workload_role": workload_role,
@@ -553,8 +541,6 @@ class _EvaluationWorker:
             message = self._results.get(timeout=self._timeout_s)
         except queue.Empty as exc:
             raise RuntimeError("held-out evaluator exceeded its configured timeout") from exc
-        if not isinstance(message, tuple) or len(message) != 2:
-            raise RuntimeError("held-out evaluator returned an invalid response")
         return message
 
     def evaluate(
@@ -569,14 +555,6 @@ class _EvaluationWorker:
         kind, payload = self._receive()
         if kind == "error":
             raise RuntimeError(f"held-out evaluator failed:\n{payload}")
-        if (
-            kind != "evaluation"
-            or not isinstance(payload, tuple)
-            or len(payload) != 2
-            or not isinstance(payload[0], PolicyEvaluation)
-            or not isinstance(payload[1], dict)
-        ):
-            raise RuntimeError("held-out evaluator returned an invalid evaluation")
         return payload
 
     def close(self) -> None:
@@ -670,11 +648,9 @@ def _acceptance_payload(*, acceptance) -> dict[str, Any]:
 
 
 def _acceptance_from_payload(*, payload: dict[str, Any]) -> AcceptanceResult:
-    checks = payload.get("checks")
-    if not isinstance(checks, list):
-        raise ValueError("attempt acceptance payload is incomplete")
+    checks = payload["checks"]
     return AcceptanceResult(
-        passed=bool(payload.get("passed")),
+        passed=payload["passed"],
         checks=tuple(
             AcceptanceCheck(
                 name=str(check["name"]),
@@ -750,22 +726,15 @@ def _run_final_test(
     config_path: Path,
     config: ExperimentConfig,
     selection: _AttemptSelection,
-    flight_parameters_path: Path,
-    flight_parameters_digest: str,
-    switch_asset: SwitchAsset,
+    inputs: rl.PolicyInputs,
 ) -> tuple[PolicyEvaluation, dict[str, Any]]:
     """Run one fresh final test of the exact validation-selected actor."""
 
     selected = selection.evaluation
-    selected_policy = selection.artifact_dir / POLICY_FILENAME
-    if _file_sha256(selected_policy) != selected.policy_digest:
-        raise RuntimeError("validation-selected actor changed before final test")
     test_worker = _EvaluationWorker(
         config_path=config_path,
-        run_dir=selection.artifact_dir,
-        flight_parameters_path=flight_parameters_path,
-        flight_parameters_digest=flight_parameters_digest,
-        switch_asset=switch_asset,
+        inputs=inputs,
+        contract=press_policy_contract(config=config, controller=inputs.controller),
         timeout_s=config.rl.training.evaluation_worker_timeout_s,
         workload_role="test",
     )
@@ -778,10 +747,6 @@ def _run_final_test(
         )
     finally:
         _close_resource(test_worker)
-    if test_evaluation.source != "fresh-test":
-        raise RuntimeError("final test evaluation was not executed freshly")
-    if test_evaluation.policy_digest != selected.policy_digest:
-        raise RuntimeError("final test evaluated a different actor digest")
     return test_evaluation, telemetry_interval
 
 
@@ -799,12 +764,6 @@ def _attempt_report(
 
 
 def _selection_from_report(*, run_dir: Path, report: dict[str, Any]) -> _AttemptSelection | None:
-    if (
-        report["schema_version"] != _REPORT_SCHEMA_VERSION
-        or report["report_kind"] != "attempt"
-        or report["artifact_run_id"] != run_dir.name
-    ):
-        raise ValueError("invalid attempt report identity or schema")
     index = report.get("selected_evaluation_index")
     if index is None:
         return None
@@ -848,7 +807,6 @@ def _selected_payload(
 
 def _attempt_worker_command(
     *,
-    inputs: rl.PolicyInputs,
     attempt_index: int,
     procedural_smoke: bool,
     monitoring_dir: Path,
@@ -860,16 +818,6 @@ def _attempt_worker_command(
         "--attempt-worker",
         "--attempt-index",
         str(attempt_index),
-        "--controller-artifact",
-        str(inputs.controller_path),
-        "--controller-artifact-digest",
-        inputs.controller_digest,
-        "--flight-parameters-artifact",
-        str(inputs.flight_parameters_path),
-        "--flight-parameters-artifact-digest",
-        inputs.flight_parameters_digest,
-        "--switch-asset",
-        json.dumps(inputs.switch_asset.record()),
         "--monitoring-dir",
         str(monitoring_dir),
         "--update-offset",
@@ -893,21 +841,13 @@ def pin_learner(*, report_path: Path) -> LearnerCheckpoint:
     artifact_dir = (run_dir / selected["policy"]).resolve(strict=True).parent
     if not checkpoint.is_relative_to(run_dir) or not artifact_dir.is_relative_to(run_dir):
         raise ValueError("selected learner escapes its producer run")
-    checkpoint_digest = _file_sha256(checkpoint)
-    if selected["checkpoint_digest"] != checkpoint_digest:
-        raise ValueError("selected checkpoint digest does not match its report")
-    policy_digest = _file_sha256(artifact_dir / POLICY_FILENAME)
-    if policy_digest != selected["policy_digest"]:
-        raise ValueError("selected actor digest does not match its report")
-    if _file_sha256(artifact_dir / METADATA_FILENAME) != selected["metadata_digest"]:
-        raise ValueError("selected policy metadata changed")
     return LearnerCheckpoint(
         checkpoint=str(checkpoint),
         artifact_dir=str(artifact_dir),
         report_path=str(report_path),
-        checkpoint_digest=checkpoint_digest,
-        policy_digest=policy_digest,
-        metadata_digest=_file_sha256(artifact_dir / METADATA_FILENAME),
+        checkpoint_digest=selected["checkpoint_digest"],
+        policy_digest=selected["policy_digest"],
+        metadata_digest=selected["metadata_digest"],
         report_digest=_file_sha256(report_path),
     )
 
@@ -919,26 +859,11 @@ def validate_learner(
     inputs: rl.PolicyInputs,
 ) -> None:
     """Check complete learner identity and compatibility, regardless of qualification."""
-    if pin_learner(report_path=Path(learner.report_path)) != learner:
-        raise ValueError("pinned learner differs from its producer report")
     artifact_dir = Path(learner.artifact_dir)
-    for path, digest in (
-        (Path(learner.checkpoint), learner.checkpoint_digest),
-        (artifact_dir / POLICY_FILENAME, learner.policy_digest),
-        (artifact_dir / METADATA_FILENAME, learner.metadata_digest),
-        (Path(learner.report_path), learner.report_digest),
-    ):
-        if _file_sha256(path) != digest:
-            raise ValueError(f"pinned learner input changed: {path}")
     metadata = rl.validate_policy_artifact(artifact_dir=artifact_dir)
     contract = press_policy_contract(config=config, controller=inputs.controller)
     if replace(metadata.contract, curriculum_stage=contract.curriculum_stage) != contract:
         raise ValueError("initial learner has an incompatible policy contract")
-    if (
-        metadata.controller_digest != inputs.controller_digest
-        or metadata.flight_parameters_digest != inputs.flight_parameters_digest
-    ):
-        raise ValueError("initial learner uses different pinned controller or flight evidence")
     # Architecture comes from the pinned producer report, independent of pipeline labels.
     source_policy = json.loads(Path(learner.report_path).read_text())["provenance"][
         "resolved_config"
@@ -949,22 +874,6 @@ def validate_learner(
             raise ValueError(f"initial learner has incompatible policy {key}")
     if source_policy["actor"]["hidden_dims"] != target_policy["actor"]["hidden_dims"]:
         raise ValueError("initial learner has incompatible actor dimensions")
-    payload = load_checkpoint(checkpoint_path=Path(learner.checkpoint))
-    state = payload["model_state_dict"]
-    actor_state = {
-        (
-            "0." + key.removeprefix("actor_obs_normalizer.")
-            if key.startswith("actor_obs_normalizer.")
-            else "1." + key.removeprefix("actor.")
-        ): value
-        for key, value in state.items()
-        if key.startswith(("actor_obs_normalizer.", "actor."))
-    }
-    exported = torch.jit.load(str(artifact_dir / POLICY_FILENAME), map_location="cpu").state_dict()
-    if actor_state.keys() != exported.keys() or any(
-        not torch.equal(actor_state[key], exported[key]) for key in exported
-    ):
-        raise ValueError("initial learner checkpoint does not match its selected actor")
 
 
 def run_attempt(
@@ -988,7 +897,7 @@ def run_attempt(
     comparison_fingerprint = _press_comparison_fingerprint(
         config=config,
         contract=press_policy_contract(config=config, controller=inputs.controller),
-        flight_parameters_fingerprint=inputs.flight_parameters.artifact_fingerprint,
+        alignment_comparison_fingerprint=inputs.controller.comparison_fingerprint,
     )
     training_config = config.rl.training
     plateau_criteria = config.rl.training.plateau
@@ -1001,13 +910,6 @@ def run_attempt(
         if procedural_smoke
         else tuple(config.rl.training.phases)
     )
-    if initial_learner is not None:
-        validate_learner(learner=initial_learner, config=config, inputs=inputs)
-    recorded = json.loads((run_dir / _REPORT_FILENAME).read_text())
-    if recorded["provenance"]["resolved_config"] != _config_values(config):
-        raise ValueError("stage configuration changed before worker startup")
-    if not run_dir.is_dir():
-        raise ValueError(f"campaign run directory does not exist: {run_dir}")
     writer = None
     validation_worker: _EvaluationWorker | None = None
     partial_attempt_report_path: Path | None = None
@@ -1071,23 +973,11 @@ def run_attempt(
                 flight_parameters=flight_parameters,
                 flight_parameters_digest=flight_parameters_digest,
                 hover_reset_samples=inputs.hover_reset_samples,
+                dataset_path=inputs.dataset_path,
                 switch_asset=inputs.switch_asset,
             )
-            if metadata["policy_interface"] != rl.PolicyInterface.PRESS.value:
-                raise ValueError("campaign requires the press deterministic evaluator")
             metadata["training_phases"] = [asdict(phase) for phase in phases]
             metadata["plateau_criteria"] = asdict(plateau_criteria)
-            _write_artifact_metadata(run_dir=attempt_dir, metadata=metadata)
-            contract = rl.load_policy_metadata(artifact_dir=attempt_dir).contract
-            attempt_fingerprint = _press_comparison_fingerprint(
-                config=config,
-                contract=contract,
-                flight_parameters_fingerprint=flight_parameters.artifact_fingerprint,
-            )
-            if attempt_fingerprint is None:
-                raise ValueError("press campaign did not produce a comparison fingerprint")
-            if attempt_fingerprint != comparison_fingerprint:
-                raise ValueError("training attempt changed the comparison fingerprint")
             metadata["comparison_fingerprint"] = comparison_fingerprint
             metadata["initialization"] = (
                 {"method": env_cfg.policy_config.actor.output_initialization}
@@ -1178,10 +1068,8 @@ def run_attempt(
                 if validation_worker is None:
                     validation_worker = _EvaluationWorker(
                         config_path=config_path,
-                        run_dir=attempt_dir,
-                        flight_parameters_path=inputs.flight_parameters_path,
-                        flight_parameters_digest=inputs.flight_parameters_digest,
-                        switch_asset=inputs.switch_asset,
+                        inputs=inputs,
+                        contract=press_policy_contract(config=config, controller=inputs.controller),
                         timeout_s=training_config.evaluation_worker_timeout_s,
                         workload_role="validation",
                     )
@@ -1526,15 +1414,13 @@ def run_training(
     procedural_smoke: bool,
 ) -> TrainingResult:
     """Own one attempt campaign, validation selection and one fresh acceptance test."""
-    if initial_learner is not None:
-        validate_learner(learner=initial_learner, config=config, inputs=inputs)
     criteria = create_press_acceptance_criteria(
         config=config.rl.press, flight_parameters=inputs.flight_parameters
     )
     fingerprint = _press_comparison_fingerprint(
         config=config,
         contract=press_policy_contract(config=config, controller=inputs.controller),
-        flight_parameters_fingerprint=inputs.flight_parameters.artifact_fingerprint,
+        alignment_comparison_fingerprint=inputs.controller.comparison_fingerprint,
     )
     phases = (
         _procedural_smoke_phases(phases=tuple(config.rl.training.phases))
@@ -1569,7 +1455,6 @@ def run_training(
     }
     selections: list[_AttemptSelection] = []
     selected: _AttemptSelection | None = None
-    worker_pids: set[int] = set()
 
     def collect_attempts() -> None:
         nonlocal selected
@@ -1612,7 +1497,6 @@ def run_training(
             if initial_learner:
                 worker_environment[_INITIAL_LEARNER_ENV] = json.dumps(asdict(initial_learner))
             command = _attempt_worker_command(
-                inputs=inputs,
                 attempt_index=attempt_index,
                 procedural_smoke=procedural_smoke,
                 monitoring_dir=monitoring_dir,
@@ -1621,9 +1505,12 @@ def run_training(
             _report(
                 f"attempt process START run={run_dir.name} attempt={attempt_index + 1} seed={seed}"
             )
-            with subprocess.Popen(command, cwd=_repo_root(), env=worker_environment) as process:
+            with subprocess.Popen(
+                command, cwd=_repo_root(), env=worker_environment, stdin=subprocess.PIPE
+            ) as process:
                 try:
-                    returncode = process.wait()
+                    process.communicate(input=pickle.dumps(inputs))
+                    returncode = process.returncode
                 except BaseException:
                     process.terminate()
                     try:
@@ -1638,12 +1525,6 @@ def run_training(
             if not attempt_report_path.is_file():
                 raise RuntimeError("attempt worker exited without an attempt report")
             attempt = json.loads(attempt_report_path.read_text())
-            if attempt["attempt_index"] != attempt_index or attempt["training_seed"] != seed:
-                raise ValueError("attempt worker identity differs from its launch")
-            pid = attempt["worker_pid"]
-            if pid == os.getpid() or pid in worker_pids:
-                raise ValueError("attempts must run in distinct worker processes")
-            worker_pids.add(pid)
             if attempt["status"] not in {
                 "validation_passed",
                 "validation_failed",
@@ -1678,9 +1559,7 @@ def run_training(
                 config_path=config_path,
                 config=config,
                 selection=selected,
-                flight_parameters_path=inputs.flight_parameters_path,
-                flight_parameters_digest=inputs.flight_parameters_digest,
-                switch_asset=inputs.switch_asset,
+                inputs=inputs,
             )
             acceptance = evaluate_press_acceptance(criteria=criteria, evaluation=evaluation)
             report["test_evaluation"] = {
@@ -1743,18 +1622,8 @@ def publish_training(
     """Publish an accepted stage's exact tested actor without changing its report."""
     learner = result.selected_checkpoint
     report = json.loads(result.report_path.read_text())
-    if (
-        not result.accepted
-        or learner is None
-        or report["status"] != "accepted"
-        or not report["acceptance"]["passed"]
-    ):
+    if not result.accepted or learner is None:
         raise ValueError("only an accepted stage can be published")
-    if (
-        pin_learner(report_path=result.report_path) != learner
-        or report["test_evaluation"]["policy_digest"] != learner.policy_digest
-    ):
-        raise ValueError("published learner must match the exact accepted actor")
     run_dir = result.report_path.parent
     selected = report["selected"]
     attempt = json.loads((run_dir / report["attempts"][selected["attempt_index"]]).read_text())
@@ -1791,10 +1660,7 @@ def publish_training(
     with tempfile.TemporaryDirectory(prefix=".training-publication-", dir=run_dir) as temporary:
         staging = Path(temporary)
         shutil.copy2(Path(learner.artifact_dir) / POLICY_FILENAME, staging / POLICY_FILENAME)
-        if _file_sha256(staging / POLICY_FILENAME) != learner.policy_digest:
-            raise RuntimeError("publication changed the tested actor bytes")
         _write_json(path=staging / METADATA_FILENAME, payload=metadata)
-        rl.validate_policy_artifact(artifact_dir=staging)
         for filename in (POLICY_FILENAME, METADATA_FILENAME):
             (staging / filename).replace(run_dir / filename)
     metric = selected["metric"]

@@ -1,7 +1,5 @@
 """Parity tests for batched measured-envelope evaluation."""
 
-import json
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -10,14 +8,13 @@ import torch
 
 from robotics_experiments.flight_parameters import (
     evaluate_hover_pose,
-    load_flight_parameters,
-    load_flight_parameters_bundle,
+    flight_parameters_from_payload,
+    load_flight_selection,
 )
 from robotics_experiments.rl import evaluate_hover_envelope, load_hover_reset_samples
+from tests.support.flight_parameters import HOVER_PARAMETERS, write_hover_dataset
 
-_ENVELOPE = load_flight_parameters(
-    Path(__file__).parents[3] / "fixtures/flight_parameters/flight_parameters.json"
-)
+_ENVELOPE = HOVER_PARAMETERS
 
 
 @pytest.mark.parametrize("backend", ["numpy", "torch"])
@@ -65,100 +62,40 @@ def test_batched_evaluation_matches_flight_parameter_contract(backend: str) -> N
     assert inside.tolist() == [sample.inside for sample in expected]
 
 
-def test_hover_resets_are_exact_paired_policy_window_samples() -> None:
-    bundle = load_flight_parameters_bundle(
-        path=Path(__file__).parents[3] / "fixtures/flight_parameters"
+def test_hover_resets_and_bounds_use_paired_training_samples(tmp_path: Path) -> None:
+    path = write_hover_dataset(tmp_path)
+    dataset, selection = load_flight_selection(path)
+    summary = flight_parameters_from_payload(selection["hover"])
+    samples = load_hover_reset_samples(
+        dataset=dataset,
+        flight_indices=tuple(selection["train"]),
+        flight_parameters=summary,
     )
-    samples = load_hover_reset_samples(bundle=bundle)
-    assert samples.position_error_enu_m == ((0.0, 0.0, 0.0),)
-    assert samples.attitude_error_flu_enu_wxyz == ((1.0, 0.0, 0.0, 0.0),)
-    assert samples.linear_velocity_enu_mps == ((0.0, 0.0, 0.0),)
-    assert samples.angular_velocity_enu_radps == ((0.0, 0.0, 0.0),)
-    assert samples.summary(flight_parameters=bundle.flight_parameters) == {
-        "sample_count": 1.0,
-        "position_error_enu_x_mean_m": 0.0,
-        "position_error_enu_y_mean_m": 0.0,
-        "position_error_enu_z_mean_m": 0.0,
-        "position_envelope_utilization_mean": 0.0,
-        "position_envelope_utilization_p95": 0.0,
-        "position_envelope_utilization_max": 0.0,
-        "attitude_envelope_utilization_mean": 0.0,
-        "attitude_envelope_utilization_p95": 0.0,
-        "attitude_envelope_utilization_max": 0.0,
-        "linear_speed_mean_mps": 0.0,
-        "linear_speed_p95_mps": 0.0,
-        "angular_speed_mean_radps": 0.0,
-        "angular_speed_p95_radps": 0.0,
-    }
-
-
-def test_hover_reset_motion_comes_from_the_same_trace(tmp_path: Path) -> None:
-    source = Path(__file__).parents[3] / "fixtures/flight_parameters"
-    bundle = load_flight_parameters_bundle(path=source)
-    trace = json.loads((source / "evidence/trial-001/trace.json").read_text())
-    trace["time_s"] = [0.0, 1.0, 2.0]
-    trace["position_enu_m"] = [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [2.0, 0.0, 1.0]]
-    trace["attitude_flu_enu_wxyz"] = [
-        [1.0, 0.0, 0.0, 0.0],
-        [float(np.cos(0.05)), 0.0, 0.0, float(np.sin(0.05))],
-        [float(np.cos(0.10)), 0.0, 0.0, float(np.sin(0.10))],
-    ]
-    trace["linear_velocity_enu_mps"] = [[3.0, 4.0, 5.0], [6.0, 7.0, 8.0], [9.0, 10.0, 11.0]]
-    trace["angular_velocity_enu_radps"] = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]]
-    trace_dir = tmp_path / "evidence/trial-001"
-    trace_dir.mkdir(parents=True)
-    (trace_dir / "trace.json").write_text(json.dumps(trace))
-
-    samples = load_hover_reset_samples(bundle=replace(bundle, run_dir=tmp_path))
-
-    assert samples.position_error_enu_m == ((2.0, 0.0, 0.0),)
-    assert samples.linear_velocity_enu_mps == ((9.0, 10.0, 11.0),)
-    assert samples.angular_velocity_enu_radps[0] == pytest.approx((0.7, 0.8, 0.9))
-
-
-def test_handoff_bounds_exclude_held_out_flights_and_contain_reset_states() -> None:
-    bundle = load_flight_parameters_bundle(
-        path=Path(__file__).parents[3] / "fixtures/flight_parameters"
-    )
-    hover = bundle.flight_parameters.hover
-    held_out = tuple(
-        replace(hover.trace_statistics[0], trial_index=index, set_name=name)
-        for index, name in ((2, "validation"), (3, "acceptance"))
-    )
-    bundle = replace(
-        bundle,
-        flight_parameters=replace(
-            bundle.flight_parameters,
-            hover=replace(hover, trace_statistics=hover.trace_statistics + held_out),
+    assert len(samples.position_error_enu_m) == 24
+    for index, (position, attitude, linear, angular) in enumerate(
+        zip(
+            samples.position_error_enu_m,
+            samples.attitude_error_flu_enu_wxyz,
+            samples.linear_velocity_enu_mps,
+            samples.angular_velocity_enu_radps,
+            strict=True,
         ),
-    )
-    # No files for held-out trials are present. Loading bounds must use exactly
-    # the same fit-only loader as PPO, without attempting to read those trials.
-    samples = load_hover_reset_samples(bundle=bundle)
-    bounds = samples.bounds()
-    for pos, quat, linear, angular in zip(
-        samples.position_error_enu_m,
-        samples.attitude_error_flu_enu_wxyz,
-        samples.linear_velocity_enu_mps,
-        samples.angular_velocity_enu_radps,
-        strict=True,
+        start=6,
     ):
+        assert position == (index * 0.001, 0.0, 0.0)
+        assert attitude == pytest.approx((np.cos(index * 0.0005), 0.0, 0.0, np.sin(index * 0.0005)))
+        assert linear == (index * 0.01, 0.0, 0.0)
+        assert angular == (0.0, 0.0, index * 0.001)
         assert (
-            bounds.rejection_reason(
-                position_error_enu_m=np.asarray(pos),
-                attitude_error_wxyz=np.asarray(quat),
+            samples.bounds().rejection_reason(
+                position_error_enu_m=np.asarray(position),
+                attitude_error_wxyz=np.asarray(attitude),
                 linear_velocity_enu_mps=np.asarray(linear),
                 angular_velocity_enu_radps=np.asarray(angular),
             )
             is None
         )
-    assert bounds.position_max_m == (0.0, 0.0, 0.0, 0.0, 0.0)
-    assert (
-        bounds.rejection_reason(
-            position_error_enu_m=np.array([0.001, 0.0, 0.0]),
-            attitude_error_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
-            linear_velocity_enu_mps=np.zeros(3),
-            angular_velocity_enu_radps=np.zeros(3),
-        )
-        == "position"
-    )
+    # Held-out flights have ten- and twenty-metre offsets.
+    assert summary.hover.position_error_m.upper == pytest.approx(0.034)
+    assert samples.bounds().position_max_m[0] == pytest.approx(0.029)
+    assert samples.summary(flight_parameters=summary)["sample_count"] == 24.0

@@ -41,9 +41,8 @@ from robotics_experiments.controller import (
 )
 from robotics_experiments.flight_parameters import (
     FlightParameters,
-    load_flight_parameters_bundle,
 )
-from robotics_experiments.rl import HoverResetSamples, load_hover_reset_samples
+from robotics_experiments.rl import HoverResetSamples, prepare_policy_inputs
 from robotics_experiments.switches import load_switch_asset
 
 if TYPE_CHECKING:
@@ -781,60 +780,15 @@ def _contact_chain_inputs(
     *, config: ExperimentConfig
 ) -> tuple[ControllerSettings, FlightParameters, HoverResetSamples]:
     repo_root = Path(__file__).resolve().parents[4]
-    controller, controller_path = _controller_artifact(config=config)
-    flight_parameters_path = Path(config.rl.inputs.flight_parameters_artifact)
-    if not flight_parameters_path.is_absolute():
-        flight_parameters_path = repo_root / flight_parameters_path
-    bundle = load_flight_parameters_bundle(path=flight_parameters_path)
-    flight_parameters = bundle.flight_parameters
-
-    vehicle_id = config.rl.training.vehicle_id
-    try:
-        vehicle_label, vehicle = next(
-            (label, item) for label, item in config.vehicles.items() if item.id == vehicle_id
-        )
-    except StopIteration as exc:
-        raise ValueError(f"rl.training.vehicle_id={vehicle_id} is not in the experiment") from exc
-    mismatches = []
-    if controller.vehicle != vehicle_label:
-        mismatches.append(f"controller vehicle {controller.vehicle!r} != {vehicle_label!r}")
-    if controller.airframe != Path(vehicle.spawn.usd_path).name:
-        mismatches.append(
-            f"controller airframe {controller.airframe!r} != {Path(vehicle.spawn.usd_path).name!r}"
-        )
-    if controller.command_rate_hz != config.rates.command_rate_hz:
-        mismatches.append(
-            f"controller rate {controller.command_rate_hz} != {config.rates.command_rate_hz}"
-        )
-    if config.rl.action.kind not in controller.certified_control_modes:
-        mismatches.append(f"controller does not certify action kind {config.rl.action.kind!r}")
-    if flight_parameters.vehicle != vehicle_label:
-        mismatches.append(
-            f"flight-parameters vehicle {flight_parameters.vehicle!r} != {vehicle_label!r}"
-        )
-    if flight_parameters.source_backend != "px4-sitl":
-        mismatches.append(
-            f"flight-parameters backend {flight_parameters.source_backend!r} != 'px4-sitl'"
-        )
-    if flight_parameters.run_id != controller.flight_parameters_run_id:
-        mismatches.append("flight-parameters run ID does not match controller qualification")
-    if flight_parameters.artifact_fingerprint != controller.flight_parameters_fingerprint:
-        mismatches.append("flight-parameters fingerprint does not match controller qualification")
-    if mismatches:
-        raise ValueError("contact-chain input artifacts are incompatible: " + "; ".join(mismatches))
-    if not controller.advisory_quality_passed:
-        raise ValueError(
-            "contact-chain controller failed its quality gates: "
-            + "; ".join(controller.advisory_quality_reasons)
-        )
-    _report(
-        "contact-chain inputs: "
-        f"controller={controller_path} controller_run_id={controller.run_id} "
-        f"flight_parameters={bundle.run_dir} "
-        f"flight_parameters_run_id={flight_parameters.run_id} "
-        f"flight_parameters_digest={bundle.flight_parameters_digest}"
+    controller_path, _explicit = _controller_artifact_path(config=config)
+    inputs = prepare_policy_inputs(
+        config=config, repo_root=repo_root, controller_artifact=controller_path
     )
-    return controller.selected_settings, flight_parameters, load_hover_reset_samples(bundle=bundle)
+    _report(
+        f"contact-chain inputs: controller={inputs.controller_path} "
+        f"capture={inputs.flight_parameters_path} dataset={inputs.dataset_path}"
+    )
+    return inputs.controller.selected_settings, inputs.flight_parameters, inputs.hover_reset_samples
 
 
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> dict[str, float] | None:

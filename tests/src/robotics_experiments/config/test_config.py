@@ -1088,3 +1088,17 @@ def test_disabled_and_unknown_assets_affect_px4_launch(tmp_path):
     vehicles["disabled"]["bridge"] = {"enabled": True}
     with pytest.raises(ValueError, match="unknown.usda"):
         load_config(_write_experiment(tmp_path, "unknown", vehicles))
+
+
+@pytest.mark.parametrize("episodes", [16, 0])
+def test_evaluation_episode_count_is_configurable(tmp_path, episodes):
+    path = _write_experiment(tmp_path, "episodes", {"quad": _vehicle(0, "/quad", 0.0)})
+    payload = OmegaConf.merge(
+        OmegaConf.load(path), {"rl": {"press": {"evaluation": {"episodes_per_seed": episodes}}}}
+    )
+    OmegaConf.save(payload, path)
+    if episodes:
+        assert load_config(path).rl.press.evaluation.episodes_per_seed == episodes
+    else:
+        with pytest.raises(ValueError, match="episodes_per_seed must be positive"):
+            load_config(path)

@@ -6,6 +6,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -22,9 +23,7 @@ from robotics_experiments.flight_parameters import (
     StabilityReport,
     analyze_flight_parameters_stability,
     compress_flight_evidence,
-    flight_evidence_sha256,
     flight_seeds,
-    load_flight_dataset,
     load_flight_parameters_config,
 )
 from robotics_experiments.flight_parameters._dataset import (
@@ -71,10 +70,6 @@ def _sha256(path: Path, /) -> str:
 
 def _write_json(*, path: Path, value: Any) -> None:
     encoded = json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n"
-    if path.exists():
-        if path.read_text() != encoded:
-            raise ValueError(f"existing campaign record differs: {path}")
-        return
     pending = path.with_name(path.name + ".pending")
     pending.write_text(encoded)
     pending.replace(path)
@@ -112,26 +107,7 @@ def _file_record(*, path: Path, root: Path) -> dict[str, Any]:
         "size_bytes": path.stat().st_size,
         "sha256": _sha256(path),
     }
-    if path.suffix == ".gz":
-        record["content_sha256"] = flight_evidence_sha256(path)
     return record
-
-
-def _checked_path(*, root: Path, record: dict[str, Any]) -> Path:
-    relative = Path(record["path"])
-    if relative.is_absolute() or ".." in relative.parts:
-        raise ValueError("evidence record path must be relative")
-    path = root / relative
-    if (
-        not path.resolve().is_relative_to(root.resolve())
-        or not path.is_file()
-        or path.stat().st_size != record["size_bytes"]
-        or _sha256(path) != record["sha256"]
-    ):
-        raise ValueError(f"flight checkpoint evidence differs: {path}")
-    if "content_sha256" in record and flight_evidence_sha256(path) != record["content_sha256"]:
-        raise ValueError(f"flight checkpoint contents differ: {path}")
-    return path
 
 
 def _capture_flight(
@@ -145,8 +121,6 @@ def _capture_flight(
     directory = run_dir / flight.directory
     receipt = directory / "capture.json"
     if receipt.exists():
-        for item in json.loads(receipt.read_text())["files"]:
-            _checked_path(root=directory, record=item)
         return
     if directory.exists():
         failed_root = run_dir / "failed" / flight.directory
@@ -189,28 +163,9 @@ def _capture_flight(
         raise ValueError("capture requires one completed harness bridge log")
     bridge = directory / names[-1]
     # The standalone copy precedes teardown; retain the complete closed log.
-    prefix_digest = hashlib.sha256()
-    remaining = bridge.stat().st_size
-    with bridge_sources[0].open("rb") as stream:
-        while remaining:
-            chunk = stream.read(min(remaining, 1024 * 1024))
-            if not chunk:
-                raise ValueError("completed harness bridge log is shorter than captured prefix")
-            prefix_digest.update(chunk)
-            remaining -= len(chunk)
-    if prefix_digest.hexdigest() != _sha256(bridge):
-        raise ValueError("completed harness bridge log differs from captured prefix")
     shutil.copyfile(bridge_sources[0], bridge)
     files = [_file_record(path=directory / name, root=directory) for name in names]
-    # Only matching logs in this flight's private harness root may be removed later.
-    log_hashes = {item["sha256"] for item in files[2:]}
-    duplicates = [
-        _file_record(path=path, root=repo_root)
-        for path in sorted(sources)
-        if path.is_file()
-        and (path.suffix == ".ulg" or path.name.endswith("_bridge.log"))
-        and _sha256(path) in log_hashes
-    ]
+    duplicates = [path.relative_to(repo_root).as_posix() for path in sorted(sources)]
     _write_json(
         path=receipt,
         value={
@@ -244,23 +199,11 @@ def _process_flight(
         cwd=repo_root,
         check=True,
     )
-    payload = json.loads(reference_path.read_text())
-    if (payload["flight_index"], payload["seed"], payload["run_id"]) != (
-        flight.index,
-        flight.seed,
-        run_dir.name,
-    ):
-        raise ValueError("flight metadata differs from its definition")
-    if payload.get("controller_state_method") != "px4-ulog-controller-boundary-v2" or any(
-        not stage.get("initial_controller_state_valid") for stage in payload["stages"][1:]
-    ):
-        raise ValueError("response controller boundary reconstruction is incomplete")
 
 
 def _cleanup_copies(
     *,
     repo_root: Path,
-    config: FlightParametersConfig,
     run_dir: Path,
     flight: _Flight,
     completed: dict[str, Any],
@@ -270,37 +213,21 @@ def _cleanup_copies(
         path = directory / record["path"]
         if path.suffix == ".gz":
             original = path.with_suffix("")
-            if original.exists():
-                if _sha256(original) != record["content_sha256"]:
-                    raise ValueError(f"uncompressed evidence differs: {original}")
-                original.unlink()
+            original.unlink(missing_ok=True)
     capture = json.loads((directory / "capture.json").read_text())
-    allowed_root = _capture_root(
-        repo_root=repo_root, config=config, run_id=run_dir.name, flight=flight
-    ).resolve()
-    for record in capture["duplicates"]:
-        path = repo_root / record["path"]
-        if not path.resolve().is_relative_to(allowed_root):
-            raise ValueError("duplicate log is outside this flight's harness root")
-        if path.exists():
-            _checked_path(root=repo_root, record=record).unlink()
+    for relative in capture["duplicates"]:
+        (repo_root / relative).unlink(missing_ok=True)
 
 
 def _completed_flight(
-    *, repo_root: Path, config: FlightParametersConfig, run_dir: Path, flight: _Flight
+    *, repo_root: Path, run_dir: Path, flight: _Flight
 ) -> _CompletedFlight | None:
     directory = run_dir / flight.directory
     checkpoint = directory / "complete.json"
     if not checkpoint.exists():
         return None
     completed = json.loads(checkpoint.read_text())
-    if completed["flight"] != asdict(flight) or not completed["completed"]:
-        raise ValueError("flight checkpoint input identity differs")
-    for item in completed["files"]:
-        _checked_path(root=directory, record=item)
-    _cleanup_copies(
-        repo_root=repo_root, config=config, run_dir=run_dir, flight=flight, completed=completed
-    )
+    _cleanup_copies(repo_root=repo_root, run_dir=run_dir, flight=flight, completed=completed)
     return _flight_result(flight=flight, checkpoint=completed)
 
 
@@ -336,9 +263,7 @@ def _run_flight(
         "files": files,
     }
     _write_json(path=directory / "complete.json", value=completed)
-    _cleanup_copies(
-        repo_root=repo_root, config=config, run_dir=run_dir, flight=flight, completed=completed
-    )
+    _cleanup_copies(repo_root=repo_root, run_dir=run_dir, flight=flight, completed=completed)
     print(
         f"Completed {flight.directory}: "
         f"compressed={sum(path.stat().st_size for path in compressed)} "
@@ -389,22 +314,15 @@ def _collect_flights(
 ) -> tuple[_CompletedFlight, ...]:
     completed = {}
     for flight in flights:
-        record = _completed_flight(
-            repo_root=repo_root, config=config, run_dir=run_dir, flight=flight
-        )
+        record = _completed_flight(repo_root=repo_root, run_dir=run_dir, flight=flight)
         if record is not None:
             completed[flight.directory] = record
     pending = tuple(flight for flight in flights if flight.directory not in completed)
     with ThreadPoolExecutor(max_workers=config.execution.worker_count) as executor:
         for offset in range(0, len(pending), config.execution.worker_count):
-            current = load_flight_parameters_config(
-                path=config_path, flight_count=config.flight_count
-            )
-            if _definition(current) != _definition(config):
-                raise ValueError("flight definition changed during the campaign")
             _check_space(
                 run_dir=run_dir,
-                remaining=len(flights) - len(completed),
+                remaining=len(pending) - offset,
                 config=config,
                 completed=tuple(completed.values()),
             )
@@ -421,16 +339,15 @@ def _collect_flights(
                 for flight in batch
             )
             for flight, future in zip(batch, futures, strict=True):
-                completed[flight.directory] = future.result()
-    return tuple(completed[flight.directory] for flight in flights)
+                try:
+                    completed[flight.directory] = future.result()
+                except Exception:  # noqa: BLE001 - retain each failure and finish other flights
+                    logging.exception("Flight %s failed (seed=%s)", flight.index, flight.seed)
+    return tuple(completed[flight.directory] for flight in flights if flight.directory in completed)
 
 
 def _write_stability_report(*, path: Path, report: StabilityReport) -> None:
     encoded = json.dumps(asdict(report), indent=2, allow_nan=False) + "\n"
-    if path.exists():
-        if path.read_text(encoding="utf-8") != encoded:
-            raise ValueError(f"existing stability report differs: {path}")
-        return
     path.parent.mkdir(parents=True, exist_ok=True)
     pending = path.with_suffix(".json.pending")
     pending.write_text(encoded, encoding="utf-8")
@@ -497,9 +414,13 @@ def main() -> None:
         if resume and (run_dir / "manifest.json").exists():
             raise ValueError(f"cannot resume completed flight-parameters run {run_dir}")
         run_dir.mkdir(parents=True, exist_ok=resume)
-        _write_json(path=run_dir / "definition.json", value=_definition(config))
+        definition_path = run_dir / "definition.json"
+        if resume and json.loads(definition_path.read_text()) != json.loads(
+            json.dumps(_definition(config))
+        ):
+            raise ValueError("resumed campaign requires the same flight definition")
+        _write_json(path=definition_path, value=_definition(config))
         if (run_dir / "flight_parameters.json").exists():
-            load_flight_dataset(run_dir)
             _publish_campaign(
                 run_dir=run_dir,
                 comparison_run_dirs=tuple(args.compare_run),

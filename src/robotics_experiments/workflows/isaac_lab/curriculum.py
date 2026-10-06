@@ -41,7 +41,9 @@ def run_curriculum(
     for stage in config.stages:
         path = (repo_root / stage.config_path).resolve(strict=True)
         experiment = load_config(path)
-        inputs = prepare_policy_inputs(config=experiment, repo_root=repo_root)
+        inputs = prepare_policy_inputs(
+            config=experiment, repo_root=repo_root, procedural_smoke=procedural_smoke
+        )
         stages.append((stage.name, path, experiment, inputs))
     learner = (
         pin_learner(report_path=repo_root / config.initial_learner)

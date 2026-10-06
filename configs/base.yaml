@@ -20,6 +20,8 @@ alignment:
     train_percent: 80.0
     validation_percent: 10.0
   evaluation:
+    policy_warmup_s: 6.0
+    policy_window_s: 24.0
     hover_position_margin_m: 0.005
     hover_attitude_margin_rad: 0.004363323129985824
     live_limits:

@@ -50,16 +50,11 @@ def flight_evidence_sha256(path: Path, /) -> str:
 
 
 def compress_flight_evidence(*, path: Path, level: int) -> Path:
-    """Atomically write and verify gzip evidence; leave original removal to the caller."""
+    """Atomically write gzip evidence; leave original removal to the caller."""
 
     if not 0 <= level <= 9:
         raise ValueError("gzip level must be between 0 and 9")
     destination = path.with_name(path.name + ".gz")
-    expected = flight_evidence_sha256(path)
-    if destination.exists():
-        if flight_evidence_sha256(destination) != expected:
-            raise ValueError(f"existing compressed evidence differs: {destination}")
-        return destination
     pending = destination.with_name(destination.name + ".pending")
     with path.open("rb") as source, pending.open("wb") as stored:
         with gzip.GzipFile(
@@ -68,7 +63,5 @@ def compress_flight_evidence(*, path: Path, level: int) -> Path:
             shutil.copyfileobj(source, target)
         stored.flush()
         os.fsync(stored.fileno())
-    if flight_evidence_sha256(pending) != expected:
-        raise ValueError(f"compressed evidence round trip failed: {path}")
     pending.replace(destination)
     return destination

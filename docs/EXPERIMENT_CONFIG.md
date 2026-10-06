@@ -195,7 +195,7 @@ settings. The shared `goal.stable_steps` remains the press retreat hold;
 `termination` owns contact
 sensing and production flight envelopes, including a range-undershoot limit
 equal to the acceptance minimum range; `evaluation` owns disjoint validation/test
-seeds and 100 episodes per seed; and `acceptance` owns the minimum success rate,
+seeds and a positive episode count per seed (100 by default); and `acceptance` owns the minimum success rate,
 maximum collision rate, and minimum range. Training-attempt, validation, and test seed sets must be
 nonempty, internally unique, and mutually disjoint; the final test set contains
 exactly three seeds. Independent reset
@@ -234,8 +234,8 @@ reports and examples.
 
 `rl.inputs.controller_artifact` and `rl.inputs.flight_parameters_artifact` remain
 stage-owned evidence selectors. Preparation resolves them to canonical producer
-paths and digests before creating a training run. Workers revalidate those pinned
-files; they never resolve a newer label implicitly.
+paths and digests before creating a training run. The controller's adjacent `dataset.json` supplies training membership and the
+numeric hover summary. Workers revalidate those pinned files; they never resolve a newer label implicitly.
 
 `rl.action` is task-neutral and contains only normalized action kind,
 dimension, and scales. Controller gains, command delay, maximum tilt, and
@@ -258,5 +258,5 @@ artifact namespace; it authors 40-second episodes.
 
 Alignment's shared block includes `dataset_split` (train and validation
 percentages, with test as the remainder), `evaluation` (response/live limits and
-training-hover margins), and `execution` (worker and GPU batch sizing). See
+training-hover margins and policy warmup/statistics windows), and `execution` (worker and GPU batch sizing). See
 [controller alignment](SIM_TO_SIM_ALIGNMENT.md) for ownership and scoring.

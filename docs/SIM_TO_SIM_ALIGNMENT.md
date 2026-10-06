@@ -27,17 +27,20 @@ filesystem, simulator, search or publication dependencies. `_metrics.py` compute
 response measurements. The evaluator alone converts performance measurements into
 normalized scores and acceptance results; callers consume those results.
 
-Preparation resolves the capture selector once and verifies every flight's stage
-commands, recorded sample times and reconstructed controller boundary. It writes
-one minimal `dataset.json`:
+Preparation resolves the capture selector once and checks the vehicle, command
+rate and availability of at least three successful flights. It writes
+one `dataset.json` with source, membership and the numeric hover summary:
 
 ```json
 {"source":"../../flight-parameters/suite/run", "source_digest":"<SHA256>",
- "train":[1], "validation":[2], "test":[0]}
+ "train":[1], "validation":[2], "test":[0], "hover":{"...":"numeric summary"}}
 ```
 
-Membership lists contain producer flight indices. There are no copied samples,
-counts, percentages or seeds in this file. Reference descriptors contain the set
+Membership lists contain producer flight indices. `hover` contains the shared
+`FlightParameters` numeric summary: full-window bounds, worst per-training-flight
+policy-window statistics, margins and explicit warmup/window durations. There are
+no copied samples, split counts, percentages or seeds in this file. Reference
+descriptors contain the set
 name, profile interpretation and relative dataset path. `flight_stage_views`
 selects the original sample ranges in memory without interpolation or reduction.
 Inactive command fields are zero for the selected control mode. ULogs and bridge
@@ -68,7 +71,7 @@ The dependency direction is:
 `config -> flight_parameters -> {alignment, rl}` evidence boundary.
 
 Controller artifacts remain schema 1. Completed evaluations publish whether
-accepted or rejected; incomplete or corrupt evidence cannot publish. Publication reads the current artifact format without migration or fallback. Input capture
+accepted or rejected; incomplete executions cannot publish. Publication reads the current artifact format without migration or fallback. Input capture
 bytes remain producer-owned and immutable.
 
 The X500 normalized controller carries velocity, attitude, and rate state into
@@ -183,9 +186,10 @@ The Isaac Lab image includes `zstd` for these records.
 Training inputs and outputs use the run root; validation and test use
 `validation/` and `test/`. Evaluators have isolated caches per role. The selected
 controller is then replayed against original ULog/bridge evidence and run through
-the live hover/goto integration. Finalization requires complete evidence bound
-to the selected settings and capture digest. It compresses target outputs in
+the live hover/goto integration. Finalization consumes the completed replay and live evaluation reports. It compresses target outputs in
 place, preserving relative input references, and inventories the completed run.
+Compression errors propagate; finalization does not decompress outputs to verify
+the compressor or repeat producer digest and manifest checks.
 
 This is repeated qualification against a fixed benchmark. Selecting published
 `best` by the final test score allows benchmark comparison; it is not a claim of
@@ -215,14 +219,13 @@ state, velocity and rate integrals, estimator filters, and the hover estimate.
 Resetting any held state
 to a neutral value makes a profile's result depend on where capture happened to
 land in PX4's asynchronous controller schedule and is therefore invalid. The
-flight-parameters bundle retains these response traces without reduction.
-Alignment preparation checks profile order, authored and recorded commands,
-completion, and reconstructed controller boundaries before pinning the run.
-The producer reader validates original sample ranges and strictly increasing
-measurement timestamps; alignment does not impose a synthetic time-zero grid. One alignment run directory keeps:
+capture retains these response samples without reduction.
+Alignment consumes the producer's recorded boundaries and sample ranges directly;
+it does not impose a synthetic time-zero grid.
+One alignment run directory keeps:
 
-- the ULog and bridge log;
-- reference and target traces;
+- dataset membership, the numeric hover summary, and relative references to the capture;
+- target traces;
 - selected controller and compressed candidate selection;
 - GPU/search telemetry;
 - actuator audit and per-profile controller-boundary replay;
@@ -285,8 +288,7 @@ of estimator velocity differences, using the recorded sample times and
 `MPC_VELD_LP`. EKF `ax/ay/az` are a different acceleration signal and cannot seed
 that filter. Capture requires disabled velocity low-pass/notch filters and
 unchanged velocity-filter parameters. Response recordings identify this method
-as `px4-ulog-controller-boundary-v2`; preparation rejects missing or different
-methods and requires a new capture. Existing producer artifacts remain immutable.
+as `px4-ulog-controller-boundary-v2`. Existing producer artifacts remain immutable.
 Replay builds relative command time from integer physics steps so
 large absolute profile start times cannot delay an exact command boundary by a
 floating-point tick. The replay also reproduces PX4's
@@ -333,8 +335,9 @@ allowed limit), one score and acceptance. The score is
 `max(error / limit)`; acceptance is exactly `score <= 1`. This rule ranks training
 and validation candidates and decides final acceptance. No average can hide a
 failed component. Final scoring combines test response, test hover, test
-controller-boundary replay and live hover/goto measurements. Reference actuator
-audits and valid timestamp associations are input-integrity prerequisites.
+controller-boundary replay and live hover/goto measurements. Failed reference
+actuator audits are recorded as controller rejection reasons. Execution exceptions
+remain errors. Training owns the decision to use a rejected controller.
 
 The translational limits apply to each X, Y and Z axis independently:
 
@@ -397,9 +400,10 @@ The board reads `progress.json` and stores its own data outside the immutable ru
 It does not affect selection or acceptance. Final reports remain authoritative.
 The default address is `http://127.0.0.1:7861`; Make overrides select host and port.
 
-RL's qualified flight-parameter/reset reader remains a separate handoff. This
-workflow does not change RL controller equations, training inputs or domain
-randomization; see [remaining work](backlog/flight_parameters_alignment_handoff.md).
+RL consumes this exact dataset selection and numeric summary, and reads paired
+reset states directly from the selected training flights. Ordinary training
+requires controller acceptance; procedural smoke records rejected controllers
+without publishing a policy. See [RL workflow](RL_WORKFLOW.md).
 
 ## Change policy
 

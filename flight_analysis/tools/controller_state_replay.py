@@ -21,7 +21,6 @@ from pathlib import Path
 import numpy as np
 
 from robotics_experiments.alignment import load_alignment_reference
-from robotics_experiments.alignment._flight_parameters import load_alignment_dataset
 from robotics_experiments.config import load_config
 from robotics_experiments.controller import (
     ActuationState,
@@ -37,7 +36,7 @@ from robotics_experiments.drone._airframe import (
     compute_body_mass_properties,
     load_builder_config,
 )
-from robotics_experiments.flight_parameters import open_flight_evidence
+from robotics_experiments.flight_parameters import load_flight_selection, open_flight_evidence
 from robotics_experiments.px4_bridge import GRAVITY_M_S2
 
 __all__ = ["main"]
@@ -2188,7 +2187,7 @@ def _dataset_report(
 ) -> dict:
     payload = load_alignment_reference(reference_path)
     descriptor = json.loads(reference_path.read_text())
-    dataset, membership = load_alignment_dataset(reference_path.parent / descriptor["dataset"])
+    dataset, membership = load_flight_selection(reference_path.parent / descriptor["dataset"])
     reports = []
     for flight in dataset.flights:
         if flight.flight_index not in membership[descriptor["set_name"]]:
@@ -2267,8 +2266,6 @@ def main() -> None:
         if args.json is None:
             parser.error("--dataset-reference requires --json")
         args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-        if args.controller_artifact is None and not report["passed"]:
-            raise SystemExit("input actuator audit failed: " + "; ".join(report["failures"]))
         return
     ulog_path = args.ulog if args.ulog is not None else args.ulog_positional
     if ulog_path is None:

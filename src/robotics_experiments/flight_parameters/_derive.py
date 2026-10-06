@@ -6,6 +6,11 @@ import math
 
 import numpy as np
 
+from robotics_experiments.flight_parameters._dataset import (
+    FlightDataset,
+    _hover_trace,
+    flight_stage_views,
+)
 from robotics_experiments.flight_parameters._math import (
     _relative_attitude_errors,
 )
@@ -13,9 +18,12 @@ from robotics_experiments.flight_parameters._models import (
     FlightParameters,
     FlightTrace,
     HoverEvaluation,
+    HoverParameters,
     Quaternion,
     SignalStatistics,
+    UpperBound,
     Vector3,
+    VectorBounds,
 )
 
 __all__: list[str] = []
@@ -159,3 +167,100 @@ def hover_pose_errors(
         }
     )
     return values
+
+
+def derive_hover_parameters(
+    *,
+    dataset: FlightDataset,
+    flight_indices: tuple[int, ...],
+    policy_warmup_s: float,
+    policy_window_s: float,
+    position_margin_m: float,
+    attitude_margin_rad: float,
+) -> FlightParameters:
+    """Derive full-window bounds and final-window limits from training flights only."""
+    for value in (policy_warmup_s, policy_window_s, position_margin_m, attitude_margin_rad):
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError("hover timing and margins must be finite and positive")
+    rate = dataset.definition["sample_rate_hz"]
+    measure_s = dataset.definition["stages"][0]["hover"]["measure_s"]
+    if not math.isclose(policy_warmup_s + policy_window_s, measure_s):
+        raise ValueError("hover warmup and policy window must cover the measured hover")
+    count = round(policy_window_s * rate)
+    if count < 1 or not math.isclose(count, policy_window_s * rate):
+        raise ValueError("hover policy window must contain an integral number of samples")
+    flights = {flight.flight_index: flight for flight in dataset.flights}
+    if (
+        not flight_indices
+        or len(set(flight_indices)) != len(flight_indices)
+        or not set(flight_indices) <= flights.keys()
+    ):
+        raise ValueError("hover derivation requires distinct existing training flights")
+    full = []
+    policy = []
+    for index in flight_indices:
+        flight = flights[index]
+        trace = _hover_trace(dataset=dataset, flight=flight, view=flight_stage_views(flight)[0])
+        signals = _trace_signal_values(trace=trace)
+        if len(trace.time_s) != round(measure_s * rate):
+            raise ValueError("hover measurement does not cover the configured window")
+        full.append(
+            tuple(
+                summarize_signal(name=name, unit=unit, values=values)
+                for name, unit, values in signals
+            )
+        )
+        policy.append(
+            tuple(
+                summarize_signal(name=name, unit=unit, values=values[-count:])
+                for name, unit, values in signals
+            )
+        )
+
+    def bounds(indices: tuple[int, int, int], margin: float, /) -> VectorBounds:
+        lower = tuple(min(row[i].minimum for row in full) for i in indices)
+        upper = tuple(max(row[i].maximum for row in full) for i in indices)
+        return VectorBounds(
+            observed_min=lower,
+            observed_max=upper,
+            lower=tuple(min(0.0, v) - margin for v in lower),
+            upper=tuple(max(0.0, v) + margin for v in upper),
+        )
+
+    def upper(index: int, margin: float, /) -> UpperBound:
+        observed = max(row[index].maximum for row in full)
+        return UpperBound(observed_max=observed, upper=observed + margin)
+
+    limits = []
+    for statistics in zip(*policy, strict=True):
+        first = statistics[0]
+        margin = position_margin_m if first.unit == "m" else attitude_margin_rad
+        limits.append(
+            SignalStatistics(
+                name=first.name,
+                unit=first.unit,
+                minimum=min(s.minimum for s in statistics) - margin,
+                maximum=max(s.maximum for s in statistics) + margin,
+                **{
+                    name: max(getattr(s, name) for s in statistics) + margin
+                    for name in ("maximum_absolute", "rmse", "p95_absolute", "p99_absolute")
+                },
+            )
+        )
+    return FlightParameters(
+        run_id=dataset.run_id,
+        sample_rate_hz=rate,
+        policy_warmup_s=policy_warmup_s,
+        policy_window_s=policy_window_s,
+        position_margin_m=position_margin_m,
+        attitude_margin_rad=attitude_margin_rad,
+        hover=HoverParameters(
+            position_error_enu_m=bounds((0, 1, 2), position_margin_m),
+            horizontal_position_error_m=upper(3, position_margin_m),
+            position_error_m=upper(4, position_margin_m),
+            attitude_error_rpy_rad=bounds((5, 6, 7), attitude_margin_rad),
+            tilt_error_rad=upper(8, attitude_margin_rad),
+            orientation_error_rad=upper(9, attitude_margin_rad),
+            acceptance_limits=tuple(limits),
+        ),
+    )

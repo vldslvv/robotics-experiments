@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
-from dataclasses import asdict, fields
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +17,6 @@ __all__: list[str] = []
 
 _ARTIFACT_KIND = "robotics-experiments-controller"
 _SCHEMA_VERSION = 1
-
-
-def _fingerprint(value: object, /) -> str:
-    payload = json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True)
-    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _object(value: Any, name: str, /) -> dict[str, Any]:
@@ -300,8 +294,6 @@ def controller_artifact_from_payload(value: Any, /) -> ControllerArtifact:
         )
     settings = _settings(payload["selected_settings"], "selected_settings")
     settings_fingerprint = _string(payload["settings_fingerprint"], "settings_fingerprint")
-    if settings_fingerprint != _fingerprint(asdict(settings)):
-        raise ValueError("controller artifact settings_fingerprint does not match settings")
     reasons = payload["advisory_quality_reasons"]
     if not isinstance(reasons, list) or not all(isinstance(item, str) for item in reasons):
         raise ValueError("advisory_quality_reasons must be a string list")
