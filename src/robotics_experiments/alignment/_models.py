@@ -59,7 +59,6 @@ class ParameterSpec:
     field: str
     stage: int
     candidates: tuple[SettingValue, ...]
-    selection_regularization_scale: float | None = None
 
 
 @dataclass(frozen=True)
@@ -90,8 +89,9 @@ class ControllerStateSourceAge:
 
 @dataclass(frozen=True)
 class ProbeTrace:
-    """One backend response sampled at the exact command-update times."""
+    """One backend response with independent measurement and command-request times."""
 
+    flight_index: int
     family: str
     control_mode: str
     family_metric: str
@@ -99,6 +99,7 @@ class ProbeTrace:
     split: str
     axis: str
     time_s: tuple[float, ...]
+    command_time_s: tuple[float, ...]
     command_velocity_body_flu_mps: tuple[Vector3, ...]
     command_yaw_rate_radps: tuple[float, ...]
     command_collective_thrust_normalized: tuple[float, ...]
@@ -153,7 +154,7 @@ class BackendEvaluator(Protocol):
         settings: ControllerSettings,
         reference_traces: tuple[ProbeTrace, ...] | None,
     ) -> tuple[ProbeTrace, ...]:
-        """Evaluate all configured profiles and return exact-cadence traces."""
+        """Evaluate all configured profiles and return traces at the recorded times."""
 
 
 @dataclass(frozen=True)
@@ -195,7 +196,7 @@ class CandidateScore:
     metrics: Mapping[str, float]
     ranking_values: tuple[float, ...]
     failure_reason: str | None
-    set_name: str = "fit"
+    set_name: str = "train"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metrics", MappingProxyType(dict(self.metrics)))
@@ -228,7 +229,7 @@ class MetricResult:
 
 @dataclass(frozen=True)
 class QualityGateResult:
-    """One explicit family-owned acceptance comparison."""
+    """One measured error and its resolved acceptance limit."""
 
     name: str
     value: float

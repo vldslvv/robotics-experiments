@@ -126,3 +126,36 @@ def evaluate_hover_pose(
         attitude_utilization=attitude_utilization,
         inside=position_utilization <= 1.0 and attitude_utilization <= 1.0,
     )
+
+
+def hover_pose_errors(
+    *,
+    target_position_enu_m: Vector3,
+    target_attitude_flu_enu_wxyz: Quaternion,
+    position_enu_m: Vector3,
+    attitude_flu_enu_wxyz: Quaternion,
+) -> dict[str, float]:
+    """Task-neutral pose measurements, including each signed extent and norm."""
+    position = np.asarray(position_enu_m) - np.asarray(target_position_enu_m)
+    if position.shape != (3,) or not np.all(np.isfinite(position)):
+        raise ValueError("hover positions must be finite three-component vectors")
+    rpy, tilt, orientation = _relative_attitude_errors(
+        target_attitude_flu_enu_wxyz, attitude_flu_enu_wxyz
+    )
+    values = {}
+    for prefix, vector, axes in (
+        ("position", position, ("x", "y", "z")),
+        ("attitude", rpy, ("roll", "pitch", "yaw")),
+    ):
+        for axis, value in zip(axes, vector, strict=True):
+            values[f"hover.{prefix}.{axis}.positive"] = max(0.0, float(value))
+            values[f"hover.{prefix}.{axis}.negative"] = max(0.0, -float(value))
+    values.update(
+        {
+            "hover.horizontal_position": float(np.linalg.norm(position[:2])),
+            "hover.position": float(np.linalg.norm(position)),
+            "hover.tilt": tilt,
+            "hover.orientation": orientation,
+        }
+    )
+    return values

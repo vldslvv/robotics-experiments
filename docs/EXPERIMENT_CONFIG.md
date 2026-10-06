@@ -255,3 +255,8 @@ as a campaign publication.
 artifact namespace; it authors 40-second episodes.
 `configs/train/press_approach_quad.yaml` selects the `approach` task and
 `press-approach` namespace; it authors 45-second episodes.
+
+Alignment's shared block includes `dataset_split` (train and validation
+percentages, with test as the remainder), `evaluation` (response/live limits and
+training-hover margins), and `execution` (worker and GPU batch sizing). See
+[controller alignment](SIM_TO_SIM_ALIGNMENT.md) for ownership and scoring.

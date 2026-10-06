@@ -279,6 +279,10 @@ RUN git clone https://github.com/isaac-sim/IsaacLab.git /isaac-lab \
  && /isaac-sim/python.sh -c \
       "import flatdict, gymnasium, isaaclab, isaaclab_contrib, isaaclab_rl, rsl_rl, trackio; print('isaaclab OK:', isaaclab.__file__)"
 
+# The alignment coordinator writes the compressed controller selection here.
+RUN apt-get update && apt-get install -y --no-install-recommends zstd \
+ && rm -rf /var/lib/apt/lists/*
+
 
 # PX4 SITL stands in for the flight controller on a real drone; kept in its own
 # container (not in isaac-sim or ros) to mirror the hardware split.

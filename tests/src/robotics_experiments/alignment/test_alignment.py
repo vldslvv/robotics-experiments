@@ -5,15 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import shutil
 from dataclasses import asdict, replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-import robotics_experiments.alignment._artifact as artifact_module
 import robotics_experiments.alignment._flight_parameters as flight_parameters_module
 from robotics_experiments.alignment import (
     ControllerDefinition,
@@ -26,7 +25,6 @@ from robotics_experiments.alignment._align import (
     _staged_beam_search,
 )
 from robotics_experiments.alignment._artifact import (
-    _compress_file,
     _require_passed_diagnostic,
     finalize_alignment_bundle,
     load_selection,
@@ -34,7 +32,14 @@ from robotics_experiments.alignment._artifact import (
     validate_alignment_bundle,
     write_alignment_result,
 )
-from robotics_experiments.alignment._flight_parameters import _validated_payload
+from robotics_experiments.alignment._evaluation import evaluate_metrics, evaluate_response
+from robotics_experiments.alignment._flight_parameters import (
+    _split_flights as split_flights,
+)
+from robotics_experiments.alignment._flight_parameters import (
+    load_alignment_reference,
+    training_hover_limits,
+)
 from robotics_experiments.alignment._io import (
     _index_candidate_diagnostics,
     _trace,
@@ -42,8 +47,10 @@ from robotics_experiments.alignment._io import (
 )
 from robotics_experiments.alignment._metrics import (
     _braking_events,
-    metric,
     register_metric,
+)
+from robotics_experiments.alignment._metrics import (
+    metric as measured_metric,
 )
 from robotics_experiments.alignment._models import (
     MetricResult,
@@ -54,11 +61,61 @@ from robotics_experiments.alignment._models import (
     ProbeTrace,
     SearchSpec,
 )
+from robotics_experiments.config import load_config
 from robotics_experiments.controller import ControllerSettings, load_controller_artifact
+from robotics_experiments.flight_parameters import (
+    flight_stage_views,
+    hover_pose_errors,
+    load_flight_dataset,
+)
 from tests.support.paths import REPO_ROOT
 
 _ZERO3 = (0.0, 0.0, 0.0)
 _IDENTITY = (1.0, 0.0, 0.0, 0.0)
+
+
+def metric(*, name):
+    measure = measured_metric(name=name)
+
+    def evaluated(reference, target, /):
+        result = measure(reference, target)
+        config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+        if name == "controller-quality":
+            return evaluate_response(
+                metric_name=name,
+                reference=reference,
+                target=target,
+                response_limits=config.alignment.evaluation.response_limits,
+                hover_limits=_hover_limits(),
+            )
+        prefix = "ctbr." if name == "ctbr-controller-quality" else "velocity."
+        limits = {
+            key.removeprefix(prefix): value
+            for key, value in config.alignment.evaluation.response_limits.items()
+            if key.startswith(prefix)
+        }
+        evaluation = evaluate_metrics(measurements=result.validation_metrics, limits=limits)
+        return replace(
+            result,
+            gates=evaluation.checks,
+            quality_passed=evaluation.accepted,
+            ranking_values=(evaluation.score,),
+            beam_values=tuple(c.value / c.limit for c in evaluation.checks),
+        )
+
+    return evaluated
+
+
+def _hover_limits():
+    return {
+        name: 0.005 if "position" in name else math.radians(0.25)
+        for name in hover_pose_errors(
+            target_position_enu_m=_ZERO3,
+            target_attitude_flu_enu_wxyz=_IDENTITY,
+            position_enu_m=_ZERO3,
+            attitude_flu_enu_wxyz=_IDENTITY,
+        )
+    }
 
 
 def _settings(
@@ -223,6 +280,7 @@ def _response_traces(
             angular_velocities.append((0.0, 0.0, delayed_yaw))
         traces.append(
             ProbeTrace(
+                flight_index=0,
                 family="velocity",
                 control_mode="velocity",
                 family_metric="translational-controller-quality",
@@ -230,6 +288,7 @@ def _response_traces(
                 split=profile.split,
                 axis=profile.axis,
                 time_s=tuple(index * 0.05 for index in range(len(commands))),
+                command_time_s=tuple(index * 0.05 for index in range(len(commands))),
                 command_velocity_body_flu_mps=commands,
                 command_yaw_rate_radps=yaw_commands,
                 command_collective_thrust_normalized=tuple(0.0 for _ in commands),
@@ -288,6 +347,7 @@ def _ctbr_response_traces(*, family: ProbeFamily) -> tuple[ProbeTrace, ...]:
         sample_count = len(collective_commands)
         traces.append(
             ProbeTrace(
+                flight_index=0,
                 family=family.name,
                 control_mode=family.control_mode,
                 family_metric=family.metric,
@@ -295,6 +355,7 @@ def _ctbr_response_traces(*, family: ProbeFamily) -> tuple[ProbeTrace, ...]:
                 split=profile.split,
                 axis=profile.axis,
                 time_s=tuple(index * 0.05 for index in range(sample_count)),
+                command_time_s=tuple(index * 0.05 for index in range(sample_count)),
                 command_velocity_body_flu_mps=tuple(_ZERO3 for _ in range(sample_count)),
                 command_yaw_rate_radps=tuple(0.0 for _ in range(sample_count)),
                 command_collective_thrust_normalized=tuple(collective_commands),
@@ -386,6 +447,154 @@ def _definition(
     )
 
 
+def _search(**kwargs):
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    return _staged_beam_search(
+        **kwargs,
+        response_limits=config.alignment.evaluation.response_limits,
+        hover_limits=_hover_limits(),
+    )
+
+
+def _raw_dataset(root: Path, count: int = 3, /) -> Path:
+    root.mkdir(parents=True)
+    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
+    traces = _response_traces(profiles=definition.profiles, settings=definition.base_settings)
+
+    def record(path):
+        return {
+            "path": path.name,
+            "size_bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+
+    flights = []
+    for index in range(count):
+        directory = root / "flights" / f"flight-{index:03d}"
+        directory.mkdir(parents=True)
+        rows: list[dict] = []
+        hover = {
+            "kind": "hover",
+            "name": "hover",
+            "stage_index": 0,
+            "start_sim_time_us": 1000000,
+            "end_sim_time_us": 1100000,
+            "sample_start": 0,
+            "sample_stop": 2,
+            "effective_target_position_enu_m": _ZERO3,
+            "effective_target_attitude_flu_enu_wxyz": _IDENTITY,
+        }
+        stages = [hover]
+        for stage_index, trace in enumerate((traces[-1], *traces)):
+            start = 1000000 + stage_index * 1000000
+            if stage_index:
+                profile = definition.profiles[stage_index - 1]
+                metadata = {
+                    **asdict(trace),
+                    "name": trace.profile,
+                    "kind": "controller-response",
+                    "stage_index": stage_index,
+                    "sample_start": len(rows),
+                    "sample_stop": len(rows) + len(trace.time_s),
+                    "start_sim_time_us": start,
+                    "end_sim_time_us": start + round((trace.time_s[-1] + 0.05) * 1e6),
+                    "hold_position": profile.hold_position,
+                    "commands": [asdict(c) for c in profile.commands],
+                    "initial_controller_state_valid": True,
+                    "initial_hover_thrust_normalized": 0.57,
+                }
+                stages.append(metadata)
+            for j, time_s in enumerate(trace.time_s):
+                command = trace.command_velocity_body_flu_mps[j]
+                rows.append(
+                    {
+                        "sim_time_us": start + round(time_s * 1e6),
+                        "requested_at_us": start + round(time_s * 1e6),
+                        "stage_index": stage_index,
+                        "phase": "measurement",
+                        "position_enu_m": trace.position_enu_m[j],
+                        "attitude_flu_enu_wxyz": trace.attitude_flu_enu_wxyz[j],
+                        "linear_velocity_enu_mps": trace.velocity_enu_mps[j],
+                        "velocity_body_flu_mps": trace.velocity_body_flu_mps[j],
+                        "angular_velocity_body_flu_radps": trace.angular_velocity_body_flu_radps[j],
+                        "angular_velocity_enu_radps": trace.angular_velocity_body_flu_radps[j],
+                        "requested_command": {
+                            "forward_mps": command[0],
+                            "right_mps": -command[1],
+                            "down_mps": -command[2],
+                            "yaw_rate_radps": -trace.command_yaw_rate_radps[j],
+                        },
+                    }
+                )
+        metadata = {
+            "flight_index": index,
+            "seed": 1001 + index,
+            "run_id": root.name,
+            "completed": True,
+            "sample_count": len(rows),
+            "sample_rate_hz": 20.0,
+            "stages": stages,
+            "controller_state_method": "px4-ulog-controller-boundary-v2",
+        }
+        (directory / "flight.json").write_text(json.dumps(metadata))
+        (directory / "motion.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+        checkpoint = {
+            "flight": {
+                "index": index,
+                "seed": 1001 + index,
+                "directory": directory.relative_to(root).as_posix(),
+            },
+            "completed": True,
+            "files": [record(directory / name) for name in ("flight.json", "motion.jsonl")],
+        }
+        (directory / "complete.json").write_text(json.dumps(checkpoint))
+        flights.append(
+            {
+                **record(directory / "complete.json"),
+                "path": (directory / "complete.json").relative_to(root).as_posix(),
+            }
+        )
+    (root / "definition.json").write_text(
+        json.dumps(
+            {
+                "flight_parameters_id": "test",
+                "start_seed": 1001,
+                "flight_count": count,
+                "stages": ["hover", *[profile.name for profile in definition.profiles]],
+                "vehicle": "x500_01",
+                "command_rate_hz": 20.0,
+            }
+        )
+    )
+    (root / "flight_parameters.json").write_text(
+        json.dumps(
+            {
+                "artifact_kind": "robotics-experiments-flight-dataset",
+                "schema_version": 1,
+                "run_id": root.name,
+                "completed": True,
+                "flight_parameters_id": "test",
+                "definition": record(root / "definition.json"),
+                "flights": flights,
+            }
+        )
+    )
+    return root
+
+
+@pytest.fixture(autouse=True)
+def prepared_dataset(tmp_path, monkeypatch):
+    source = _raw_dataset(tmp_path / "source")
+    run = tmp_path / "prepared"
+    flight_parameters_module.prepare_alignment_reference(
+        flight_parameters_artifact=source,
+        definition=_definition(backend="px4-sitl", evaluator=_Evaluator()),
+        run_dir=run,
+    )
+    monkeypatch.setenv("ROBOTICS_ALIGNMENT_RUN_DIR", str(run))
+    return run
+
+
 def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> None:
     target = load_controller_definition(
         REPO_ROOT / "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
@@ -452,7 +661,6 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_observation_bias_command_start_mps",
         "velocity_observation_bias_command_full_mps",
     )
-    assert target.parameters[3].selection_regularization_scale == pytest.approx(1.0)
     assert next(
         profile
         for profile in target.probe_families[0].profiles
@@ -502,229 +710,6 @@ def test_trace_rejects_out_of_range_initial_hover_thrust() -> None:
 
     with pytest.raises(ValueError, match="must not exceed 1"):
         _trace(value=raw, name="trace")  # noqa: SLF001 - trace validation contract
-
-
-@pytest.mark.parametrize(
-    "controller_state_method", ["px4-ulog-controller-boundary-v2", None, "unknown"]
-)
-def test_flight_parameters_response_preserves_complete_alignment_input(
-    tmp_path: Path,
-    controller_state_method: str | None,
-) -> None:
-    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
-    traces = tuple(
-        replace(trace, initial_controller_state_valid=True)
-        for trace in _response_traces(
-            profiles=definition.profiles,
-            settings=definition.base_settings,
-        )
-    )
-    path = tmp_path / "flight_parameters_response.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "controller_id": definition.controller_id,
-                "definition_fingerprint": definition.definition_fingerprint,
-                "controller_state_method": controller_state_method,
-                "traces": [asdict(trace) for trace in traces],
-            }
-        )
-    )
-
-    if controller_state_method != "px4-ulog-controller-boundary-v2":
-        with pytest.raises(ValueError, match="new controller-boundary capture"):
-            _validated_payload(
-                path=path,
-                definition=definition,
-                expected_profile_count=len(definition.profiles),
-            )
-        return
-
-    payload = _validated_payload(
-        path=path,
-        definition=definition,
-        expected_profile_count=len(definition.profiles),
-    )
-
-    assert payload["traces"] == json.loads(json.dumps([asdict(trace) for trace in traces]))
-
-
-def test_flight_parameters_response_accepts_bridge_quantized_cadence(
-    tmp_path: Path,
-) -> None:
-    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
-    traces = tuple(
-        replace(
-            trace,
-            initial_controller_state_valid=True,
-            time_s=(
-                *(
-                    time_s + (0.01 if index % 2 else 0.0)
-                    for index, time_s in enumerate(trace.time_s)
-                ),
-                sum(command.duration_s for command in profile.commands) - 0.01,
-            ),
-            command_velocity_body_flu_mps=(
-                *trace.command_velocity_body_flu_mps,
-                profile.commands[-1].velocity_body_flu_mps,
-            ),
-            command_yaw_rate_radps=(
-                *trace.command_yaw_rate_radps,
-                profile.commands[-1].yaw_rate_radps,
-            ),
-            command_collective_thrust_normalized=(
-                *trace.command_collective_thrust_normalized,
-                profile.commands[-1].collective_thrust_normalized,
-            ),
-            command_body_rate_flu_radps=(
-                *trace.command_body_rate_flu_radps,
-                profile.commands[-1].body_rate_flu_radps,
-            ),
-            position_enu_m=(*trace.position_enu_m, trace.position_enu_m[-1]),
-            attitude_flu_enu_wxyz=(
-                *trace.attitude_flu_enu_wxyz,
-                trace.attitude_flu_enu_wxyz[-1],
-            ),
-            velocity_body_flu_mps=(
-                *trace.velocity_body_flu_mps,
-                trace.velocity_body_flu_mps[-1],
-            ),
-            velocity_enu_mps=(*trace.velocity_enu_mps, trace.velocity_enu_mps[-1]),
-            angular_velocity_body_flu_radps=(
-                *trace.angular_velocity_body_flu_radps,
-                trace.angular_velocity_body_flu_radps[-1],
-            ),
-        )
-        for profile, trace in zip(
-            definition.profiles,
-            _response_traces(
-                profiles=definition.profiles,
-                settings=definition.base_settings,
-            ),
-            strict=True,
-        )
-    )
-    path = tmp_path / "flight_parameters_response.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "controller_id": definition.controller_id,
-                "definition_fingerprint": definition.definition_fingerprint,
-                "controller_state_method": "px4-ulog-controller-boundary-v2",
-                "traces": [asdict(trace) for trace in traces],
-            }
-        )
-    )
-
-    _validated_payload(
-        path=path,
-        definition=definition,
-        expected_profile_count=len(definition.profiles),
-    )
-
-
-def test_flight_parameters_response_rejects_reduced_alignment_input(
-    tmp_path: Path,
-) -> None:
-    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
-    traces = tuple(
-        replace(trace, initial_controller_state_valid=True)
-        for trace in _response_traces(
-            profiles=definition.profiles,
-            settings=definition.base_settings,
-        )
-    )
-    path = tmp_path / "flight_parameters_response.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "controller_id": definition.controller_id,
-                "definition_fingerprint": definition.definition_fingerprint,
-                "controller_state_method": "px4-ulog-controller-boundary-v2",
-                "traces": [asdict(trace) for trace in traces[:-1]],
-            }
-        )
-    )
-
-    with pytest.raises(ValueError, match="every alignment profile"):
-        _validated_payload(
-            path=path,
-            definition=definition,
-            expected_profile_count=len(definition.profiles),
-        )
-
-
-def test_alignment_references_immutable_flight_parameter_inputs(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    definition = _definition(backend="px4-sitl", evaluator=_Evaluator())
-    bundle_dir = tmp_path / "flight-parameters" / "20260821T180358Z"
-    response_dir = bundle_dir / "response" / "repetition-001"
-    response_dir.mkdir(parents=True)
-    evidence = SimpleNamespace(
-        repetition=1,
-        set_name="fit",
-        profile_count=len(definition.profiles),
-        reference_path="response/repetition-001/flight_parameters_response.json",
-        ulog_path="response/repetition-001/flight_parameters.ulg",
-        bridge_log_path="response/repetition-001/flight_parameters_bridge.log",
-    )
-    for relative, payload in (
-        (evidence.reference_path, "reference"),
-        (evidence.ulog_path, "ulog"),
-        (evidence.bridge_log_path, "bridge"),
-    ):
-        (bundle_dir / relative).write_text(payload)
-    monkeypatch.setattr(
-        flight_parameters_module,
-        "load_flight_parameters_bundle",
-        lambda **_kwargs: SimpleNamespace(
-            run_dir=bundle_dir,
-            flight_parameters=SimpleNamespace(
-                run_id="20260821T180358Z",
-                artifact_fingerprint="fingerprint",
-                response=SimpleNamespace(
-                    repetitions=3,
-                    traces=(
-                        SimpleNamespace(**(vars(evidence) | {"set_name": "acceptance"})),
-                        evidence,
-                        SimpleNamespace(**(vars(evidence) | {"set_name": "validation"})),
-                    ),
-                ),
-            ),
-        ),
-    )
-    monkeypatch.setattr(
-        flight_parameters_module,
-        "_validated_payload",
-        lambda **_kwargs: {},
-    )
-    run_dir = tmp_path / "alignment" / "timestamped-run"
-
-    flight_parameters_module.prepare_alignment_reference(
-        flight_parameters_artifact=bundle_dir,
-        definition=definition,
-        run_dir=run_dir,
-    )
-
-    assert (run_dir / "flight_parameters").is_symlink()
-    manifest = json.loads((run_dir / "manifest.json").read_text())
-    assert manifest["flight_parameters_run_id"] == "20260821T180358Z"
-    assert "20260821T180358Z" in manifest["flight_parameters_artifact"]
-    assert manifest["flight_parameters_artifact"] != "flight_parameters"
-    for name, source in (
-        ("reference.json", bundle_dir / evidence.reference_path),
-        ("reference.ulg", bundle_dir / evidence.ulog_path),
-        ("bridge.log", bundle_dir / evidence.bridge_log_path),
-    ):
-        reference = run_dir / name
-        assert reference.is_symlink()
-        assert not reference.readlink().is_absolute()
-        assert reference.resolve() == source
 
 
 def test_ctbr_family_has_independent_roll_pitch_yaw_and_collective_gates() -> None:
@@ -851,8 +836,6 @@ def test_staged_beam_search_is_deterministic() -> None:
 
 def test_staged_beam_search_reports_initial_candidate_failure() -> None:
     class FailedEvaluator(_Evaluator):
-        _retain_traces = False
-
         def evaluate_scored_batch(self, *, definition, settings, reference_traces):
             del definition, reference_traces
             return tuple("ctbr trace failed" for _settings in settings)
@@ -860,7 +843,7 @@ def test_staged_beam_search_reports_initial_candidate_failure() -> None:
     target = _definition(backend="isaac-lab", evaluator=FailedEvaluator())
 
     with pytest.raises(RuntimeError, match="unusable: ctbr trace failed"):
-        _staged_beam_search(target=target, reference_traces=())
+        _search(target=target, reference_traces=())
 
 
 def test_beam_retains_per_objective_champions() -> None:
@@ -873,8 +856,10 @@ def test_beam_retains_per_objective_champions() -> None:
             metrics={"velocity_rmse_mps": 0.0},
             ranking_values=(abs(peak - 2.0),),
             fit_metrics={"velocity_rmse_mps": 0.0},
-            validation_metrics={"worst_axis_velocity_nrmse": 0.0},
-            beam_values=(abs(peak - 1.0), abs(peak - 3.0)),
+            validation_metrics={
+                "velocity.x_velocity_nrmse": abs(peak - 1.0),
+                "velocity.y_velocity_nrmse": abs(peak - 3.0),
+            },
         )
 
     register_metric(name=name, metric=diverse_metric)
@@ -905,6 +890,8 @@ def test_beam_retains_per_objective_champions() -> None:
     )
 
     outcome = _staged_beam_search(
+        response_limits={"velocity.x_velocity_nrmse": 0.1, "velocity.y_velocity_nrmse": 0.1},
+        hover_limits=_hover_limits(),
         target=target,
         reference_traces=reference_traces,
     )
@@ -961,8 +948,6 @@ def test_staged_beam_search_batches_without_changing_deterministic_order() -> No
 
 def test_alignment_loads_qualified_traces_for_each_recording_set() -> None:
     class ScoredEvaluator(_Evaluator):
-        _retain_traces = False
-
         def __init__(self) -> None:
             super().__init__()
             self.trace_loads = 0
@@ -1002,8 +987,6 @@ def test_alignment_loads_qualified_traces_for_each_recording_set() -> None:
 
 def test_alignment_selects_response_candidate_inside_flight_parameters() -> None:
     class EnvelopeChoiceEvaluator(_Evaluator):
-        _retain_traces = False
-
         def evaluate(self, *, definition, settings, reference_traces):
             del reference_traces
             traces = _response_traces(profiles=definition.profiles, settings=settings)
@@ -1073,7 +1056,7 @@ def test_effective_key_aliases_float32_equivalent_settings_and_stops_fixed_point
     )
     reference_traces = _response_traces(profiles=target.profiles, settings=target.base_settings)
 
-    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+    outcome = _search(target=target, reference_traces=reference_traces)
 
     assert len(outcome.candidate_scores) == 3
     assert outcome.statistics["submitted_unique_candidates"] == 1
@@ -1101,7 +1084,7 @@ def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
     )
     reference_traces = _response_traces(profiles=target.profiles, settings=known)
 
-    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+    outcome = _search(target=target, reference_traces=reference_traces)
 
     assert outcome.selected.settings.command_delay_s == pytest.approx(0.25)
     assert any(
@@ -1135,7 +1118,7 @@ def test_search_rejects_invalid_cross_field_combinations_before_evaluation() -> 
         settings=target.base_settings,
     )
 
-    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+    outcome = _search(target=target, reference_traces=reference_traces)
 
     assert outcome.statistics["rejected_invalid_settings"] >= 1
     assert all(
@@ -1148,8 +1131,6 @@ def test_search_rejects_invalid_cross_field_combinations_before_evaluation() -> 
 
 def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
     class ArchiveEvaluator(_Evaluator):
-        _retain_traces = False
-
         def evaluate_scored_batch(self, *, definition, settings, reference_traces):
             del definition, reference_traces
             results = []
@@ -1201,7 +1182,7 @@ def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
         ),
     )
 
-    outcome = _staged_beam_search(target=target, reference_traces=())
+    outcome = _search(target=target, reference_traces=())
 
     assert outcome.selected.settings.command_delay_s == 1.0
     assert outcome.selected.settings.max_tilt_cmd_deg == 40.0
@@ -1226,7 +1207,7 @@ def test_coarse_to_fine_search_expands_each_initial_setting() -> None:
     )
     reference_traces = _response_traces(profiles=target.profiles, settings=base)
 
-    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+    outcome = _search(target=target, reference_traces=reference_traces)
 
     assert any(
         score.settings.command_delay_s == 0.1
@@ -1255,14 +1236,15 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
     ).encode()
     key = hashlib.sha256(encoded).hexdigest()
     path = tmp_path / "target_candidates.json"
-    (tmp_path / "reference.json").write_text("reference")
-    reference_sha256 = hashlib.sha256(b"reference").hexdigest()
+    (tmp_path / "reference.json").write_text('{"dataset":"dataset.json","set_name":"train"}')
+    source_digest = "producer-digest"
+    (tmp_path / "dataset.json").write_text(json.dumps({"source_digest": source_digest}))
     path.write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "set_name": "fit",
-                "reference_sha256": reference_sha256,
+                "set_name": "train",
+                "source_digest": source_digest,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
                 "image": definition.image,
@@ -1313,10 +1295,11 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
     assert index_count == 1
     validation_dir = tmp_path / "validation"
     validation_dir.mkdir()
-    (validation_dir / "reference.json").write_text("validation-reference")
+    (validation_dir / "reference.json").write_text(
+        '{"dataset":"../dataset.json","set_name":"validation"}'
+    )
     payload = json.loads(path.read_text())
     payload["set_name"] = "validation"
-    payload["reference_sha256"] = hashlib.sha256(b"validation-reference").hexdigest()
     payload["candidates"][key][0]["start_sim_time_us"] = 123456
     validation_path = validation_dir / path.name
     validation_path.write_text(json.dumps(payload))
@@ -1332,7 +1315,7 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
         evaluator.evaluate(definition=definition, settings=settings, reference_traces=None) == first
     )
     assert index_count == 2
-    payload["set_name"] = "fit"
+    payload["set_name"] = "train"
     validation_path.write_text(json.dumps(payload))
     with pytest.raises(RuntimeError, match="different recording set"):
         evaluator.for_set("validation").evaluate(
@@ -1342,7 +1325,7 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
         )
 
     payload["set_name"] = "validation"
-    payload["reference_sha256"] = reference_sha256
+    payload["source_digest"] = "different-producer"
     validation_path.write_text(json.dumps(payload))
     with pytest.raises(RuntimeError, match="different reference recording"):
         evaluator.for_set("validation").evaluate(
@@ -1487,7 +1470,13 @@ def test_registered_metric_can_change_selection_without_changing_aligner(
             metrics={"negative_peak": -peak},
             ranking_values=(-peak,),
             fit_metrics={"velocity_rmse_mps": 0.0},
-            validation_metrics={"worst_axis_velocity_nrmse": 0.0},
+            validation_metrics={
+                key: (abs(3.0 - peak) if key == "velocity.x_velocity_nrmse" else 0.0)
+                for key in load_config(
+                    REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml"
+                ).alignment.evaluation.response_limits
+                if key.startswith("velocity.")
+            },
         )
 
     register_metric(name=name, metric=highest_x)
@@ -1511,44 +1500,6 @@ def test_registered_metric_can_change_selection_without_changing_aligner(
     )
 
     assert align(target, reference).controller.selected_settings.kp_vel == (3.0, 1.0, 1.0)
-
-
-def test_regularized_parameter_prefers_smallest_quality_passing_correction() -> None:
-    name = "test-regularized-highest-x-response-v1"
-
-    def highest_x(reference, target, /):
-        peak = max(abs(value[0]) for trace in target for value in trace.velocity_body_flu_mps)
-        return MetricResult(
-            metrics={"negative_peak": -peak},
-            ranking_values=(-peak,),
-            fit_metrics={"velocity_rmse_mps": 0.0},
-            validation_metrics={"worst_axis_velocity_nrmse": 0.0},
-        )
-
-    register_metric(name=name, metric=highest_x)
-    parameters = (
-        ParameterSpec(
-            "kp_vel",
-            1,
-            ((1.0, 1.0, 1.0), (3.0, 1.0, 1.0)),
-            selection_regularization_scale=1.0,
-        ),
-    )
-    reference = _definition(
-        backend="px4-sitl",
-        evaluator=_Evaluator(reference_settings=_settings(kp=(1.0, 1.0, 1.0))),
-        metric_name=name,
-    )
-    target = _definition(
-        backend="isaac-lab",
-        evaluator=_Evaluator(),
-        parameters=parameters,
-        metric_name=name,
-    )
-
-    result = align(target, reference)
-
-    assert result.controller.selected_settings.kp_vel == (1.0, 1.0, 1.0)
 
 
 def test_experiment_fingerprint_includes_capture_but_excludes_execution(
@@ -1625,7 +1576,7 @@ def test_controller_and_selection_artifacts_are_compact_and_exact(tmp_path: Path
     )
     controller = load_controller_artifact(run_dir)
     assert controller.certified_control_modes == ("velocity",)
-    assert controller.flight_parameters_run_id == "fixture"
+    assert controller.flight_parameters_run_id == "source"
     reconstructed = load_selection(run_dir=run_dir, controller=controller)
     assert reconstructed.candidates == result.candidates
     assert reconstructed.selected_candidate_index == result.selected_candidate_index
@@ -1715,186 +1666,6 @@ def test_selection_serialization_is_deterministic(tmp_path: Path) -> None:
     assert first_selection.read_bytes() == second_selection.read_bytes()
 
 
-def test_bundle_finalization_compresses_and_inventories_every_payload(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    result = align(
-        _definition(backend="isaac-lab", evaluator=_Evaluator()),
-        _definition(
-            backend="px4-sitl",
-            evaluator=_Evaluator(reference_settings=known),
-        ),
-    )
-    result = replace(
-        result,
-        controller=replace(
-            result.controller,
-            advisory_quality_passed=False,
-            advisory_quality_reasons=(artifact_module._PENDING_QUALIFICATION,),  # noqa: SLF001 - provisional artifact contract
-        ),
-    )
-    run_dir = tmp_path / "run"
-    write_alignment_result(result=result, run_dir=run_dir)
-    inputs = tmp_path / "inputs"
-    inputs.mkdir()
-    for name, payload in {
-        "reference.json": "{}\n",
-        "reference.ulg": "ulog",
-        "bridge.log": "bridge",
-    }.items():
-        (inputs / name).write_text(payload)
-        (run_dir / name).symlink_to(Path("..") / "inputs" / name)
-    for name, payload in {
-        "target_candidates.json": "{}\n",
-        "actuator_audit.json": '{"schema_version":1,"passed":true}\n',
-        "controller_boundary_replay.json": '{"schema_version":1,"passed":true}\n',
-        "gpu_utilization.json": "{}\n",
-        "search_realization.json": "{}\n",
-    }.items():
-        (run_dir / name).write_text(payload)
-
-    compress_file = _compress_file
-    compression_arguments_seen: list[tuple[str, ...]] = []
-
-    def record_compression(
-        *,
-        source: Path,
-        destination: Path,
-        compression_arguments: tuple[str, ...] = ("-19", "-T1"),
-    ) -> None:
-        compression_arguments_list = tuple(compression_arguments)
-        compression_arguments_seen.append(compression_arguments_list)
-        compress_file(
-            source=source,
-            destination=destination,
-            compression_arguments=compression_arguments_list,
-        )
-
-    monkeypatch.setattr(artifact_module, "_compress_file", record_compression)
-
-    for set_name in ("validation", "acceptance"):
-        (run_dir / set_name).mkdir()
-        for filename in ("actuator_audit.json", "controller_boundary_replay.json"):
-            (run_dir / set_name / filename).write_text('{"schema_version":1,"passed":true}\n')
-    for set_name in ("validation", "acceptance"):
-        (run_dir / set_name / "target_candidates.json").write_text("{}\n")
-    for filename in ("qualification.json", "integration.json"):
-        (run_dir / filename).write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "passed": True,
-                    "set_name": "acceptance",
-                    "settings_fingerprint": result.controller.settings_fingerprint,
-                    "flight_parameters_fingerprint": (
-                        result.controller.flight_parameters_fingerprint
-                    ),
-                }
-            )
-        )
-    report_path = run_dir / "qualification.json"
-    passing_report = report_path.read_text()
-    report = json.loads(passing_report)
-    for changes, message in (
-        ({"passed": False}, "fixed benchmark qualification failed"),
-        ({"settings_fingerprint": "another-controller"}, "does not qualify"),
-        ({"set_name": "validation"}, "requires acceptance recordings"),
-    ):
-        report_path.write_text(json.dumps(report | changes))
-        with pytest.raises(ValueError, match=message):
-            finalize_alignment_bundle(run_dir=run_dir)
-        assert not load_controller_artifact(run_dir).advisory_quality_passed
-        assert not (run_dir.parent / "latest").exists()
-    report_path.write_text(passing_report)
-    manifest_path = finalize_alignment_bundle(run_dir=run_dir)
-    assert load_controller_artifact(run_dir).advisory_quality_passed
-
-    validate_alignment_bundle(run_dir)
-    manifest = json.loads(manifest_path.read_text())
-    paths = {entry["path"] for entry in manifest["files"]}
-    assert "controller.json" in paths
-    assert "selection.json.zst" in paths
-    assert "evidence/target_traces.json.zst" in paths
-    assert "diagnostics/stages/search_realization.json" in paths
-    for name in ("reference_traces.json", "reference.ulg", "bridge.log"):
-        reference = run_dir / "evidence" / name
-        assert reference.is_symlink()
-        assert not reference.readlink().is_absolute()
-    assert not (run_dir / "target_candidates.json").exists()
-    assert compression_arguments_seen == [("-8", "--long=27", "-T0")] * 3
-
-    (run_dir / "diagnostics" / "untracked.log").write_text("untracked")
-    with pytest.raises(ValueError, match="inventory every payload"):
-        validate_alignment_bundle(run_dir)
-
-
-def test_publication_replaces_unsupported_existing_label(tmp_path: Path) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    result = align(
-        _definition(backend="isaac-lab", evaluator=_Evaluator()),
-        _definition(
-            backend="px4-sitl",
-            evaluator=_Evaluator(reference_settings=known),
-        ),
-    )
-    result = replace(
-        result,
-        controller=replace(
-            result.controller,
-            advisory_quality_passed=True,
-            advisory_quality_reasons=(),
-        ),
-    )
-    run_dir = tmp_path / "run"
-    write_alignment_result(result=result, run_dir=run_dir)
-    for name, payload in {
-        "reference.json": "{}\n",
-        "reference.ulg": "ulog",
-        "bridge.log": "bridge",
-        "target_candidates.json": "{}\n",
-        "actuator_audit.json": '{"schema_version":1,"passed":true}\n',
-        "controller_boundary_replay.json": '{"schema_version":1,"passed":true}\n',
-        "gpu_utilization.json": "{}\n",
-    }.items():
-        (run_dir / name).write_text(payload)
-    for set_name in ("validation", "acceptance"):
-        (run_dir / set_name).mkdir()
-        for filename in ("actuator_audit.json", "controller_boundary_replay.json"):
-            (run_dir / set_name / filename).write_text('{"schema_version":1,"passed":true}\n')
-    for set_name in ("validation", "acceptance"):
-        (run_dir / set_name / "target_candidates.json").write_text("{}\n")
-    for filename in ("qualification.json", "integration.json"):
-        (run_dir / filename).write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "passed": True,
-                    "set_name": "acceptance",
-                    "settings_fingerprint": result.controller.settings_fingerprint,
-                    "flight_parameters_fingerprint": (
-                        result.controller.flight_parameters_fingerprint
-                    ),
-                }
-            )
-        )
-    finalize_alignment_bundle(run_dir=run_dir)
-
-    obsolete = tmp_path / "obsolete"
-    obsolete.mkdir()
-    (obsolete / "controller.json").write_text(
-        '{"schema_version":1,"command_interface":"velocity"}\n'
-    )
-    (tmp_path / "best").symlink_to(obsolete.name, target_is_directory=True)
-
-    with pytest.warns(RuntimeWarning, match="replacing unsupported controller publication"):
-        publish_controller(run_dir=run_dir)
-
-    assert (tmp_path / "best").resolve() == run_dir
-    assert (tmp_path / "latest").resolve() == run_dir
-
-
 def test_failed_boundary_diagnostic_blocks_acceptance(tmp_path: Path) -> None:
     report = tmp_path / "diagnostic.json"
     report.write_text(
@@ -1911,68 +1682,263 @@ def test_failed_boundary_diagnostic_blocks_acceptance(tmp_path: Path) -> None:
         _require_passed_diagnostic(path=report, name="controller boundary replay")
 
 
-@pytest.mark.parametrize("acceptance_passed", [True, False])
-def test_validation_selects_then_acceptance_freezes_settings(monkeypatch, acceptance_passed):
-    import robotics_experiments.alignment._align as alignment_module
-
-    calls = []
-    bundle_validations = []
-    validate_bundle = alignment_module.validate_flight_parameters_bundle
-
-    def validate_once_per_stage(path, /):
-        bundle_validations.append(path)
-        return validate_bundle(path)
-
-    monkeypatch.setattr(
-        alignment_module, "validate_flight_parameters_bundle", validate_once_per_stage
+@pytest.mark.parametrize(
+    ("count", "expected"), [(3, (1, 1, 1)), (10, (8, 1, 1)), (100, (80, 10, 10)), (7, (5, 1, 1))]
+)
+def test_whole_flight_percentages_are_complete_disjoint_and_reproducible(count, expected):
+    arguments = dict(
+        flight_indices=tuple(range(count)), train_percent=80, validation_percent=10, seed=1001
     )
+    split = split_flights(**arguments)
+    assert split == split_flights(**arguments)
+    assert tuple(map(len, split.values())) == expected
+    assert sorted(index for indices in split.values() for index in indices) == list(range(count))
+    assert split != split_flights(**{**arguments, "seed": 1002})
+
+
+@pytest.mark.parametrize(
+    ("value", "score", "accepted"), [(0.09, 0.9, True), (0.1, 1.0, True), (0.11, 1.1, False)]
+)
+def test_numerical_evaluation_threshold(value, score, accepted):
+    result = evaluate_metrics(
+        measurements={"response": value, "hover": 0.001}, limits={"response": 0.1, "hover": 0.005}
+    )
+    assert result.score == pytest.approx(score)
+    assert result.accepted is accepted
+    assert [check.name for check in result.checks] == ["response", "hover"]
+
+
+def test_worst_check_controls_ranking_and_acceptance():
+    worse = evaluate_metrics(
+        measurements={"x": 1.2, "y": 0.0, "z": 0.0}, limits=dict.fromkeys(("x", "y", "z"), 1.0)
+    )
+    better = evaluate_metrics(
+        measurements={"x": 1.1, "y": 1.1, "z": 1.1}, limits=dict.fromkeys(("x", "y", "z"), 1.0)
+    )
+    assert not worse.accepted and not better.accepted
+    assert better.score < worse.score
+
+
+def test_reference_views_preserve_source_samples_and_minimal_membership(prepared_dataset):
+    metadata = json.loads((prepared_dataset / "dataset.json").read_text())
+    assert set(metadata) == {"source", "source_digest", "train", "validation", "test"}
+    dataset = load_flight_dataset(prepared_dataset / metadata["source"])
+    before = {p: p.read_bytes() for p in dataset.run_dir.rglob("*") if p.is_file()}
+    for role in ("train", "validation", "test"):
+        directory = prepared_dataset if role == "train" else prepared_dataset / role
+        reference = load_alignment_reference(directory / "reference.json")
+        assert {trace["flight_index"] for trace in reference["traces"]} == set(metadata[role])
+        assert "traces" not in json.loads((directory / "reference.json").read_text())
+        for trace in reference["traces"]:
+            flight = next(f for f in dataset.flights if f.flight_index == trace["flight_index"])
+            view = next(
+                view for view in flight_stage_views(flight) if view["name"] == trace["profile"]
+            )
+            assert trace["position_enu_m"] == view["position_enu_m"]
+            assert trace["time_s"] == view["time_s"]
+            assert trace["initial_rate_integral_body_flu"] == view["initial_rate_integral_body_flu"]
+            _trace(value=trace, name="source view")
+    assert before == {p: p.read_bytes() for p in before}
+
+
+def test_repeated_profile_names_are_distinct_flights():
+    reference = _response_traces(profiles=_profiles(), settings=_settings())
+    repeated = (*reference, *(replace(trace, flight_index=1) for trace in reference))
+    assert metric(name="controller-quality")(repeated, repeated).ranking_values == (0.0,)
+    perturbed = tuple(
+        replace(
+            trace,
+            velocity_body_flu_mps=tuple(
+                (v[0] + 0.1, v[1], v[2]) for v in trace.velocity_body_flu_mps
+            ),
+        )
+        if trace.flight_index == 1
+        else trace
+        for trace in repeated
+    )
+    assert metric(name="controller-quality")(repeated, perturbed).ranking_values[0] > 0
+    with pytest.raises(ValueError, match="duplicate"):
+        metric(name="controller-quality")((*reference, *reference), (*reference, *reference))
+
+
+def test_hover_bounds_read_training_windows_only(prepared_dataset, monkeypatch):
+    dataset, membership = flight_parameters_module.load_alignment_dataset(
+        prepared_dataset / "dataset.json"
+    )
+    reader = flight_stage_views
+    read = []
+
+    def traced_reader(flight, /):
+        read.append(flight.flight_index)
+        return reader(flight)
+
+    monkeypatch.setattr(flight_parameters_module, "flight_stage_views", traced_reader)
+    bounds = training_hover_limits(
+        dataset=dataset,
+        membership=membership,
+        position_margin_m=0.005,
+        attitude_margin_rad=math.radians(0.25),
+    )
+    assert read == membership["train"]
+    assert bounds["hover.position"] == 0.005
+    assert bounds["hover.orientation"] == math.radians(0.25)
+
+
+@pytest.mark.parametrize("test_gain", [1.0, 4.0])
+def test_validation_selects_and_test_cannot_change_selection(test_gain):
+    calls = []
 
     class SetEvaluator(_Evaluator):
-        def __init__(self, *, set_name="fit"):
+        def __init__(self, role="train"):
             super().__init__()
-            self.set_name = set_name
+            self.role = role
 
         def for_set(self, set_name, /):
-            return SetEvaluator(set_name=set_name)
+            return SetEvaluator(set_name)
 
         def evaluate(self, *, definition, settings, reference_traces):
-            calls.append((definition.backend, self.set_name, settings.command_delay_s))
-            traces = _response_traces(
-                profiles=definition.profiles, settings=definition.base_settings
-            )
-            # Encode the test response in the first trace, away from the hover profile.
-            marker = {"fit": 0.0, "validation": 0.05, "acceptance": 0.0}[self.set_name]
-            if definition.backend == "isaac-lab":
-                marker = settings.command_delay_s
-            return (replace(traces[0], start_sim_time_us=round(marker * 1000)), *traces[1:])
+            calls.append((definition.backend, self.role, settings.kp_vel))
+            active = settings
+            if definition.backend == "px4-sitl":
+                gain = {"train": 2.0, "validation": 1.0, "test": test_gain}[self.role]
+                active = replace(settings, kp_vel=(gain, 1.0, 1.0))
+            return _response_traces(profiles=definition.profiles, settings=active)
 
-    def score(reference, target, /):
-        error = abs(reference[0].start_sim_time_us - target[0].start_sim_time_us)
-        accepting = calls[-1][1] == "acceptance"
-        return MetricResult(
-            metrics={"error": float(error)},
-            ranking_values=(float(error),),
-            fit_metrics={},
-            validation_metrics={},
-            quality_passed=acceptance_passed if accepting else True,
-        )
-
-    monkeypatch.setattr(alignment_module, "metric", lambda **_kwargs: score)
     target = _definition(
         backend="isaac-lab",
         evaluator=SetEvaluator(),
-        parameters=(ParameterSpec("command_delay_s", 1, (0.0, 0.05)),),
+        parameters=(ParameterSpec("kp_vel", 1, ((1.0, 1.0, 1.0), (2.0, 1.0, 1.0))),),
     )
-    result = align(target, _definition(backend="px4-sitl", evaluator=SetEvaluator()))
-    assert result.controller.selected_settings.command_delay_s == 0.05
-    assert result.controller.advisory_quality_passed is acceptance_passed
-    assert [
-        delay
-        for backend, set_name, delay in calls
-        if backend == "isaac-lab" and set_name == "acceptance"
-    ] == [0.05]
-    first_validation = next(i for i, call in enumerate(calls) if call[1] == "validation")
-    assert all(call[1] == "fit" for call in calls[:first_validation])
-    assert all(call[1] != "fit" for call in calls[first_validation:])
-    assert result.candidates[result.selected_candidate_index].set_name == "validation"
-    assert len(bundle_validations) == 3
+    reference = _definition(backend="px4-sitl", evaluator=SetEvaluator())
+    result = align(target, reference)
+    assert result.controller.selected_settings.kp_vel == (1.0, 1.0, 1.0)
+    assert result.controller.advisory_quality_passed == (test_gain == 1.0)
+    assert [entry[2] for entry in calls if entry[:2] == ("isaac-lab", "test")] == [(1.0, 1.0, 1.0)]
+
+
+def _completed_run(*, root, name, result, score):
+    run = root / name
+    result = replace(result, controller=replace(result.controller, run_id=name))
+    write_alignment_result(result=result, run_dir=run)
+    (run / "dataset.json").write_bytes(
+        (Path(os.environ["ROBOTICS_ALIGNMENT_RUN_DIR"]) / "dataset.json").read_bytes()
+    )
+    identity = {
+        "schema_version": 1,
+        "completed": True,
+        "settings_fingerprint": result.controller.settings_fingerprint,
+        "flight_parameters_fingerprint": result.controller.flight_parameters_fingerprint,
+    }
+    (run / "qualification.json").write_text(
+        json.dumps(
+            {
+                **identity,
+                "set_name": "test",
+                "checks": [{"name": "response", "value": score, "limit": 1.0}],
+            }
+        )
+    )
+    (run / "integration.json").write_text(
+        json.dumps({**identity, "checks": [{"name": "live", "value": 0.0, "limit": 1.0}]})
+    )
+    for role in ("train", "validation", "test"):
+        directory = run if role == "train" else run / role
+        directory.mkdir(exist_ok=True)
+        (directory / "actuator_audit.json").write_text('{"schema_version":1,"passed":true}')
+        (directory / "target_candidates.json").write_text("{}")
+        (directory / "controller_boundary_replay.json").write_text(
+            json.dumps(
+                {
+                    "completed": True,
+                    "set_name": role,
+                    "settings_fingerprint": result.controller.settings_fingerprint,
+                    "source_digest": result.controller.flight_parameters_fingerprint,
+                    "flights": [
+                        {
+                            "flight_index": 0,
+                            "profiles": [
+                                {
+                                    "profile": "probe",
+                                    "physical_state_timestamp_join_error_us": 0,
+                                    "actuator_handoff_join_error_us": 0,
+                                    "metrics": {
+                                        "normalized_motor_rmse": 0.0,
+                                        "collective_thrust_rmse_n": 0.0,
+                                    },
+                                    "physical_state_metrics": {"normalized_motor_rmse": 0.0},
+                                }
+                            ],
+                            "limits": {
+                                "normalized_motor_rmse": 0.01,
+                                "collective_thrust_rmse_n": 0.05,
+                            },
+                            "timestamp_join_limit_us": 4000,
+                        }
+                    ],
+                }
+            )
+        )
+    return run
+
+
+def test_completed_rejected_runs_publish_and_best_uses_the_final_score(tmp_path):
+    result = align(
+        _definition(backend="isaac-lab", evaluator=_Evaluator()),
+        _definition(backend="px4-sitl", evaluator=_Evaluator()),
+    )
+    runs = []
+    for name, score in (
+        ("first", 3.0),
+        ("better", 2.0),
+        ("tied", 2.0),
+        ("accepted", 1.0),
+        ("worse", 4.0),
+    ):
+        run = _completed_run(root=tmp_path, name=name, result=result, score=score)
+        finalize_alignment_bundle(run_dir=run)
+        validate_alignment_bundle(run)
+        publish_controller(run_dir=run)
+        assert (tmp_path / "latest").resolve() == run
+        assert load_controller_artifact(run).advisory_quality_passed == (score <= 1.0)
+        assert (run / "target_candidates.json.zst").exists()
+        assert not (run / "target_candidates.json").exists()
+        runs.append(run)
+        best_index = (0, 1, 1, 3, 3)[len(runs) - 1]
+        assert (tmp_path / "best").resolve() == runs[best_index]
+    (runs[-1] / "untracked.log").write_text("untracked")
+    with pytest.raises(ValueError, match="inventory every payload"):
+        validate_alignment_bundle(runs[-1])
+
+
+def test_incomplete_or_mismatched_reports_cannot_finalize(tmp_path):
+    result = align(
+        _definition(backend="isaac-lab", evaluator=_Evaluator()),
+        _definition(backend="px4-sitl", evaluator=_Evaluator()),
+    )
+    run = _completed_run(root=tmp_path, name="incomplete", result=result, score=2.0)
+    report = json.loads((run / "integration.json").read_text())
+    for change in ({"completed": False}, {"settings_fingerprint": "wrong"}):
+        (run / "integration.json").write_text(json.dumps({**report, **change}))
+        with pytest.raises(ValueError, match="did not complete for the selected"):
+            finalize_alignment_bundle(run_dir=run)
+        assert not (run / "manifest.json").exists()
+
+
+def test_best_starts_again_when_comparison_inputs_change(tmp_path):
+    result = align(
+        _definition(backend="isaac-lab", evaluator=_Evaluator()),
+        _definition(backend="px4-sitl", evaluator=_Evaluator()),
+    )
+    original = _completed_run(root=tmp_path, name="group-one-best", result=result, score=2.0)
+    finalize_alignment_bundle(run_dir=original)
+    publish_controller(run_dir=original)
+    other = replace(result, controller=replace(result.controller, comparison_fingerprint="a" * 64))
+    separate = _completed_run(root=tmp_path, name="group-two", result=other, score=0.1)
+    finalize_alignment_bundle(run_dir=separate)
+    publish_controller(run_dir=separate)
+    assert (tmp_path / "best").resolve() == separate
+    worse = _completed_run(root=tmp_path, name="group-one-new", result=result, score=3.0)
+    finalize_alignment_bundle(run_dir=worse)
+    publish_controller(run_dir=worse)
+    assert (tmp_path / "best").resolve() == worse
+    assert (tmp_path / "latest").resolve() == worse

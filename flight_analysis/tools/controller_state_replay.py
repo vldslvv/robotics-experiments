@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
+from robotics_experiments.alignment import load_alignment_reference
+from robotics_experiments.alignment._flight_parameters import load_alignment_dataset
 from robotics_experiments.config import load_config
 from robotics_experiments.controller import (
     ActuationState,
@@ -954,7 +956,7 @@ def _actuator_boundary_report(
     *,
     ulog,
     config_path: Path,
-    reference_path: Path,
+    reference: dict,
     bridge_log_path: Path,
 ) -> dict:
     config = load_config(config_path)
@@ -973,12 +975,11 @@ def _actuator_boundary_report(
         input_scaling=np.asarray(bridge.input_scaling),
         zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
-    reference = json.loads(reference_path.read_text())
     if reference.get("schema_version") != 1:
-        raise ValueError(f"{reference_path} must use alignment trace schema 1")
+        raise ValueError("reference must use alignment trace schema 1")
     raw_profiles = reference.get("traces")
     if not isinstance(raw_profiles, list) or not raw_profiles:
-        raise ValueError(f"{reference_path} has no alignment traces")
+        raise ValueError("reference has no alignment traces")
 
     thrust = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
     torque = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
@@ -1154,7 +1155,6 @@ def _actuator_boundary_report(
         "schema_version": 1,
         "method": "px4-ulog-bridge-actuator-boundary-v1",
         "config": str(config_path),
-        "reference": str(reference_path),
         "bridge_log": str(bridge_log_path),
         "airframe": airframe_name,
         "composed_mass_kg": mass,
@@ -2021,13 +2021,12 @@ def _report(
     }
 
 
-def _profile_windows(*, reference_path: Path) -> list[dict]:
-    reference = json.loads(reference_path.read_text())
+def _profile_windows(*, reference: dict) -> list[dict]:
     if reference.get("schema_version") != 1:
-        raise ValueError(f"{reference_path} must use alignment trace schema 1")
+        raise ValueError("reference must use alignment trace schema 1")
     raw_profiles = reference.get("traces")
     if not isinstance(raw_profiles, list) or not raw_profiles:
-        raise ValueError(f"{reference_path} has no alignment traces")
+        raise ValueError("reference has no alignment traces")
     windows = []
     for raw_profile in raw_profiles:
         relative_time_s = raw_profile.get("time_s")
@@ -2045,7 +2044,7 @@ def _profile_windows(*, reference_path: Path) -> list[dict]:
                 "start_s": start_s,
                 "end_s": start_s + float(relative_time_s[-1]),
                 "command_trace": {
-                    "time_s": relative_time_s,
+                    "time_s": raw_profile["command_time_s"],
                     "command_velocity_body_flu_mps": raw_profile["command_velocity_body_flu_mps"],
                     "command_yaw_rate_radps": raw_profile["command_yaw_rate_radps"],
                     "command_collective_thrust_normalized": raw_profile[
@@ -2069,13 +2068,13 @@ def _profile_replay_report(
     ulog,
     config_path: Path,
     controller_artifact_path: Path,
-    reference_path: Path,
+    reference: dict,
     bridge_log_path: Path,
 ) -> dict:
     bridge_state = _bridge_state_samples(path=bridge_log_path)
     profiles = []
     failures = []
-    for window in _profile_windows(reference_path=reference_path):
+    for window in _profile_windows(reference=reference):
         core_replay = _report(
             ulog=ulog,
             config_path=config_path,
@@ -2170,9 +2169,9 @@ def _profile_replay_report(
     return {
         "schema_version": 1,
         "method": "physical-and-estimated-state-px4-profile-replay-v1-physics-rate",
+        "timestamp_join_limit_us": _PHYSICS_TICK_US,
         "config": str(config_path),
         "controller_artifact": str(controller_artifact_path),
-        "reference": str(reference_path),
         "bridge_log": str(bridge_log_path),
         "limits": {
             "normalized_motor_rmse": _MAX_NORMALIZED_MOTOR_RMSE,
@@ -2181,6 +2180,63 @@ def _profile_replay_report(
         "profiles": profiles,
         "passed": not failures,
         "failures": failures,
+    }
+
+
+def _dataset_report(
+    *, reference_path: Path, config_path: Path, controller_artifact_path: Path | None, ulog_type
+) -> dict:
+    payload = load_alignment_reference(reference_path)
+    descriptor = json.loads(reference_path.read_text())
+    dataset, membership = load_alignment_dataset(reference_path.parent / descriptor["dataset"])
+    reports = []
+    for flight in dataset.flights:
+        if flight.flight_index not in membership[descriptor["set_name"]]:
+            continue
+        reference = {
+            **payload,
+            "traces": [
+                trace for trace in payload["traces"] if trace["flight_index"] == flight.flight_index
+            ],
+        }
+        with open_flight_evidence(flight.directory / "flight.ulg.gz") as stream:
+            ulog = ulog_type(stream)
+        arguments = dict(
+            ulog=ulog,
+            config_path=config_path,
+            reference=reference,
+            bridge_log_path=flight.directory / "bridge.log.gz",
+        )
+        report = (
+            _actuator_boundary_report(**arguments)
+            if controller_artifact_path is None
+            else _profile_replay_report(
+                **arguments, controller_artifact_path=controller_artifact_path
+            )
+        )
+        reports.append({"flight_index": flight.flight_index, **report})
+    identity = (
+        {}
+        if controller_artifact_path is None
+        else {
+            "settings_fingerprint": load_controller_artifact(
+                controller_artifact_path
+            ).settings_fingerprint,
+        }
+    )
+    return {
+        **identity,
+        "source_digest": dataset.artifact_digest,
+        "schema_version": 1,
+        "completed": True,
+        "set_name": descriptor["set_name"],
+        "passed": all(report["passed"] for report in reports),
+        "failures": [
+            f"flight {report['flight_index']}: {failure}"
+            for report in reports
+            for failure in report["failures"]
+        ],
+        "flights": reports,
     }
 
 
@@ -2195,11 +2251,25 @@ def main() -> None:
     parser.add_argument("--audit-reference", type=Path)
     parser.add_argument("--profile-reference", type=Path)
     parser.add_argument("--bridge-log", type=Path)
+    parser.add_argument("--dataset-reference", type=Path)
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
 
     from pyulog import ULog
 
+    if args.dataset_reference is not None:
+        report = _dataset_report(
+            reference_path=args.dataset_reference,
+            config_path=args.config,
+            controller_artifact_path=args.controller_artifact,
+            ulog_type=ULog,
+        )
+        if args.json is None:
+            parser.error("--dataset-reference requires --json")
+        args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        if args.controller_artifact is None and not report["passed"]:
+            raise SystemExit("input actuator audit failed: " + "; ".join(report["failures"]))
+        return
     ulog_path = args.ulog if args.ulog is not None else args.ulog_positional
     if ulog_path is None:
         parser.error("one ULog path is required")
@@ -2226,7 +2296,7 @@ def main() -> None:
             ulog=replay_ulog,
             config_path=args.config,
             controller_artifact_path=args.controller_artifact,
-            reference_path=args.profile_reference,
+            reference=json.loads(args.profile_reference.read_text()),
             bridge_log_path=args.bridge_log,
         )
     elif args.audit_reference is not None or args.bridge_log is not None:
@@ -2235,7 +2305,7 @@ def main() -> None:
         report = _actuator_boundary_report(
             ulog=replay_ulog,
             config_path=args.config,
-            reference_path=args.audit_reference,
+            reference=json.loads(args.audit_reference.read_text()),
             bridge_log_path=args.bridge_log,
         )
     else:

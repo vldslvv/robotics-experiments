@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import itertools
 import json
 import math
@@ -15,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from bisect import bisect_right
 from collections.abc import Mapping
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -23,14 +23,20 @@ from typing import Any
 import numpy as np
 import torch
 
-from robotics_experiments.alignment import load_controller_definition
+from robotics_experiments.alignment import load_alignment_reference, load_controller_definition
 from robotics_experiments.alignment._align import (
-    _fitting_candidates,
+    _evaluate_alignment,
     _select_validation,
     _staged_beam_search,
+    _validate_pair,
 )
-from robotics_experiments.alignment._io import _trace, _TraceFileEvaluator
-from robotics_experiments.alignment._metrics import metric
+from robotics_experiments.alignment._artifact import _PENDING_QUALIFICATION, write_alignment_result
+from robotics_experiments.alignment._evaluation import evaluate_response
+from robotics_experiments.alignment._flight_parameters import (
+    load_alignment_dataset,
+    training_hover_limits,
+)
+from robotics_experiments.alignment._io import _fingerprint, _trace, _TraceFileEvaluator
 from robotics_experiments.alignment._models import (
     CandidateScore,
     ControllerDefinition,
@@ -52,74 +58,14 @@ def _report(message: str) -> None:
     print(f"[isaac-standalone-test] {message}", file=sys.stderr, flush=True)
 
 
-def _settings_fingerprint(settings: ControllerSettings, /) -> str:
-    encoded = json.dumps(
-        asdict(settings),
-        allow_nan=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _write_target_candidates(
-    *,
-    path: Path,
-    schema_version: int,
-    controller_id: str,
-    definition_fingerprint: str,
-    reference_sha256: str,
-    image: str,
-    candidates: dict[ControllerSettings, tuple[ProbeTrace, ...]],
-    failures: dict[str, str | None],
-    set_name: str = "fit",
-) -> None:
-    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+def _write_progress(payload: dict[str, Any], /) -> None:
     try:
-        with temporary_path.open("w") as stream:
-            stream.write('{"schema_version":')
-            json.dump(schema_version, stream, allow_nan=False, separators=(",", ":"))
-            stream.write(',"controller_id":')
-            json.dump(controller_id, stream, allow_nan=False, separators=(",", ":"))
-            stream.write(',"definition_fingerprint":')
-            json.dump(
-                definition_fingerprint,
-                stream,
-                allow_nan=False,
-                separators=(",", ":"),
-            )
-            stream.write(',"reference_sha256":')
-            json.dump(reference_sha256, stream)
-            stream.write(',"set_name":')
-            json.dump(set_name, stream)
-            stream.write(',"image":')
-            json.dump(image, stream, allow_nan=False, separators=(",", ":"))
-            stream.write(',"candidates":{')
-            for index, (settings, traces) in enumerate(candidates.items()):
-                if index:
-                    stream.write(",")
-                json.dump(
-                    _settings_fingerprint(settings),
-                    stream,
-                    allow_nan=False,
-                    separators=(",", ":"),
-                )
-                stream.write(":")
-                json.dump(
-                    [asdict(trace) for trace in traces],
-                    stream,
-                    allow_nan=False,
-                    separators=(",", ":"),
-                )
-            stream.write('},"failures":')
-            json.dump(failures, stream, allow_nan=False, separators=(",", ":"))
-            stream.write("}\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary_path.replace(path)
-    except BaseException:
-        temporary_path.unlink(missing_ok=True)
-        raise
+        path = Path(os.environ[_RUN_DIR_ENV]) / "progress.json"
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(payload, allow_nan=False) + "\n")
+        temporary.replace(path)
+    except (OSError, ValueError) as exc:
+        _report(f"WARNING: progress reporting failed: {exc}")
 
 
 def _write_spooled_trace(
@@ -129,7 +75,7 @@ def _write_spooled_trace(
     traces: list[dict[str, Any]],
 ) -> None:
     stream.write('{"fingerprint":')
-    json.dump(_settings_fingerprint(settings), stream, separators=(",", ":"))
+    json.dump(_fingerprint(asdict(settings)), stream, separators=(",", ":"))
     stream.write(',"traces":')
     json.dump(traces, stream, allow_nan=False, separators=(",", ":"))
     stream.write("}\n")
@@ -140,12 +86,12 @@ def _merge_target_candidate_spools(
     path: Path,
     controller_id: str,
     definition_fingerprint: str,
-    reference_sha256: str,
+    source_digest: str,
     image: str,
     scores: tuple[CandidateScore, ...],
     trace_sources: Mapping[ControllerSettings, ControllerSettings],
     spool_paths: tuple[Path, ...],
-    set_name: str = "fit",
+    set_name: str = "train",
 ) -> None:
     offsets: dict[str, tuple[Path, int, int, int]] = {}
     for spool_path in spool_paths:
@@ -171,8 +117,8 @@ def _merge_target_candidate_spools(
             json.dump(controller_id, stream, separators=(",", ":"))
             stream.write(',"definition_fingerprint":')
             json.dump(definition_fingerprint, stream, separators=(",", ":"))
-            stream.write(',"reference_sha256":')
-            json.dump(reference_sha256, stream)
+            stream.write(',"source_digest":')
+            json.dump(source_digest, stream)
             stream.write(',"set_name":')
             json.dump(set_name, stream)
             stream.write(',"image":')
@@ -181,11 +127,11 @@ def _merge_target_candidate_spools(
             first = True
             failures = {}
             for score in scores:
-                key = _settings_fingerprint(score.settings)
+                key = _fingerprint(asdict(score.settings))
                 if not score.usable:
                     failures[key] = score.failure_reason
                     continue
-                source_key = _settings_fingerprint(trace_sources[score.settings])
+                source_key = _fingerprint(asdict(trace_sources[score.settings]))
                 try:
                     spool_path, start, length, value_start = offsets[source_key]
                 except KeyError as exc:
@@ -366,6 +312,19 @@ class _GpuSampler:
             "warning": self._warning,
         }
         self._path.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
+        progress_path = Path(os.environ[_RUN_DIR_ENV]) / "progress.json"
+        try:
+            progress = json.loads(progress_path.read_text())
+            progress.update(
+                {
+                    "gpu/average_percent": average,
+                    "gpu/samples": len(self._samples),
+                    "candidates_per_second": payload["candidates_per_second"],
+                }
+            )
+            _write_progress(progress)
+        except (OSError, ValueError) as exc:
+            _report(f"WARNING: GPU progress reporting failed: {exc}")
         if self._warning:
             _report(self._warning)
         elif average is None:
@@ -791,7 +750,8 @@ def _candidate_trace_batch(
         )
     )
     times = [[float(value) for value in source["time_s"]] for source in reference_traces]
-    sample_indices = [1 for _source in reference_traces]
+    command_times = [source["command_time_s"] for source in reference_traces]
+    sample_indices = [0 for _source in reference_traces]
     trace_initial_positions = [
         (
             float(source["initial_position_enu_m"][0]),
@@ -800,33 +760,20 @@ def _candidate_trace_batch(
         )
         for source in reference_traces
     ]
-    initial_states = env.flight_states()
-    velocities = [[value] for value in env.body_velocities()]
-    positions = [[state[0]] for state in initial_states]
-    attitudes = [[state[1]] for state in initial_states]
-    world_velocities = [[state[2]] for state in initial_states]
-    angular_velocities = [[state[3]] for state in initial_states]
+    velocities: list[list] = [[] for _ in range(env.num_envs)]
+    positions: list[list] = [[] for _ in range(env.num_envs)]
+    attitudes: list[list] = [[] for _ in range(env.num_envs)]
+    world_velocities: list[list] = [[] for _ in range(env.num_envs)]
+    angular_velocities: list[list] = [[] for _ in range(env.num_envs)]
     failures: list[str | None] = [None for _settings in settings]
     elapsed_s = 0.0
-    while any(
-        sample_index < len(trace_times)
-        for sample_index, trace_times in zip(sample_indices, times, strict=True)
-    ):
-        next_sample_s = min(
-            trace_times[sample_index]
-            for sample_index, trace_times in zip(sample_indices, times, strict=True)
-            if sample_index < len(trace_times)
-        )
+    events = sorted({time_s for trace_times in (*times, *command_times) for time_s in trace_times})
+    for next_sample_s in events:
         interval_s = next_sample_s - elapsed_s
         physics_steps = round(interval_s * physics_hz)
-        if not math.isclose(
-            physics_steps / physics_hz,
-            interval_s,
-            abs_tol=1e-9,
-        ):
+        if not math.isclose(physics_steps / physics_hz, interval_s, abs_tol=1e-9):
             raise ValueError(
-                f"reference cadence interval {interval_s} is not representable "
-                f"at {physics_hz} Hz"
+                f"reference interval {interval_s} is not representable at {physics_hz} Hz"
             )
         action = torch.zeros(
             (env.num_envs, config.rl.action.action_dim),
@@ -837,20 +784,23 @@ def _candidate_trace_batch(
                 sample_index = sample_indices[trace_index]
                 if sample_index >= len(times[trace_index]):
                     continue
+                command_index = max(
+                    0, bisect_right(command_times[trace_index], elapsed_s + 1e-9) - 1
+                )
                 env_index = candidate_index * environment_traces_per_candidate + trace_index
                 if control_mode == "ctbr":
                     collective = float(
-                        source["command_collective_thrust_normalized"][sample_index - 1]
+                        source["command_collective_thrust_normalized"][command_index]
                     )
                     hover = float(env.actuation_params.hover_thrust_normalized[env_index])
                     action[env_index, 0] = collective / hover - 1.0
                     action[env_index, 1:4] = torch.as_tensor(
-                        source["command_body_rate_flu_radps"][sample_index - 1],
+                        source["command_body_rate_flu_radps"][command_index],
                         dtype=torch.float32,
                         device=env.device,
                     ) / float(config.rl.action.max_body_rate_radps)
                 else:
-                    command = source["command_velocity_body_flu_mps"][sample_index - 1]
+                    command = source["command_velocity_body_flu_mps"][command_index]
                     action[env_index, :3] = (
                         torch.as_tensor(
                             command,
@@ -860,12 +810,10 @@ def _candidate_trace_batch(
                         / action_scale
                     )
                     action[env_index, 3] = float(
-                        source["command_yaw_rate_radps"][sample_index - 1]
+                        source["command_yaw_rate_radps"][command_index]
                     ) / float(config.rl.action.max_yaw_rate_radps)
-        env.step_with_physics_steps(
-            action=action,
-            physics_steps=physics_steps,
-        )
+        if physics_steps:
+            env.step_with_physics_steps(action=action, physics_steps=physics_steps)
         elapsed_s = next_sample_s
         body_velocities = env.body_velocities()
         flight_states = env.flight_states()
@@ -953,16 +901,30 @@ def _worker_main(
             _trace(value=trace, name=f"reference[{index}]")
             for index, trace in enumerate(reference_traces)
         )
-        score_metric = metric(name=target.selection_metric)
-        traces_by_mode = {
-            mode: [trace for trace in reference_traces if trace["control_mode"] == mode]
-            for mode in ("velocity", "ctbr")
-            if any(trace["control_mode"] == mode for trace in reference_traces)
-        }
-        environment_traces_per_candidate = max(
-            len(mode_traces) for mode_traces in traces_by_mode.values()
+        dataset, membership = load_alignment_dataset(
+            Path(os.environ[_RUN_DIR_ENV]) / "dataset.json"
         )
-        initial_mode = next(iter(traces_by_mode))
+        criteria = config.alignment.evaluation
+        hover_limits = training_hover_limits(
+            dataset=dataset,
+            membership=membership,
+            position_margin_m=criteria.hover_position_margin_m,
+            attitude_margin_rad=criteria.hover_attitude_margin_rad,
+        )
+        # Bound the scene by one flight's profiles, independently of dataset size.
+        flight_indices = tuple(dict.fromkeys(trace["flight_index"] for trace in reference_traces))
+        trace_batches = [
+            [
+                trace
+                for trace in reference_traces
+                if trace["flight_index"] == flight_index and trace["control_mode"] == mode
+            ]
+            for flight_index in flight_indices
+            for mode in ("velocity", "ctbr")
+        ]
+        trace_batches = [batch for batch in trace_batches if batch]
+        environment_traces_per_candidate = max(len(batch) for batch in trace_batches)
+        initial_mode = trace_batches[0][0]["control_mode"]
         env = _make_env(
             config=config,
             num_envs=candidate_capacity * environment_traces_per_candidate,
@@ -978,8 +940,8 @@ def _worker_main(
                     break
                 batch_id, indexed_settings = task
                 settings = tuple(setting for _index, setting in indexed_settings)
-                mode_results = {
-                    mode: _candidate_trace_batch(
+                mode_results = [
+                    _candidate_trace_batch(
                         env=env,
                         config=config,
                         settings=settings,
@@ -988,14 +950,15 @@ def _worker_main(
                         reference_traces=mode_traces,
                         vehicle_label=target.vehicle,
                     )
-                    for mode, mode_traces in traces_by_mode.items()
-                }
+                    for mode_traces in trace_batches
+                ]
                 raw: list[str | list[dict[str, Any]]] = []
-                order = {trace["profile"]: index for index, trace in enumerate(reference_traces)}
+                order = {
+                    (trace["flight_index"], trace["profile"]): index
+                    for index, trace in enumerate(reference_traces)
+                }
                 for candidate_index in range(len(settings)):
-                    candidate_results = [
-                        mode_results[mode][candidate_index] for mode in traces_by_mode
-                    ]
+                    candidate_results = [result[candidate_index] for result in mode_results]
                     failure = next(
                         (result for result in candidate_results if isinstance(result, str)),
                         None,
@@ -1009,7 +972,12 @@ def _worker_main(
                         if isinstance(result, list)
                         for trace in result
                     ]
-                    raw.append(sorted(combined, key=lambda trace: order[trace["profile"]]))
+                    raw.append(
+                        sorted(
+                            combined,
+                            key=lambda trace: order[(trace["flight_index"], trace["profile"])],
+                        )
+                    )
                 scored = []
                 for (index, setting), result in zip(indexed_settings, raw, strict=True):
                     if isinstance(result, str):
@@ -1023,7 +991,13 @@ def _worker_main(
                             )
                             for trace_index, trace in enumerate(result)
                         )
-                        score = score_metric(parsed_reference, parsed)
+                        score = evaluate_response(
+                            metric_name=target.selection_metric,
+                            reference=parsed_reference,
+                            target=parsed,
+                            response_limits=criteria.response_limits,
+                            hover_limits=hover_limits,
+                        )
                         _write_spooled_trace(stream=spool, settings=setting, traces=result)
                         scored.append((index, score))
                     except Exception as exc:  # noqa: BLE001 - candidate-local scoring failure
@@ -1059,6 +1033,7 @@ class _WorkerPool:
         context = multiprocessing.get_context("spawn")
         self.worker_count = worker_count
         self.candidate_capacity = candidate_capacity
+        self.flight_count = len({trace["flight_index"] for trace in reference_traces})
         self.physical_batches = 0
         self.candidate_slots = 0
         self._result_queue = context.Queue()
@@ -1180,8 +1155,6 @@ class _LiveEvaluator:
     def for_set(self, set_name: str, /) -> _TraceFileEvaluator:
         return _TraceFileEvaluator(backend="isaac-lab", set_name=set_name)
 
-    _retain_traces = False
-
     def __init__(
         self,
         *,
@@ -1192,6 +1165,11 @@ class _LiveEvaluator:
         self._sampler = sampler
         self._evaluations = 0
         self._started_s = time.monotonic()
+        self._phase = (
+            "train"
+            if pool.spool_paths[0].parent.parent == Path(os.environ[_RUN_DIR_ENV])
+            else pool.spool_paths[0].parent.parent.name
+        )
 
     def finish_sampling(
         self,
@@ -1249,6 +1227,19 @@ class _LiveEvaluator:
             f"alignment target evaluated {self._evaluations} candidates in "
             f"{self._pool.physical_batches} GPU batches ({elapsed_s:.1f}s)"
         )
+        scores = [
+            result.ranking_values[0] for result in raw_results if isinstance(result, MetricResult)
+        ]
+        progress = {
+            "phase": self._phase,
+            "candidates_completed": self._evaluations,
+            "flight_evaluations_completed": self._evaluations * self._pool.flight_count,
+            "elapsed_s": elapsed_s,
+            "candidates_per_second": self._evaluations / elapsed_s,
+        }
+        if scores:
+            progress[f"{self._phase}/best_score"] = min(scores)
+        _write_progress(progress)
         return raw_results
 
 
@@ -1263,25 +1254,12 @@ def _evaluate_fixed_set(
     """Replay a frozen list without parameter expansion or cross-set caches."""
     if not candidates:
         return
+    _write_progress({"phase": set_name, "candidates_completed": 0})
     target = load_controller_definition(target_path)
     directory = run_dir / set_name
-    reference_bytes = (directory / "reference.json").read_bytes()
-    reference_sha256 = hashlib.sha256(reference_bytes).hexdigest()
-    payload = json.loads(reference_bytes)
+    payload = load_alignment_reference(directory / "reference.json")
     if payload["set_name"] != set_name:
         raise ValueError("target reference recording set does not match evaluation")
-    (directory / "evaluation.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "set_name": set_name,
-                "settings_fingerprints": [_settings_fingerprint(c.settings) for c in candidates],
-                "reference_sha256": reference_sha256,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
     spool_dir = directory / ".target-trace-spool"
     spool_dir.mkdir()
     pool = _WorkerPool(
@@ -1323,7 +1301,7 @@ def _evaluate_fixed_set(
         path=directory / "target_candidates.json",
         controller_id=target.controller_id,
         definition_fingerprint=target.definition_fingerprint,
-        reference_sha256=reference_sha256,
+        source_digest=payload["source_digest"],
         image=os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image),
         scores=scores,
         trace_sources={candidate.settings: candidate.settings for candidate in candidates},
@@ -1341,16 +1319,29 @@ def _run(
     target_path: Path,
     run_dir: Path,
 ) -> None:
+    _write_progress({"phase": "train", "candidates_completed": 0})
     target = load_controller_definition(target_path)
     reference_path = run_dir / "reference.json"
-    reference_bytes = reference_path.read_bytes()
-    reference_sha256 = hashlib.sha256(reference_bytes).hexdigest()
-    payload = json.loads(reference_bytes)
-    if payload["set_name"] != "fit":
+    payload = load_alignment_reference(reference_path)
+    if payload["set_name"] != "train":
         raise ValueError("alignment search requires fitting recordings")
     reference_traces = payload.get("traces")
     if not isinstance(reference_traces, list):
         raise ValueError(f"{reference_path} has no traces list")
+    dataset, membership = load_alignment_dataset(run_dir / "dataset.json")
+    target = replace(target, flight_parameters_artifact=str(dataset.run_dir))
+    reference_definition = replace(
+        load_controller_definition(Path(os.environ["ALIGNMENT_REFERENCE"])),
+        flight_parameters_artifact=str(dataset.run_dir),
+    )
+    _validate_pair(target, reference_definition)
+    criteria = config.alignment.evaluation
+    hover_limits = training_hover_limits(
+        dataset=dataset,
+        membership=membership,
+        position_margin_m=criteria.hover_position_margin_m,
+        attitude_margin_rad=criteria.hover_attitude_margin_rad,
+    )
     maximum_expansion = _maximum_candidate_expansion(target)
     worker_count = min(config.alignment.execution.worker_count, maximum_expansion)
     candidate_capacity = min(
@@ -1387,6 +1378,8 @@ def _run(
         outcome = _staged_beam_search(
             target=live_target,
             reference_traces=parsed_reference,
+            response_limits=criteria.response_limits,
+            hover_limits=hover_limits,
         )
         pool.close()
     except BaseException:
@@ -1407,8 +1400,7 @@ def _run(
         json.dumps(
             {
                 "schema_version": 1,
-                "set_name": "fit",
-                "reference_sha256": reference_sha256,
+                "set_name": "train",
                 "statistics": dict(outcome.statistics),
                 "generated_refinements": list(outcome.generated_refinements),
             },
@@ -1421,7 +1413,7 @@ def _run(
         path=run_dir / "target_candidates.json",
         controller_id=target.controller_id,
         definition_fingerprint=target.definition_fingerprint,
-        reference_sha256=reference_sha256,
+        source_digest=payload["source_digest"],
         image=os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image),
         scores=outcome.candidate_scores,
         trace_sources=outcome.trace_sources,
@@ -1430,8 +1422,7 @@ def _run(
     for spool_path in pool.spool_paths:
         spool_path.unlink()
     spool_dir.rmdir()
-    # Validation sees only fitting-qualified candidates; acceptance sees one frozen setting.
-    eligible = _fitting_candidates(target=target, outcome=outcome)
+    eligible = tuple(candidate for candidate in outcome.candidate_scores if candidate.usable)
     _evaluate_fixed_set(
         config=config,
         target_path=target_path,
@@ -1439,20 +1430,52 @@ def _run(
         set_name="validation",
         candidates=eligible,
     )
-    reference_definition = load_controller_definition(Path(os.environ["ALIGNMENT_REFERENCE"]))
-    selected, _scores, reasons = _select_validation(
+    selected, scores = _select_validation(
         target=target,
         reference=reference_definition,
         outcome=outcome,
+        response_limits=criteria.response_limits,
+        hover_limits=hover_limits,
     )
-    if not reasons:
-        _evaluate_fixed_set(
-            config=config,
-            target_path=target_path,
-            run_dir=run_dir,
-            set_name="acceptance",
-            candidates=(selected,),
-        )
+    _evaluate_fixed_set(
+        config=config,
+        target_path=target_path,
+        run_dir=run_dir,
+        set_name="test",
+        candidates=(selected,),
+    )
+    result = _evaluate_alignment(
+        target=replace(target, image=os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image)),
+        reference=reference_definition,
+        selected=selected,
+        candidate_scores=scores,
+        dataset=dataset,
+        membership=membership,
+        response_limits=criteria.response_limits,
+        hover_limits=hover_limits,
+        run_dir=run_dir,
+    )
+    result = replace(
+        result,
+        controller=replace(
+            result.controller,
+            run_id=run_dir.name,
+            advisory_quality_passed=False,
+            advisory_quality_reasons=(
+                *result.controller.advisory_quality_reasons,
+                _PENDING_QUALIFICATION,
+            ),
+        ),
+    )
+    write_alignment_result(result=result, run_dir=run_dir)
+    _write_progress(
+        {
+            "phase": "replay",
+            "test/response_score": json.loads((run_dir / "qualification.json").read_text())[
+                "score"
+            ],
+        }
+    )
 
 
 def _benchmark_settings(
@@ -1483,7 +1506,7 @@ def _run_capacity_benchmark(
 ) -> None:
     target = load_controller_definition(target_path)
     reference_path = run_dir / "reference.json"
-    payload = json.loads(reference_path.read_text())
+    payload = load_alignment_reference(reference_path)
     raw_reference = payload.get("traces")
     if not isinstance(raw_reference, list):
         raise ValueError(f"{reference_path} has no traces list")

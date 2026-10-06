@@ -66,8 +66,10 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "AlignmentResult",
             "ControllerDefinition",
             "align",
+            "evaluate_metrics",
             "load_controller_definition",
             "prepare_alignment_reference",
+            "load_alignment_reference",
         ]
         flight_parameters = importlib.import_module("robotics_experiments.flight_parameters")
         assert flight_parameters.__all__ == [
@@ -84,8 +86,11 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "ResponseTraceEvidence",
             "SignalStatistics",
             "FlightDataset",
+            "FlightRecording",
+            "flight_stage_views",
             "load_flight_dataset",
             "evaluate_hover_pose",
+            "hover_pose_errors",
             "finalize_flight_parameters_bundle",
             "flight_parameters_from_payload",
             "flight_trace_from_payload",

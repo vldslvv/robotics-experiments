@@ -441,6 +441,7 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
                         "split": "validation",
                         "axis": "combined",
                         "start_sim_time_us": 116_384_000,
+                        "command_time_s": [0.0, 2.5, 5.7],
                         "time_s": [0.0, 2.5, 5.7],
                         "command_velocity_body_flu_mps": [
                             [0.0, 0.0, 0.0],
@@ -471,7 +472,7 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
         )
     )
 
-    assert _profile_windows(reference_path=reference) == [
+    assert _profile_windows(reference=json.loads(reference.read_text())) == [
         {
             "family": "velocity",
             "control_mode": "velocity",

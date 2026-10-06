@@ -200,10 +200,10 @@ not stable evidence or a qualified baseline. There is no automatic `best` or
 baseline designation.
 
 The distinct `FlightParameters` contract represents consumer-qualified hover
-bounds used by existing alignment and RL. Those consumers reject the new raw
-dataset until their follow-up implementation; there is no compatibility adapter
-or evidence migration. Alignment must assign whole independent flights to
-training, validation and test sets and derive fitting-only bounds. See
+bounds used by the existing RL workflow. RL still requires that contract;
+there is no compatibility adapter or evidence migration. Alignment consumes
+the raw dataset, assigns whole flights to train, validation and test, and derives
+its bounds from training flights only. See
 [the alignment handoff](backlog/flight_parameters_alignment_handoff.md).
 
 ## Final stability analysis
@@ -247,3 +247,9 @@ PYTHONPATH=src uv run --with pyulog python make/scripts/run_flight_parameters_ca
   --compare-run .build/flight-parameters/<id>/<comparison-run> \
   --analysis-output .build/flight-parameters-stability/<analysis-run>/stability.json
 ```
+
+Alignment consumes this raw dataset through `load_flight_dataset` and
+`flight_stage_views`, assigns complete flights to train/validation/test, and
+keeps membership in its own minimal `dataset.json`. Capture output and sample
+windows do not change when a consumer changes its split. See
+[controller alignment](SIM_TO_SIM_ALIGNMENT.md).

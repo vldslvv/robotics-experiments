@@ -15,9 +15,15 @@ from robotics_experiments.flight_parameters._config import (
     flight_seeds,
     load_flight_parameters_config,
 )
-from robotics_experiments.flight_parameters._dataset import FlightDataset, load_flight_dataset
+from robotics_experiments.flight_parameters._dataset import (
+    FlightDataset,
+    FlightRecording,
+    flight_stage_views,
+    load_flight_dataset,
+)
 from robotics_experiments.flight_parameters._derive import (
     evaluate_hover_pose,
+    hover_pose_errors,
     summarize_signal,
 )
 from robotics_experiments.flight_parameters._evidence import (
@@ -53,8 +59,11 @@ __all__ = [
     "ResponseTraceEvidence",
     "SignalStatistics",
     "FlightDataset",
+    "FlightRecording",
+    "flight_stage_views",
     "load_flight_dataset",
     "evaluate_hover_pose",
+    "hover_pose_errors",
     "finalize_flight_parameters_bundle",
     "flight_parameters_from_payload",
     "flight_trace_from_payload",

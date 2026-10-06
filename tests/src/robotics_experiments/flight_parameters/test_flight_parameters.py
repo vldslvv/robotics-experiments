@@ -369,6 +369,7 @@ def _dataset(
         rows = [
             {
                 "sim_time_us": 1_000_000 + i * 500_000,
+                "requested_at_us": 1_000_000 + i * 500_000,
                 "stage_index": 0 if i < 20 else 1,
                 "phase": "measurement",
                 "position_enu_m": [0.01 + shift, 0.0, 2.5],

@@ -8,13 +8,16 @@ import math
 import mmap
 import os
 import re
-from collections.abc import Sequence
-from dataclasses import asdict, fields
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from robotics_experiments.alignment._flight_parameters import (
+    load_alignment_reference,
+)
 from robotics_experiments.alignment._metrics import metric
 from robotics_experiments.alignment._models import (
     ControllerDefinition,
@@ -39,6 +42,16 @@ _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
 _CANDIDATE_ENTRY = re.compile(rb'"([0-9a-f]{64})"\s*:\s*')
 _CANDIDATES_KEY = b'"candidates"'
 _FAILURES_KEY = b'"failures"'
+
+
+def _plain(value: Any, /) -> Any:
+    if not isinstance(value, type) and is_dataclass(value):
+        return {item.name: _plain(getattr(value, item.name)) for item in fields(value)}
+    if isinstance(value, Mapping):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return value
 
 
 def _canonical_json(value: Any, /) -> str:
@@ -485,6 +498,8 @@ def _parameters(
     for index, raw_parameter in enumerate(value):
         name = f"parameters[{index}]"
         parameter = _object(value=raw_parameter, name=name)
+        if set(parameter) != {"field", "stage", "candidates"}:
+            raise ValueError(f"{name} fields must be field, stage and candidates")
         field_name = _string(value=parameter.get("field"), name=f"{name}.field")
         if field_name not in _SETTINGS_FIELDS:
             raise ValueError(f"{name}.field names unknown ControllerSettings field {field_name!r}")
@@ -495,7 +510,6 @@ def _parameters(
         if not isinstance(raw_candidates, list) or not raw_candidates:
             raise ValueError(f"{name}.candidates must be a non-empty list")
         template = getattr(base_settings, field_name)
-        raw_regularization_scale = parameter.get("selection_regularization_scale")
         parameters.append(
             ParameterSpec(
                 field=field_name,
@@ -510,15 +524,6 @@ def _parameters(
                         name=f"{name}.candidates[{candidate_index}]",
                     )
                     for candidate_index, candidate in enumerate(raw_candidates)
-                ),
-                selection_regularization_scale=(
-                    None
-                    if raw_regularization_scale is None
-                    else _finite(
-                        value=raw_regularization_scale,
-                        name=f"{name}.selection_regularization_scale",
-                        positive=True,
-                    )
                 ),
             )
         )
@@ -606,6 +611,7 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     if type(completed) is not bool:
         raise ValueError(f"{name}.completed must be boolean")
     time = trace["time_s"]
+    command_time = trace["command_time_s"]
     commands = trace["command_velocity_body_flu_mps"]
     yaw_commands = trace["command_yaw_rate_radps"]
     collective_commands = trace["command_collective_thrust_normalized"]
@@ -617,6 +623,7 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     angular_velocities = trace["angular_velocity_body_flu_radps"]
     if (
         not isinstance(time, list)
+        or not isinstance(command_time, list)
         or not isinstance(commands, list)
         or not isinstance(yaw_commands, list)
         or not isinstance(collective_commands, list)
@@ -629,6 +636,7 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     ):
         raise ValueError(f"{name} samples must be lists")
     sample_lengths = (
+        len(command_time),
         len(commands),
         len(yaw_commands),
         len(collective_commands),
@@ -647,6 +655,24 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         for current, next_time in zip(parsed_time, parsed_time[1:], strict=False)
     ):
         raise ValueError(f"{name}.time_s must be strictly increasing")
+    parsed_command_time = tuple(
+        _finite(value=value, name=f"{name}.command_time_s") for value in command_time
+    )
+    if (
+        parsed_time[0] < 0
+        or parsed_command_time[0] < 0
+        or any(
+            command > sample
+            for command, sample in zip(parsed_command_time, parsed_time, strict=True)
+        )
+        or any(
+            right < left
+            for left, right in zip(parsed_command_time, parsed_command_time[1:], strict=False)
+        )
+    ):
+        raise ValueError(
+            f"{name} command times must be ordered, nonnegative and no later than measurements"
+        )
     control_mode = _string(value=trace["control_mode"], name=f"{name}.control_mode")
     if control_mode not in ("velocity", "ctbr"):
         raise ValueError(f"{name}.control_mode must be 'velocity' or 'ctbr'")
@@ -719,6 +745,7 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     if set(source_age) != expected_source_age:
         raise ValueError(f"{name}.initial_controller_state_source_age_us fields mismatch")
     return ProbeTrace(
+        flight_index=_nonnegative_integer(value=trace["flight_index"], name=f"{name}.flight_index"),
         family=_string(value=trace["family"], name=f"{name}.family"),
         control_mode=control_mode,
         family_metric=_string(value=trace["family_metric"], name=f"{name}.family_metric"),
@@ -726,6 +753,7 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         split=_string(value=trace["split"], name=f"{name}.split"),
         axis=_string(value=trace["axis"], name=f"{name}.axis"),
         time_s=parsed_time,
+        command_time_s=parsed_command_time,
         command_velocity_body_flu_mps=parsed_velocity_commands,
         command_yaw_rate_radps=parsed_yaw_commands,
         command_collective_thrust_normalized=parsed_collective_commands,
@@ -1001,12 +1029,11 @@ def _index_candidate_diagnostics(
 
 
 class _TraceFileEvaluator:
-    def __init__(self, *, backend: str, set_name: str = "fit") -> None:
-        if set_name not in {"fit", "validation", "acceptance"}:
+    def __init__(self, *, backend: str, set_name: str = "train") -> None:
+        if set_name not in {"train", "validation", "test"}:
             raise ValueError(f"unknown alignment recording set {set_name!r}")
         self._set_name = set_name
         self._backend = backend
-        self._retain_traces = False
         self._path: Path | None = None
         self._payload: dict[str, Any] | None = None
         self._candidate_offsets: dict[str, tuple[int, int]] = {}
@@ -1019,7 +1046,7 @@ class _TraceFileEvaluator:
         if self._path == path and self._payload is not None:
             return self._payload
         try:
-            loaded = json.loads(path.read_text())
+            loaded = load_alignment_reference(path)
         except (OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(
                 f"cannot load {self._backend} alignment traces from {path}: {exc}"
@@ -1033,9 +1060,9 @@ class _TraceFileEvaluator:
         if self._path == path and self._payload is not None:
             return self._payload
         payload, offsets, failures = _index_candidate_diagnostics(path=path)
-        with (path.parent / "reference.json").open("rb") as reference:
-            reference_sha256 = hashlib.file_digest(reference, "sha256").hexdigest()
-        if payload.get("reference_sha256") != reference_sha256:
+        run_dir = path.parent if self._set_name == "train" else path.parent.parent
+        source_digest = json.loads((run_dir / "dataset.json").read_text())["source_digest"]
+        if payload["source_digest"] != source_digest:
             raise RuntimeError(f"{path} was evaluated against a different reference recording")
         self._path = path
         self._payload = payload
@@ -1074,7 +1101,7 @@ class _TraceFileEvaluator:
                 "or an explicitly injected evaluator"
             )
         run_dir = Path(run_dir_value)
-        if self._set_name != "fit":
+        if self._set_name != "train":
             run_dir /= self._set_name
         if self._backend == "px4-sitl":
             path = run_dir / "reference.json"

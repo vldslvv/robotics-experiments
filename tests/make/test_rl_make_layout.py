@@ -58,7 +58,7 @@ def test_alignment_targets_are_defined_only_in_alignment_makefile() -> None:
         "alignment-prepare-reference",
         "alignment-benchmark-capacity",
         "alignment-sweep-target",
-        "alignment-fit",
+        "trackio-alignment",
         "align-controllers",
         "test-integration-alignment-target",
     )
@@ -79,7 +79,7 @@ def test_alignment_campaign_runs_integration_before_publication() -> None:
     )[0]
 
     integration = campaign.index("test-integration-alignment-target")
-    finalization = campaign.index("--finalize")
+    finalization = campaign.index("$(ALIGNMENT_FIT_SCRIPT)")
     assert "CONTROLLER_ARTIFACT='$(ALIGNMENT_RUN_DIR)/controller.json'" in campaign
     assert integration < finalization
 

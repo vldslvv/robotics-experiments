@@ -82,11 +82,10 @@ auto-disarm are outside the controller target.
 Keep their imports in this order; neither runner may import Kit/Isaac Lab at
 module import time.
 
-`alignment_fit.py` is host-safe and performs no simulator imports. Fit mode
-consumes the two diagnostic trace files and writes `controller.json` plus
-`selection.json.zst` without publishing. Finalize mode validates the complete
-bundle, including hard quality and boundary diagnostics, before atomically
-updating relative `latest`/`best` links. No migration mode is supported.
+`alignment_sweep_target.py` owns train search, validation selection and frozen
+test evaluation. `alignment_fit.py` is the host-safe finalization/publication
+entrypoint after replay and live checks. `alignment_trackio.py` reads progress
+for the local board in the Isaac Lab image; it does not select controllers.
 
 ## Training entrypoint
 

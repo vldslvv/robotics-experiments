@@ -2,12 +2,14 @@
 
 import importlib.util
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import ModuleType, SimpleNamespace
 
 import pytest
+import torch
 
 from robotics_experiments.alignment import load_controller_definition
+from robotics_experiments.config import load_config
 from tests.support.paths import REPO_ROOT
 
 
@@ -150,56 +152,6 @@ def test_worker_merge_rejects_corrupt_protocol(shards, message):
         )
 
 
-def test_target_candidates_are_streamed_to_atomic_json(tmp_path):
-    module = _load_script()
-    first = _settings(1)[0]
-    second = replace(first, command_delay_s=first.command_delay_s + 0.001)
-    trace = module.ProbeTrace(
-        family="velocity",
-        control_mode="velocity",
-        family_metric="translational-controller-quality",
-        profile="fit_x",
-        split="fit",
-        axis="x",
-        time_s=(0.0,),
-        command_velocity_body_flu_mps=((0.0, 0.0, 0.0),),
-        command_yaw_rate_radps=(0.0,),
-        command_collective_thrust_normalized=(0.0,),
-        command_body_rate_flu_radps=((0.0, 0.0, 0.0),),
-        position_enu_m=((0.0, 0.0, 0.0),),
-        attitude_flu_enu_wxyz=((1.0, 0.0, 0.0, 0.0),),
-        velocity_body_flu_mps=((0.0, 0.0, 0.0),),
-        velocity_enu_mps=((0.0, 0.0, 0.0),),
-        angular_velocity_body_flu_radps=((0.0, 0.0, 0.0),),
-        initial_position_enu_m=(0.0, 0.0, 0.0),
-        initial_attitude_flu_enu_wxyz=(1.0, 0.0, 0.0, 0.0),
-        initial_linear_velocity_enu_mps=(0.0, 0.0, 0.0),
-        initial_estimated_linear_velocity_enu_mps=(0.0, 0.0, 0.0),
-        initial_angular_velocity_body_flu_radps=(0.0, 0.0, 0.0),
-        initial_estimated_angular_velocity_body_flu_radps=(0.0, 0.0, 0.0),
-        completed=True,
-    )
-    path = tmp_path / "target_candidates.json"
-
-    module._write_target_candidates(  # noqa: SLF001 - focused serializer test
-        path=path,
-        schema_version=3,
-        controller_id="controller",
-        definition_fingerprint="definition",
-        reference_sha256="reference-digest",
-        image="image",
-        candidates={first: (trace,), second: (trace,)},
-        failures={module._settings_fingerprint(second): "failed"},  # noqa: SLF001
-    )
-
-    payload = json.loads(path.read_text())
-    assert payload["schema_version"] == 3
-    assert payload["controller_id"] == "controller"
-    assert len(payload["candidates"]) == 2
-    assert tuple(payload["failures"].values()) == ("failed",)
-    assert not path.with_suffix(".json.tmp").exists()
-
-
 def test_worker_spools_merge_in_candidate_order_with_effective_aliases(tmp_path):
     module = _load_script()
     first = _settings(1)[0]
@@ -229,7 +181,7 @@ def test_worker_spools_merge_in_candidate_order_with_effective_aliases(tmp_path)
         path=path,
         controller_id="controller",
         definition_fingerprint="definition",
-        reference_sha256="reference-digest",
+        source_digest="reference-digest",
         image="image",
         scores=scores,
         trace_sources={first: first, alias: first},
@@ -238,10 +190,65 @@ def test_worker_spools_merge_in_candidate_order_with_effective_aliases(tmp_path)
 
     payload = json.loads(path.read_text())
     assert list(payload["candidates"]) == [
-        module._settings_fingerprint(first),  # noqa: SLF001
-        module._settings_fingerprint(alias),  # noqa: SLF001
+        module._fingerprint(asdict(first)),  # noqa: SLF001
+        module._fingerprint(asdict(alias)),  # noqa: SLF001
     ]
     assert list(payload["candidates"].values()) == [[trace], [trace]]
     assert payload["failures"] == {
-        module._settings_fingerprint(failed): "failed"  # noqa: SLF001
+        module._fingerprint(asdict(failed)): "failed"  # noqa: SLF001
     }
+
+
+def test_replay_preserves_measurement_offset_and_independent_command_times():
+    module = _load_script()
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    elapsed = 0.0
+    position = 0.0
+    velocity = 0.0
+    steps = []
+
+    def step(*, action, physics_steps):
+        nonlocal elapsed, position, velocity
+        velocity = float(action[0, 0]) * config.rl.action.max_body_velocity_mps
+        duration = physics_steps / config.sim.physics_hz
+        position += velocity * duration
+        elapsed += duration
+        steps.append(elapsed)
+
+    env = SimpleNamespace(
+        num_envs=1,
+        device="cpu",
+        actuation_params=config.rl.action,
+        apply_controller_settings_batch=lambda **_kwargs: None,
+        set_initial_states=lambda **_kwargs: None,
+        step_with_physics_steps=step,
+        body_velocities=lambda: [(velocity, 0.0, 0.0)],
+        flight_states=lambda: [
+            ((position, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), (velocity, 0.0, 0.0), (0.0, 0.0, 0.0))
+        ],
+    )
+    source = {
+        "profile": "timing",
+        "control_mode": "velocity",
+        "initial_position_enu_m": (0.0, 0.0, 0.0),
+        "time_s": [0.032, 0.080, 0.132],
+        "command_time_s": [0.0, 0.060, 0.100],
+        "command_velocity_body_flu_mps": [(0.0, 0.0, 0.0), (0.1, 0.0, 0.0), (-0.1, 0.0, 0.0)],
+        "command_yaw_rate_radps": [0.0, 0.0, 0.0],
+    }
+    with torch.no_grad():
+        result = module._candidate_trace_batch(  # noqa: SLF001 - simulator-free replay timing regression
+            env=env,
+            config=config,
+            settings=_settings(1),
+            candidate_capacity=1,
+            environment_traces_per_candidate=1,
+            reference_traces=[source],
+            vehicle_label="x500_01",
+        )
+    assert not isinstance(result[0], str)
+    assert result[0][0]["time_s"] == source["time_s"]
+    assert [value[0] for value in result[0][0]["position_enu_m"]] == pytest.approx(
+        [0.0, 0.002, 0.0008]
+    )
+    assert steps == pytest.approx([0.032, 0.060, 0.080, 0.100, 0.132])

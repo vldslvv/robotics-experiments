@@ -28,15 +28,12 @@ alignment-prepare-reference:
 .PHONY: alignment-audit-actuators
 alignment-audit-actuators:
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
-	@test -f '$(ALIGNMENT_RUN_DIR)/reference.ulg'
-	@test -f '$(ALIGNMENT_RUN_DIR)/bridge.log'
-	@for set_name in fit validation acceptance; do \
+	@for set_name in train validation test; do \
 	    directory='$(ALIGNMENT_RUN_DIR)'; \
-	    if [ "$$set_name" != fit ]; then directory="$$directory/$$set_name"; fi; \
+	    if [ "$$set_name" != train ]; then directory="$$directory/$$set_name"; fi; \
 	    PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
 	        --config configs/alignment_px4_x500_velocity.yaml \
-	        --audit-reference "$$directory/reference.json" \
-	        --bridge-log "$$directory/bridge.log" --ulog "$$directory/reference.ulg" \
+	        --dataset-reference "$$directory/reference.json" \
 	        --json "$$directory/actuator_audit.json" || exit $$?; \
 	done
 
@@ -63,29 +60,17 @@ alignment-benchmark-capacity: generate-assets
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"
 
-.PHONY: alignment-fit
-alignment-fit:
-	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
-	@test -f '$(ALIGNMENT_RUN_DIR)/target_candidates.json'
-	@PYTHONPATH=src uv run python '$(ALIGNMENT_FIT_SCRIPT)' \
-	    --target '$(ALIGNMENT_TARGET)' \
-	    --reference '$(ALIGNMENT_REFERENCE)' \
-	    --run-dir '$(ALIGNMENT_RUN_DIR)' \
-	    --run-id '$(ALIGNMENT_RUN_ID)'
-
 .PHONY: alignment-replay-controller
 alignment-replay-controller:
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
-	@test -f '$(ALIGNMENT_RUN_DIR)/reference.ulg'
 	@test -f '$(ALIGNMENT_RUN_DIR)/controller.json'
-	@for set_name in fit validation acceptance; do \
+	@for set_name in train validation test; do \
 	    directory='$(ALIGNMENT_RUN_DIR)'; \
-	    if [ "$$set_name" != fit ]; then directory="$$directory/$$set_name"; fi; \
+	    if [ "$$set_name" != train ]; then directory="$$directory/$$set_name"; fi; \
 	    PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
 	        --config configs/alignment_px4_x500_velocity.yaml \
 	        --controller-artifact '$(ALIGNMENT_RUN_DIR)/controller.json' \
-	        --ulog "$$directory/reference.ulg" --profile-reference "$$directory/reference.json" \
-	        --bridge-log "$$directory/bridge.log" \
+	        --dataset-reference "$$directory/reference.json" \
 	        --json "$$directory/controller_boundary_replay.json" || exit $$?; \
 	done
 
@@ -96,14 +81,12 @@ align-controllers:
 	@$(MAKE) alignment-audit-actuators ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)'
 	@$(MAKE) alignment-sweep-target ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \
 	    ALIGNMENT_TARGET='$(ALIGNMENT_TARGET)' ALIGNMENT_REFERENCE='$(ALIGNMENT_REFERENCE)'
-	@$(MAKE) alignment-fit ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \
-	    ALIGNMENT_TARGET='$(ALIGNMENT_TARGET)' ALIGNMENT_REFERENCE='$(ALIGNMENT_REFERENCE)'
 	@$(MAKE) alignment-replay-controller ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)'
 	@$(MAKE) test-integration-alignment-target \
 	    CONTROLLER_ARTIFACT='$(ALIGNMENT_RUN_DIR)/controller.json' \
 	    ISAAC_TEST_EXTRA_ARGS='--alignment-report $(ALIGNMENT_RUN_DIR_CONTAINER)/integration.json'
 	@PYTHONPATH=src uv run python '$(ALIGNMENT_FIT_SCRIPT)' \
-	    --run-dir '$(ALIGNMENT_RUN_DIR)' --finalize
+	    --run-dir '$(ALIGNMENT_RUN_DIR)'
 
 .PHONY: test-integration-alignment-target
 test-integration-alignment-target: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
@@ -114,3 +97,21 @@ test-integration-alignment-target: generate-assets
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"
+
+ALIGNMENT_TRACKIO_HOST ?= 127.0.0.1
+ALIGNMENT_TRACKIO_PORT ?= 7861
+ALIGNMENT_TRACKIO_DIR ?= .build/alignment/trackio
+
+.PHONY: trackio-alignment
+trackio-alignment:
+	@mkdir -p '$(ALIGNMENT_TRACKIO_DIR)'
+	@docker run --rm --network=host \
+	    -v '$(CURDIR):$(ISAAC_PROJECT_DIR):ro' \
+	    -v '$(CURDIR)/$(ALIGNMENT_TRACKIO_DIR):$(ISAAC_PROJECT_DIR)/$(ALIGNMENT_TRACKIO_DIR):rw' \
+	    -e 'TRACKIO_DIR=$(ISAAC_PROJECT_DIR)/$(ALIGNMENT_TRACKIO_DIR)' \
+	    -e 'PYTHONPATH=$(ISAAC_PROJECT_DIR)/src' \
+	    --entrypoint /isaac-sim/python.sh '$(ISAAC_LAB_IMAGE)' \
+	    '$(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/alignment_trackio.py' \
+	    --run-dir '$(ALIGNMENT_RUN_DIR_CONTAINER)' \
+	    --config '$(ISAAC_PROJECT_DIR)/configs/alignment_px4_x500_velocity.yaml' \
+	    --host '$(ALIGNMENT_TRACKIO_HOST)' --port '$(ALIGNMENT_TRACKIO_PORT)'

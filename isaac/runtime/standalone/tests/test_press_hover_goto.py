@@ -24,14 +24,14 @@ import math
 import os
 import random
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
-from robotics_experiments.alignment import load_controller_definition
+from robotics_experiments.alignment import evaluate_metrics, load_controller_definition
 from robotics_experiments.config import ExperimentConfig, RlActionConfig, load_config
 from robotics_experiments.controller import (
     ControllerArtifact,
@@ -57,10 +57,8 @@ if TYPE_CHECKING:
 # env's velocity actuation tracks.
 _POSITION_KP = 1.0
 _HOVER_SETTLE_S = 4.0
-_HOVER_TOLERANCE_M = 0.1
 _GOTO_DISTANCE_M = 2.0
 _GOTO_SETTLE_S = 8.0
-_GOTO_TOLERANCE_M = 0.2
 _SETTLED_WINDOW_S = 1.0
 _EPISODE_MARGIN_S = 1.0
 _DEFAULT_SEED = 7
@@ -839,12 +837,12 @@ def _contact_chain_inputs(
     return controller.selected_settings, flight_parameters, load_hover_reset_samples(bundle=bundle)
 
 
-def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> dict[str, float] | None:
     if args.switch_mechanics:
         from _switch_mechanics import _run_switch_mechanics
 
         _run_switch_mechanics(config)
-        return
+        return None
     if args.contact_chain:
         controller_settings, flight_parameters, hover_reset_samples = _contact_chain_inputs(
             config=config
@@ -856,7 +854,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             flight_parameters=flight_parameters,
             hover_reset_samples=hover_reset_samples,
         )
-        return
+        return None
     controller_settings = _controller_settings(config=config)
     action_cfg = config.rl.action
     if args.ctbr_sanity:
@@ -875,7 +873,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             controller_settings=controller_settings,
             env_cls=DroneHoverEnv,
         )
-        return
+        return None
 
     if action_cfg.kind != "velocity":
         raise AssertionError(
@@ -917,12 +915,6 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             f"last{_SETTLED_WINDOW_S:.1f}s_max={hover.last_window_max_error_m:.3f} m "
             f"peak={hover.peak_error_m:.3f} m"
         )
-        if hover.last_window_max_error_m > _HOVER_TOLERANCE_M:
-            raise AssertionError(
-                "hover not held: "
-                f"last-window max error {hover.last_window_max_error_m:.3f} m "
-                f"> {_HOVER_TOLERANCE_M} m"
-            )
 
         goto_target = target + torch.tensor([_GOTO_DISTANCE_M, 0.0, 0.0], device=env.device)
         # F2 side channel: a switch just beyond env 0's goto target; the
@@ -951,12 +943,6 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             f"last{_SETTLED_WINDOW_S:.1f}s_max={goto.last_window_max_error_m:.3f} m "
             f"peak={goto.peak_error_m:.3f} m"
         )
-        if goto.last_window_max_error_m > _GOTO_TOLERANCE_M:
-            raise AssertionError(
-                "goto not tracked: "
-                f"last-window max error {goto.last_window_max_error_m:.3f} m "
-                f"> {_GOTO_TOLERANCE_M} m"
-            )
 
         press_end_obs = _press_observation_sample(env, provider, action_dim)
         _validate_press_side_channel(
@@ -964,6 +950,16 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             end_obs=press_end_obs,
             handoff_config=config.rl.press.handoff,
         )
+        measurements = {
+            "live.hover_error_m": hover.last_window_max_error_m,
+            "live.goto_error_m": goto.last_window_max_error_m,
+        }
+        evaluation = evaluate_metrics(
+            measurements=measurements, limits=config.alignment.evaluation.live_limits
+        )
+        if not args.alignment_report and not evaluation.accepted:
+            raise AssertionError("; ".join(evaluation.failures))
+        return measurements
     finally:
         env.close()
 
@@ -1017,6 +1013,7 @@ def main() -> None:
             artifact, _path = _controller_artifact(config=config)
             report = {
                 "schema_version": 1,
+                "completed": False,
                 "passed": False,
                 "settings_fingerprint": artifact.settings_fingerprint,
                 "flight_parameters_fingerprint": artifact.flight_parameters_fingerprint,
@@ -1025,14 +1022,25 @@ def main() -> None:
             with args.alignment_report.open("x") as stream:
                 json.dump(report, stream)
         try:
-            _run(args=args, config=config)
+            measurements = _run(args=args, config=config)
         except Exception as exc:
             if args.alignment_report:
                 report["failures"] = [str(exc)]
                 args.alignment_report.write_text(json.dumps(report, indent=2) + "\n")
             raise
         if args.alignment_report:
-            report.update(passed=True, failures=[])
+            if measurements is None:
+                raise RuntimeError("alignment integration returned no measurements")
+            evaluation = evaluate_metrics(
+                measurements=measurements, limits=config.alignment.evaluation.live_limits
+            )
+            report.update(
+                completed=True,
+                passed=evaluation.accepted,
+                failures=evaluation.failures,
+                score=evaluation.score,
+                checks=[asdict(check) for check in evaluation.checks],
+            )
             args.alignment_report.write_text(json.dumps(report, indent=2) + "\n")
         if args.switch_mechanics:
             _report("switch mechanics validation PASSED")
@@ -1041,7 +1049,11 @@ def main() -> None:
         elif args.ctbr_sanity:
             _report("ctbr sanity validation PASSED")
         else:
-            _report("press hover+goto validation PASSED")
+            _report(
+                "press hover+goto evaluation COMPLETED"
+                if args.alignment_report
+                else "press hover+goto validation PASSED"
+            )
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
         raise

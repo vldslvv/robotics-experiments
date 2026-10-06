@@ -67,9 +67,29 @@ class _AlignmentExecutionConfig(_FreezableConfig):
 
 
 @dataclass
+class _AlignmentDatasetSplitConfig(_FreezableConfig):
+    """Whole-flight percentages; test receives the remainder."""
+
+    train_percent: float
+    validation_percent: float
+
+
+@dataclass
+class _AlignmentEvaluationConfig(_FreezableConfig):
+    """Resolved acceptance limits, independent of search and capture."""
+
+    response_limits: dict[str, float]
+    live_limits: dict[str, float]
+    hover_position_margin_m: float
+    hover_attitude_margin_rad: float
+
+
+@dataclass
 class _AlignmentConfig(_FreezableConfig):
     """Controller-alignment capture and execution settings."""
 
+    dataset_split: _AlignmentDatasetSplitConfig
+    evaluation: _AlignmentEvaluationConfig
     capture: _AlignmentCaptureConfig
     execution: _AlignmentExecutionConfig
 

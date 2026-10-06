@@ -7,17 +7,19 @@ import json
 import os
 import shutil
 import subprocess
-import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import asdict, fields, replace
 from pathlib import Path
 from typing import Any
 
+from robotics_experiments.alignment._evaluation import evaluate_final
+from robotics_experiments.alignment._flight_parameters import load_alignment_dataset
 from robotics_experiments.alignment._io import (
     _canonical_json,
     _finite,
     _object,
     _parameters,
+    _plain,
     _settings,
     _string,
 )
@@ -27,6 +29,7 @@ from robotics_experiments.alignment._models import (
     CandidateScore,
     ControllerArtifact,
     ControllerSettings,
+    QualityGateResult,
 )
 from robotics_experiments.controller import load_controller_artifact
 
@@ -40,22 +43,16 @@ _MANIFEST_SCHEMA_VERSION = 1
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
 
 
-def _plain(value: Any, /) -> Any:
-    if hasattr(value, "__dataclass_fields__"):
-        return {item.name: _plain(getattr(value, item.name)) for item in fields(value)}
-    if isinstance(value, Mapping):
-        return {str(key): _plain(item) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return [_plain(item) for item in value]
-    return value
+def _replace_text(*, path: Path, payload: str) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(payload)
+    os.replace(temporary, path)
 
 
 def _write_new_text(*, path: Path, payload: str) -> None:
     if path.exists():
         raise FileExistsError(f"alignment result already exists: {path}")
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(payload)
-    os.replace(temporary, path)
+    _replace_text(path=path, payload=payload)
 
 
 def _zstd(*, arguments: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
@@ -220,7 +217,7 @@ def load_selection(*, run_dir: Path, controller: ControllerArtifact) -> Alignmen
         }
         if set(row) != expected_row or row["index"] != row_index:
             raise ValueError(f"{name} fields or index mismatch")
-        if row["set_name"] not in {"fit", "validation"}:
+        if row["set_name"] not in {"train", "validation"}:
             raise ValueError(f"{name} has an invalid selection recording set")
         overrides = _object(value=row["settings_overrides"], name=f"{name}.settings_overrides")
         extra = overrides.keys() - _SETTINGS_FIELDS
@@ -314,147 +311,93 @@ def _manifest_entry(*, role: str, path: Path, run_dir: Path) -> dict[str, Any]:
     }
 
 
-def _relocate_payload(*, source: Path, destination: Path) -> None:
-    if not source.is_symlink():
-        source.rename(destination)
-        return
-    target = source.resolve(strict=True)
-    source.unlink()
-    destination.symlink_to(os.path.relpath(target, start=destination.parent))
-
-
-def finalize_alignment_bundle(
-    *,
-    run_dir: Path,
-    compressed_target_source: bool = False,
-) -> Path:
-    """Reorganize, compress, inventory, and validate one completed run."""
-
+def finalize_alignment_bundle(*, run_dir: Path) -> Path:
+    """Evaluate completed evidence, compress outputs in place, and inventory it."""
     controller = load_controller_artifact(run_dir)
     load_selection(run_dir=run_dir, controller=controller)
-    response_failures = tuple(
-        reason for reason in controller.advisory_quality_reasons if reason != _PENDING_QUALIFICATION
-    )
-    if response_failures or (
-        not controller.advisory_quality_passed and not controller.advisory_quality_reasons
+    dataset, _membership = load_alignment_dataset(run_dir / "dataset.json")
+    if (
+        dataset.artifact_digest != controller.flight_parameters_fingerprint
+        or dataset.run_id != controller.flight_parameters_run_id
     ):
-        raise ValueError("controller quality gates failed: " + "; ".join(response_failures))
-    _require_passed_diagnostic(
-        path=run_dir / "actuator_audit.json",
-        name="actuator audit",
-    )
-    _require_passed_diagnostic(
-        path=run_dir / "controller_boundary_replay.json",
-        name="controller boundary replay",
-    )
-    _require_passed_diagnostic(
-        path=run_dir / "qualification.json", name="fixed benchmark qualification"
-    )
-    for set_name in ("validation", "acceptance"):
-        for filename in ("actuator_audit.json", "controller_boundary_replay.json"):
-            _require_passed_diagnostic(
-                path=run_dir / set_name / filename, name=f"{set_name} {filename}"
-            )
-    _require_passed_diagnostic(path=run_dir / "integration.json", name="controller integration")
-    for filename in ("qualification.json", "integration.json"):
-        report = json.loads((run_dir / filename).read_text())
+        raise ValueError("finalization source does not match the selected controller")
+    for role in ("train", "validation", "test"):
+        directory = run_dir if role == "train" else run_dir / role
+        _require_passed_diagnostic(
+            path=directory / "actuator_audit.json", name=f"{role} input audit"
+        )
+        replay = json.loads((directory / "controller_boundary_replay.json").read_text())
         if (
-            report.get("settings_fingerprint") != controller.settings_fingerprint
+            not replay.get("completed")
+            or replay.get("settings_fingerprint") != controller.settings_fingerprint
+            or replay.get("source_digest") != dataset.artifact_digest
+            or replay.get("set_name") != role
+        ):
+            raise ValueError(f"{role} controller replay did not complete for the selected inputs")
+    qualification = json.loads((run_dir / "qualification.json").read_text())
+    integration = json.loads((run_dir / "integration.json").read_text())
+    for report in (qualification, integration):
+        if (
+            not report.get("completed")
+            or report.get("settings_fingerprint") != controller.settings_fingerprint
             or report.get("flight_parameters_fingerprint")
             != controller.flight_parameters_fingerprint
         ):
-            raise ValueError(f"{filename} does not qualify the selected controller inputs")
-    if json.loads((run_dir / "qualification.json").read_text()).get("set_name") != "acceptance":
-        raise ValueError("controller qualification requires acceptance recordings")
-    evidence = run_dir / "evidence"
-    diagnostics = run_dir / "diagnostics"
-    stages = diagnostics / "stages"
-    acceptance = diagnostics / "acceptance"
-    evidence.mkdir(exist_ok=True)
-    diagnostics.mkdir(exist_ok=True)
-    stages.mkdir(exist_ok=True)
-    acceptance.mkdir(exist_ok=True)
-    moves = {
-        "reference.json": evidence / "reference_traces.json",
-        "reference.ulg": evidence / "reference.ulg",
-        "bridge.log": evidence / "bridge.log",
-        "actuator_audit.json": diagnostics / "actuator_audit.json",
-        "controller_boundary_replay.json": diagnostics / "controller_boundary_replay.json",
-        "gpu_utilization.json": diagnostics / "gpu_utilization.json",
-        "preflight-alignment.json": stages / "preflight-alignment.json",
-        "search_realization.json": stages / "search_realization.json",
-        "manifest.json": stages / "capture_manifest.json",
-    }
-    optional_moves = {"preflight-alignment.json", "search_realization.json", "manifest.json"}
-    for source_name, destination in moves.items():
-        source = run_dir / source_name
-        if not source.is_file():
-            if source_name in optional_moves:
-                continue
-            raise FileNotFoundError(f"required alignment output is missing: {source}")
-        _relocate_payload(source=source, destination=destination)
-    target_source = run_dir / (
-        "target_candidates.json.zst" if compressed_target_source else "target_candidates.json"
+            raise ValueError("evaluation did not complete for the selected controller inputs")
+    if qualification.get("set_name") != "test":
+        raise ValueError("final evaluation requires test flights")
+    evaluation = evaluate_final(
+        response_checks=tuple(QualityGateResult(**check) for check in qualification["checks"]),
+        live_checks=tuple(QualityGateResult(**check) for check in integration["checks"]),
+        replay=json.loads((run_dir / "test/controller_boundary_replay.json").read_text()),
     )
-    target_destination = evidence / "target_traces.json.zst"
-    if not target_source.is_file():
-        raise FileNotFoundError(f"required alignment output is missing: {target_source}")
-    if compressed_target_source:
-        shutil.copy2(target_source, target_destination)
-        _zstd(arguments=("-q", "-t", str(target_destination)))
-    else:
-        _compress_file(
-            source=target_source,
-            destination=target_destination,
-            compression_arguments=("-8", "--long=27", "-T0"),
-        )
-    target_source.unlink()
-    for set_name in ("validation", "acceptance"):
-        source = run_dir / set_name / "target_candidates.json"
+    qualification.update(
+        score=evaluation.score,
+        passed=evaluation.accepted,
+        failures=evaluation.failures,
+        checks=[_plain(check) for check in evaluation.checks],
+    )
+    _replace_text(
+        path=run_dir / "qualification.json", payload=_canonical_json(qualification) + "\n"
+    )
+    for role in ("train", "validation", "test"):
+        directory = run_dir if role == "train" else run_dir / role
+        source = directory / "target_candidates.json"
+        destination = source.with_suffix(".json.zst")
         _compress_file(
             source=source,
-            destination=source.with_suffix(".json.zst"),
+            destination=destination,
             compression_arguments=("-8", "--long=27", "-T0"),
         )
         source.unlink()
-    controller = replace(controller, advisory_quality_passed=True, advisory_quality_reasons=())
-    (run_dir / "controller.json").write_text(_canonical_json(_plain(controller)) + "\n")
-    role_by_path = {
-        "controller.json": "controller",
-        "selection.json.zst": "selection",
-        "evidence/reference_traces.json": "reference-traces",
-        "evidence/reference.ulg": "reference-ulog",
-        "evidence/bridge.log": "bridge-log",
-        "evidence/target_traces.json.zst": "target-traces",
-        "diagnostics/actuator_audit.json": "actuator-audit",
-        "diagnostics/controller_boundary_replay.json": "controller-boundary-replay",
-        "diagnostics/gpu_utilization.json": "gpu-utilization",
-        "diagnostics/stages/preflight-alignment.json": "preflight",
-        "diagnostics/stages/search_realization.json": "search-realization",
-        "diagnostics/stages/capture_manifest.json": "capture-manifest",
-    }
-    role_by_path = {
-        relative: role for relative, role in role_by_path.items() if (run_dir / relative).is_file()
-    }
-    for path in sorted(run_dir.rglob("*")):
-        if not path.is_file() or path.name == "manifest.json":
-            continue
-        relative = path.relative_to(run_dir).as_posix()
-        role_by_path.setdefault(
-            relative,
-            (
-                "acceptance-log"
-                if relative.startswith("diagnostics/acceptance/")
-                else "stage-diagnostic"
-            ),
+    controller = replace(
+        controller,
+        advisory_quality_passed=evaluation.accepted,
+        advisory_quality_reasons=evaluation.failures,
+    )
+    _replace_text(
+        path=run_dir / "controller.json", payload=_canonical_json(_plain(controller)) + "\n"
+    )
+    _replace_text(
+        path=run_dir / "progress.json",
+        payload=_canonical_json(
+            {
+                "phase": "complete",
+                "accepted": evaluation.accepted,
+                "test/final_score": evaluation.score,
+                "artifact": str(run_dir / "controller.json"),
+            }
         )
+        + "\n",
+    )
     manifest = {
         "schema_version": _MANIFEST_SCHEMA_VERSION,
         "alignment_id": controller.alignment_id,
         "run_id": controller.run_id,
         "files": [
-            _manifest_entry(role=role, path=run_dir / relative, run_dir=run_dir)
-            for relative, role in role_by_path.items()
+            _manifest_entry(role=path.stem, path=path, run_dir=run_dir)
+            for path in sorted(run_dir.rglob("*"))
+            if path.is_file() and path.name != "manifest.json"
         ],
     }
     manifest_path = run_dir / "manifest.json"
@@ -537,29 +480,20 @@ def publish_controller(*, run_dir: Path) -> None:
 
     validate_alignment_bundle(run_dir)
     controller = load_controller_artifact(run_dir)
-    if not controller.advisory_quality_passed:
-        raise ValueError("cannot publish a controller that failed its quality gates")
-    result = load_selection(run_dir=run_dir, controller=controller)
-    ranking = result.candidates[result.selected_candidate_index].ranking_values
     root = run_dir.parent
     best_link = root / "best"
-    replace_best = True
-    if best_link.exists() and (best_link / "controller.json").is_file():
-        try:
-            best = load_controller_artifact(best_link)
-            best_result = load_selection(run_dir=best_link.resolve(), controller=best)
-        except ValueError as exc:
-            warnings.warn(
-                f"replacing unsupported controller publication at {best_link}: {exc}",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        else:
-            if best.comparison_fingerprint == controller.comparison_fingerprint:
-                best_ranking = best_result.candidates[
-                    best_result.selected_candidate_index
-                ].ranking_values
-                replace_best = (ranking, controller.run_id) < (best_ranking, best.run_id)
-    if replace_best:
-        _replace_relative_symlink(link=best_link, target=run_dir)
+    selected = run_dir
+    score = _finite(
+        value=json.loads((run_dir / "qualification.json").read_text())["score"],
+        name="final score",
+        nonnegative=True,
+    )
+    if best_link.exists():
+        best = load_controller_artifact(best_link)
+        if best.comparison_fingerprint == controller.comparison_fingerprint:
+            validate_alignment_bundle(best_link.resolve())
+            best_score = json.loads((best_link / "qualification.json").read_text())["score"]
+            if best_score <= score:
+                selected = best_link.resolve()
+    _replace_relative_symlink(link=best_link, target=selected)
     _replace_relative_symlink(link=root / "latest", target=run_dir)

@@ -5,58 +5,71 @@ PX4 SITL for identical physical commands. It is upstream of reinforcement
 learning. Waypoint navigation, policy rewards, policy actions, and domain
 randomization are not fitting inputs.
 
-Flight-parameter bundles contain independently captured fitting, validation, and
-acceptance flights. Preparation pins all three complete response recordings;
-their `set_name` remains separate from each recording's internal profile splits.
-Hover bounds and policy reset samples still come only from fitting hover flights.
-See [flight parameters](FLIGHT_PARAMETERS.md) for capture and set ownership.
+Capture publishes independent complete 24-stage flights without dataset roles.
+Alignment owns the following flow:
+
+```python
+membership = _split_flights(flight_indices=indices, train_percent=80,
+                          validation_percent=10, seed=start_seed)
+# GPU coordinator: train search -> validation selection -> freeze settings.
+# Evaluate the frozen controller on test flights, then replay and live hover/goto.
+finalize_alignment_bundle(run_dir=run_dir)
+publish_controller(run_dir=run_dir)
+```
 
 ## Architecture and contracts
 
-`robotics_experiments.controller` owns the immutable `ControllerSettings`, the
-strict controller artifact, and the pure NumPy controller/allocator/actuator
-reference. `robotics_experiments.alignment` owns probe definitions, generic
-candidate search, metrics, evidence bundles, and publication. RL depends only
-on the controller artifact and never imports alignment.
+`controller` owns controller settings, artifacts and actuation equations.
+`flight_parameters` owns immutable physical evidence. `alignment` owns splitting,
+fitting, numerical evaluation and publication. RL never imports alignment.
+The host-safe `_evaluation.py` has explicit measurement and limit inputs and no
+filesystem, simulator, search or publication dependencies. `_metrics.py` computes
+response measurements. The evaluator alone converts performance measurements into
+normalized scores and acceptance results; callers consume those results.
 
-`robotics_experiments.flight_parameters` owns the task-neutral schema-1 hover
-and controller-response evidence described in `docs/FLIGHT_PARAMETERS.md`.
-Alignment no longer launches a private PX4 reference capture. Its preparation
-step resolves and pins one immutable flight-parameters run, validates that its
-lossless response evidence exactly covers the authored fit, validation, and
-stability profiles, then exposes its `reference.json`, ULog, and bridge log to
-the existing alignment evaluator through relative symlinks. The selected target
-settings are still replayed through the full 30-second
-`stability-hover-pose` profile and must keep position and attitude within the
-full-window hover bounds. The registered metrics, response thresholds, and hover bounds remain unchanged. The exact flight-parameters fingerprint enters
-the comparison fingerprint and strict controller artifact. The capture manifest
-and controller artifact also record the resolved producer `run_id`; an authored
-`latest` selector is never retained as lineage.
+Preparation resolves the capture selector once and verifies every flight's stage
+commands, recorded sample times and reconstructed controller boundary. It writes
+one minimal `dataset.json`:
 
-Input validation completes before the alignment run directory is created. An
-invalid or incompatible flight-parameters selector therefore exits with one
-preflight error and leaves no empty or partially staged alignment run. The
-consumer never copies those producer-owned inputs; final alignment evidence
-retains relative references to the pinned timestamped bundle. ULogs and bridge
-logs may be gzip-compressed in that producer; audit and replay readers stream
-their original bytes without changing the reference names or copying inputs.
-The fitting entrypoint uses that prepared bundle for both controller definitions,
-preserving their authored definition fingerprints. Different authored selectors
-such as `latest` and an exact run path cannot override the prepared input or
-cause a false definition mismatch after simulation.
+```json
+{"source":"../../flight-parameters/suite/run", "source_digest":"<SHA256>",
+ "train":[1], "validation":[2], "test":[0]}
+```
+
+Membership lists contain producer flight indices. There are no copied samples,
+counts, percentages or seeds in this file. Reference descriptors contain the set
+name, profile interpretation and relative dataset path. `flight_stage_views`
+selects the original sample ranges in memory without interpolation or reduction.
+Inactive command fields are zero for the selected control mode. ULogs and bridge
+logs are read directly from each flight's original compressed producer files.
+Target results reuse the producer digest recorded in `dataset.json`; dataset
+roles identify their assigned flights.
+
+`alignment.dataset_split` in the composed experiment owns train and validation
+percentages; test gets the remainder. Splitting uses a separate RNG seeded by the
+capture's `start_seed`. It shuffles whole flights before allocation, leaving every
+stage and sample in order. Largest-remainder rounding uses train, validation,
+test as its tie order. Empty roles receive one flight from the largest role with
+more than one. At least three complete flights are required. Thus three flights
+produce 1/1/1; ten produce 8/1/1; one hundred produce 80/10/10.
+
+Every assigned flight contributes to the response measurements. Profile identity
+is `(flight_index, profile)`. Workers replay one flight's profiles at a time in a
+fixed scene, so increasing flight count does not increase the number of GPU
+environments. RMS measurements pool the actual samples; peak checks retain the
+worst event across flights. Native-hover bounds use only full training-flight
+windows, with the configured position and attitude margins. Held-out flights
+cannot enlarge these bounds. The target's complete `stability-hover-pose` traces
+are evaluated against those same bounds.
 
 The dependency direction is:
 
 `config -> controller -> {alignment, rl} -> workflows`, with the
 `config -> flight_parameters -> {alignment, rl}` evidence boundary.
 
-The only supported controller and alignment artifact contract is schema 1.
-There are no artifact migrations, compatibility sentinels, alternate plant
-mappings, or physical-force controller paths. Older files under `.build/` are
-inert evidence and cannot be loaded by current production code. If an existing
-`latest` or `best` label names an unsupported artifact, the next accepted
-publication replaces that label atomically without loading or migrating the
-obsolete payload.
+Controller artifacts remain schema 1. Completed evaluations publish whether
+accepted or rejected; incomplete or corrupt evidence cannot publish. Publication reads the current artifact format without migration or fallback. Input capture
+bytes remain producer-owned and immutable.
 
 The X500 normalized controller carries velocity, attitude, and rate state into
 PX4-style normalized thrust and torque. The generated X500 effectiveness matrix
@@ -108,7 +121,7 @@ attitude at each wire transmission, then holds the resulting world-ENU velocity
 setpoint while the 125 Hz velocity loop and 250 Hz rate, allocator, actuator,
 and physics loops advance. This mirrors PX4's `MAV_FRAME_BODY_NED` receiver:
 body-to-world conversion occurs for each received message, independently of the
-slower policy cadence.
+slower policy timing.
 
 Alignment receives an ordered list of probe families. A family contract is
 only a stable name, a control mode, a registered metric, and physical command
@@ -134,17 +147,10 @@ fields. The `coarse-to-fine-beam` strategy:
 4. generates midpoints around retained regions for each configured refinement level;
 5. deduplicates settings by their exact float32 controller representation.
 
-A zero-centered fitted field may declare a positive
-`selection_regularization_scale`. Among candidates that pass both the registered
-response metric and the pinned flight-parameters qualification, final selection
-uses the smallest dimensionless L2 correction across those declared fields,
-then the response metrics as tie-breakers. If no candidate passes the response
-metric, gate proximity continues to determine the diagnostic selection; if
-response candidates pass but none fit the flight parameters, the best response
-candidate remains diagnostic evidence and cannot publish. This keeps an
-estimator-offset fit from spending unnecessary correction authority merely to
-improve an already-passing trace metric without allowing that correction to
-escape the measured hover envelope.
+Candidates are ordered by one scalar: the maximum measured error divided by its
+allowed limit. There is no accepted-first branch or regularization preference.
+The beam also preserves champions for individual checks to explore competing
+objectives. An unusable or incomplete simulation has no valid score.
 
 The default uses one persistent worker and 128 candidate slots. This is the
 measured useful-throughput optimum for the current GPU; additional workers
@@ -164,37 +170,26 @@ mode and padding the smaller family's trace stride to the fixed scene capacity;
 constructing multiple `DirectRLEnv` instances in one process is unsupported by
 Isaac Lab's simulation-context ownership.
 
-### Independent selection and qualification
+### Independent selection and evaluation
 
-Parameter expansion and beam retention use the fitting response flight only.
-After search finishes, candidates passing both response and full-window hover
-checks are replayed on the validation response flight. Validation selects among
-those candidates using the existing response ranking and declared L2
-regularization, with the same hover bounds. It never expands the parameter grid.
-The selected settings are frozen before the acceptance recording is evaluated.
-An acceptance failure preserves that selection and fails qualification; it does
-not trigger a second selection on acceptance data.
+Only training flights drive parameter expansion. All usable training candidates
+are scored on validation flights, including candidates above the acceptance
+threshold. The lowest validation score wins; an exact tie retains the earlier
+candidate. Its settings are frozen before test evaluation. Test failures never
+trigger reselection or another search. The GPU coordinator performs selection
+once and writes the provisional controller and compressed selection records.
+The Isaac Lab image includes `zstd` for these records.
 
-Each qualification stage validates the immutable flight bundle once and reuses
-the loaded hover bounds for its candidates. Candidate iteration does not reread
-and hash all producer evidence files. Fitting eligibility, validation selection,
-and frozen acceptance each perform their own validation.
+Training inputs and outputs use the run root; validation and test use
+`validation/` and `test/`. Evaluators have isolated caches per role. The selected
+controller is then replayed against original ULog/bridge evidence and run through
+the live hover/goto integration. Finalization requires complete evidence bound
+to the selected settings and capture digest. It compresses target outputs in
+place, preserving relative input references, and inventories the completed run.
 
-This is repeated qualification against a fixed benchmark. Subsequent controller
-iterations reuse the same immutable PX4 bundle, including acceptance recordings.
-Recapture only when PX4 setup, flight profiles, or recording configuration changes.
-This repeated use is not a claim of an untouched final test population.
-
-Fitting inputs and target traces retain the existing root filenames. Independent
-validation and acceptance inputs and target traces live under `validation/` and
-`acceptance/`. Evaluators have separate caches per set and reject mismatched
-`set_name` headers or reference SHA-256 digests. Digests are pinned before worker
-launch and checked when target results are loaded. Selection rows identify the recording set that owns their
-metrics; metric names containing `fit` or `validation` still identify internal
-profile splits. `qualification.json` records the frozen settings fingerprint,
-pinned flight fingerprint, selection set, final evaluation set, raw metric
-result, and failure reasons. Each held-out GPU evaluation also records its
-reference digest and exact settings list in `evaluation.json`.
+This is repeated qualification against a fixed benchmark. Selecting published
+`best` by the final test score allows benchmark comparison; it is not a claim of
+an untouched test population across repeated controller-development efforts.
 
 ## Evidence and boundary audit
 
@@ -221,9 +216,10 @@ Resetting any held state
 to a neutral value makes a profile's result depend on where capture happened to
 land in PX4's asynchronous controller schedule and is therefore invalid. The
 flight-parameters bundle retains these response traces without reduction.
-Alignment preparation validates exact profile order, commands, cadence, sample
-counts, split identity, completion, and controller-boundary state before
-pinning the resolved run. One alignment run directory keeps:
+Alignment preparation checks profile order, authored and recorded commands,
+completion, and reconstructed controller boundaries before pinning the run.
+The producer reader validates original sample ranges and strictly increasing
+measurement timestamps; alignment does not impose a synthetic time-zero grid. One alignment run directory keeps:
 
 - the ULog and bridge log;
 - reference and target traces;
@@ -237,8 +233,8 @@ The actuator audit joins `vehicle_thrust_setpoint`,
 reconstructed collective/torque, and `hover_thrust_estimate` by timestamp. It
 fails on incomplete topic coverage, a join error above one 4 ms physics tick,
 normalized motor RMSE above 0.01, or collective RMSE above 0.05 N. The
-controller-boundary replay applies the selected controller to every fit,
-validation, and stability profile. Its core replay uses PX4-estimated state and
+controller-boundary replay applies the selected controller to every train,
+validation, and test profile. Its core replay uses PX4-estimated state and
 reports the per-axis body-rate setpoint and collective setpoint errors before
 the rate controller and the per-axis angular-velocity and derivative errors at
 the rate-controller input. It consumes PX4's independently published angular
@@ -253,11 +249,11 @@ replay starts from the physics-rate physical articulation state in the bridge
 log, seeds the recorded
 initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each
-profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
-the target's fitted fractional attitude-loop cadence, and recorded command
-cadence. A recorded policy sample contains the setpoint
-published after observing that timestamp; replay therefore applies a changed
-setpoint on the following 4 ms controller tick. The controller command and
+profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop timing,
+the target's fitted fractional attitude-loop timing, and recorded command
+timing. A recorded command request follows its policy observation; boundary replay
+therefore applies that request on the following 4 ms controller tick. Request
+timestamps remain separate from sampled physical observation timestamps. The controller command and
 PX4's vertical velocity-state blending both consume that same delayed setpoint.
 The collapsed target cascade consumes an attitude-loop publication in its rate
 controller on the same physics tick. PX4 runs attitude, rate, and allocation on
@@ -273,8 +269,10 @@ outputs retain the logged thrust value because allocation is not invertible.
 The unshifted intermediate setpoint metrics remain authoritative, so this join
 cannot absorb a controller-value error. CTBR remains the direct rate-controller
 contract.
-Replay holds the exact recorded 40/60 ms intervals and does not quantize them
-through a second synthetic 20 Hz cadence. The seed phase is derived per profile from the
+Replay uses the original measurement times and separate command-request times.
+A controller boundary can precede its first physical measurement. The target
+advances from that boundary to each command event and each observation, preserving
+the offset without shifting or interpolating producer samples. The seed phase is derived per profile from the
 recorded age of its `vehicle_local_position` sample. Because the replay grid
 includes the profile boundary, its initial accrued outer-loop time is the
 sample age minus one 4 ms physics tick; this preserves the next 125 Hz update
@@ -329,10 +327,16 @@ audits the deployment boundary.
 
 ## Quality and acceptance
 
-The registered `controller-quality` aggregate resolves each family's registered
-metric, keeps every axis visible, and ranks first by failed-gate count and
-normalized excess. The translational family applies the following limits to
-each of X, Y, and Z independently:
+`alignment.evaluation.response_limits` owns the existing response limits.
+The pure evaluator returns the existing check records (name, measured error,
+allowed limit), one score and acceptance. The score is
+`max(error / limit)`; acceptance is exactly `score <= 1`. This rule ranks training
+and validation candidates and decides final acceptance. No average can hide a
+failed component. Final scoring combines test response, test hover, test
+controller-boundary replay and live hover/goto measurements. Reference actuator
+audits and valid timestamp associations are input-integrity prerequisites.
+
+The translational limits apply to each X, Y and Z axis independently:
 
 - direct velocity NRMSE <= 0.10;
 - envelope velocity NRMSE <= 0.10;
@@ -361,41 +365,41 @@ Each translational axis has an independent envelope profile through 0.8 m/s.
 The Z profile specifically prevents a low-speed aggregate from hiding the wrong
 climb/descend correction observed during policy execution.
 
-A run cannot finalize or publish unless acceptance response and hover checks
-pass, every stability trace completes with finite values, all three actuator
-audits and controller-boundary replays pass, and the integration report passes.
-The run-local controller stays quality-failed with an explicit pending reason
-until these checks complete. Finalization verifies that qualification and
-integration reports identify the selected settings and pinned flight inputs
-before marking the controller quality-passed. Policy training rejects a controller whose
-quality record is failed. The authoritative live gate is:
+A completed rejected controller has `advisory_quality_passed: false` with
+component failure reasons. `qualification.json` retains its final score and all
+measured values and limits. A passing result uses the same report and artifact
+format. `latest` advances to every completed evaluation; comparable `best`
+advances only for a strictly lower final score, with ties retaining the existing
+best. Different comparison inputs start a new best; publication does not scan
+older runs to recover a previous group. Existing run artifacts are preserved.
+Invalid publication inputs raise an error.
 
-```bash
-make test-integration-alignment-target
+Run capture and alignment with:
+
+```sh
+make flight-parameters FLIGHT_COUNT=3
+make align-controllers FLIGHT_PARAMETERS_ARTIFACT=<capture-run> ALIGNMENT_RUN_ID=<run-id>
 ```
 
-Capture publishes unsplit flight datasets; alignment consumption is tracked in
-[the handoff](backlog/flight_parameters_alignment_handoff.md). Run alignment
-against an existing qualified artifact with:
+Three flights exercise the interface with one flight per role. They do not
+establish statistical stability. Alignment never launches its own PX4 capture.
+The authoritative live check remains `make test-integration-alignment-target`.
+During alignment, it records both hover and goto errors even if one exceeds its
+limit. Interface failures or incomplete executions still stop the workflow.
 
-```bash
-# Alignment currently requires a qualified FlightParameters artifact.
-make align-controllers
+To follow local progress in the existing Isaac Lab TrackIO image:
+
+```sh
+make trackio-alignment ALIGNMENT_RUN_ID=<run-id>
 ```
 
-`align-controllers` begins with `alignment-prepare-reference`; it never captures
-PX4 reference data. The campaign runs the authoritative integration check against its run-local
-`controller.json` after replay and before finalization, retaining a settings-bound
-`integration.json` report. A failure therefore
-preserves diagnostic evidence without advancing `latest` or `best`.
+The board reads `progress.json` and stores its own data outside the immutable run.
+It does not affect selection or acceptance. Final reports remain authoritative.
+The default address is `http://127.0.0.1:7861`; Make overrides select host and port.
 
-`controller.json` is the downstream product. It contains complete controller
-settings, the control modes certified by the accepted probe-family list, and
-the exact flight-parameters fingerprint used by its hover-pose qualification;
-policy-owned normalized action scales are not alignment fields. Candidate traces and ULogs are
-valuable reproducibility evidence, but policy training consumes only the
-controller artifact and the independently published matching flight parameters.
-`latest` and comparable `best` links advance only for a fully accepted bundle.
+RL's qualified flight-parameter/reset reader remains a separate handoff. This
+workflow does not change RL controller equations, training inputs or domain
+randomization; see [remaining work](backlog/flight_parameters_alignment_handoff.md).
 
 ## Change policy
 

@@ -304,3 +304,11 @@ rg 'ROUTINE_STAGE.*"kind":"policy"' px4/logs/<date>/<time>_v0_bridge.log
 ULog message timestamps use the same simulated PX4 boot-time clock. Tools whose
 windows are relative to `ULog.start_timestamp` convert a stage boundary with
 `(sim_time_us - ULog.start_timestamp) / 1e6`.
+
+Alignment audit and replay can consume `--dataset-reference <reference.json>`
+with `--json <report.json>`. The reference is an alignment-owned descriptor of
+whole-flight membership. The reader selects lossless stages in memory and opens
+each flight's original compressed ULog and bridge log independently. Adding
+`--controller-artifact` selects controller replay; without it, the command audits
+reference actuator integrity. Completed replay errors remain numerical evaluation
+results; incomplete evidence and input audit failures stop alignment.

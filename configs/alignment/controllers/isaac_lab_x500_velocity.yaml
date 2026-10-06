@@ -84,7 +84,6 @@ parameters:
   # Z remains pinned because its isolated and endpoint errors already pass.
   - field: velocity_observation_bias_mps
     stage: 3
-    selection_regularization_scale: 1.0
     candidates:
       - [-0.010, -0.0140, 0.0]
   # Preserve the unfiltered X branch and existing Y filter.

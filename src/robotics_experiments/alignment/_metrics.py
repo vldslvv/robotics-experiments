@@ -1,4 +1,4 @@
-"""Generic probe-family metric registry and controller quality aggregation."""
+"""Probe response measurements; numerical acceptance belongs to evaluation."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from robotics_experiments.alignment._models import (
     MetricFunction,
     MetricResult,
     ProbeTrace,
-    QualityGateResult,
 )
 
 __all__: list[str] = []
@@ -22,21 +21,24 @@ _MIN_BRAKING_RESPONSE_FRACTION = 0.5
 _METRICS: dict[str, MetricFunction] = {}
 
 
-def _trace_map(*, traces: tuple[ProbeTrace, ...]) -> Mapping[str, ProbeTrace]:
-    mapped = {trace.profile: trace for trace in traces}
+def _trace_map(*, traces: tuple[ProbeTrace, ...]) -> Mapping[tuple[int, str], ProbeTrace]:
+    mapped = {(trace.flight_index, trace.profile): trace for trace in traces}
     if len(mapped) != len(traces):
-        raise ValueError("backend produced duplicate probe profile names")
+        raise ValueError("backend produced duplicate flight/profile identities")
     return mapped
 
 
 def _matched_trace(*, reference: ProbeTrace, target: ProbeTrace) -> None:
     identity = (
+        "flight_index",
+        "profile",
         "family",
         "control_mode",
         "family_metric",
         "split",
         "axis",
         "time_s",
+        "command_time_s",
         "command_velocity_body_flu_mps",
         "command_yaw_rate_radps",
         "command_collective_thrust_normalized",
@@ -45,7 +47,7 @@ def _matched_trace(*, reference: ProbeTrace, target: ProbeTrace) -> None:
     if any(getattr(reference, name) != getattr(target, name) for name in identity):
         raise ValueError(
             f"target trace {target.profile!r} does not reproduce the reference family, "
-            "cadence, and physical command sequence"
+            "sample timing, and physical command sequence"
         )
     sample_fields = (
         "position_enu_m",
@@ -200,11 +202,7 @@ def _translation_split(
     return metrics
 
 
-def _gate(*, name: str, metrics: Mapping[str, float], limit: float) -> QualityGateResult:
-    return QualityGateResult(name=name, value=metrics[name], limit=limit)
-
-
-def _translation_quality(
+def _translation_metrics(
     reference_traces: tuple[ProbeTrace, ...], target_traces: tuple[ProbeTrace, ...], /
 ) -> MetricResult:
     fit = _translation_split(
@@ -213,31 +211,11 @@ def _translation_quality(
     validation = _translation_split(
         reference_traces=reference_traces, target_traces=target_traces, split="validation"
     )
-    gates: list[QualityGateResult] = []
-    for axis in ("x", "y", "z"):
-        gates.extend(
-            (
-                _gate(name=f"{axis}_velocity_nrmse", metrics=validation, limit=0.10),
-                _gate(name=f"{axis}_envelope_velocity_nrmse", metrics=validation, limit=0.10),
-                _gate(name=f"{axis}_braking_distance_error_m", metrics=validation, limit=0.005),
-                _gate(name=f"{axis}_residual_speed_error_mps", metrics=validation, limit=0.01),
-                _gate(name=f"{axis}_stop_time_error_s", metrics=validation, limit=0.10),
-            )
-        )
-    gates.append(_gate(name="combined_endpoint_error_m", metrics=validation, limit=0.01))
-    ratios = tuple(gate.value / gate.limit for gate in gates)
     return MetricResult(
         metrics={**{f"fit_{key}": value for key, value in fit.items()}, **validation},
-        ranking_values=(
-            sum(validation[f"{axis}_residual_speed_error_mps"] for axis in ("x", "y", "z")),
-            sum(validation[f"{axis}_velocity_nrmse"] for axis in ("x", "y", "z")),
-            validation["combined_endpoint_error_m"],
-        ),
+        ranking_values=(),
         fit_metrics=fit,
         validation_metrics=validation,
-        beam_values=ratios,
-        quality_passed=all(gate.value <= gate.limit for gate in gates),
-        gates=tuple(gates),
     )
 
 
@@ -342,45 +320,22 @@ def _ctbr_split(
     return metrics
 
 
-def _ctbr_quality(
+def _ctbr_metrics(
     reference_traces: tuple[ProbeTrace, ...], target_traces: tuple[ProbeTrace, ...], /
 ) -> MetricResult:
     fit = _ctbr_split(reference_traces=reference_traces, target_traces=target_traces, split="fit")
     validation = _ctbr_split(
         reference_traces=reference_traces, target_traces=target_traces, split="validation"
     )
-    gates: list[QualityGateResult] = []
-    for axis in ("roll", "pitch", "yaw"):
-        gates.extend(
-            (
-                _gate(name=f"{axis}_body_rate_nrmse", metrics=validation, limit=0.10),
-                _gate(name=f"{axis}_envelope_body_rate_nrmse", metrics=validation, limit=0.10),
-                _gate(name=f"{axis}_attitude_error_deg", metrics=validation, limit=3.0),
-            )
-        )
-    gates.extend(
-        (
-            _gate(name="collective_velocity_nrmse", metrics=validation, limit=0.10),
-            _gate(name="collective_acceleration_nrmse", metrics=validation, limit=0.10),
-        )
-    )
-    ratios = tuple(gate.value / gate.limit for gate in gates)
     return MetricResult(
         metrics={**{f"fit_{key}": value for key, value in fit.items()}, **validation},
-        ranking_values=(
-            sum(validation[f"{axis}_body_rate_nrmse"] for axis in ("roll", "pitch", "yaw")),
-            sum(validation[f"{axis}_attitude_error_deg"] for axis in ("roll", "pitch", "yaw")),
-            validation["collective_velocity_nrmse"],
-        ),
+        ranking_values=(),
         fit_metrics=fit,
         validation_metrics=validation,
-        beam_values=ratios,
-        quality_passed=all(gate.value <= gate.limit for gate in gates),
-        gates=tuple(gates),
     )
 
 
-def _controller_quality(
+def _controller_metrics(
     reference_traces: tuple[ProbeTrace, ...], target_traces: tuple[ProbeTrace, ...], /
 ) -> MetricResult:
     reference_by_profile = _trace_map(traces=reference_traces)
@@ -401,9 +356,6 @@ def _controller_quality(
     metrics: dict[str, float] = {}
     fit: dict[str, float] = {}
     validation: dict[str, float] = {}
-    gates: list[QualityGateResult] = []
-    ranking: list[float] = []
-    beam: list[float] = []
     for family_name, reference_family in reference_by_family.items():
         metric_names = {trace.family_metric for trace in reference_family}
         if len(metric_names) != 1:
@@ -420,26 +372,11 @@ def _controller_quality(
             fit[f"{family_name}.{key}"] = value
         for key, value in family_result.validation_metrics.items():
             validation[f"{family_name}.{key}"] = value
-        gates.extend(
-            QualityGateResult(name=f"{family_name}.{gate.name}", value=gate.value, limit=gate.limit)
-            for gate in family_result.gates
-        )
-        ranking.extend(family_result.ranking_values)
-        beam.extend(family_result.beam_values)
-    excesses = tuple(max(gate.value / gate.limit - 1.0, 0.0) for gate in gates)
     return MetricResult(
         metrics=metrics,
-        ranking_values=(
-            float(sum(excess > 0.0 for excess in excesses)),
-            max(excesses, default=0.0),
-            sum(excesses),
-            *ranking,
-        ),
+        ranking_values=(),
         fit_metrics=fit,
         validation_metrics=validation,
-        beam_values=tuple(beam),
-        quality_passed=not any(excesses),
-        gates=tuple(gates),
     )
 
 
@@ -475,6 +412,6 @@ def _finite_metric_result(*, result: MetricResult) -> bool:
     return all(math.isfinite(value) for value in values)
 
 
-register_metric(name="translational-controller-quality", metric=_translation_quality)
-register_metric(name="ctbr-controller-quality", metric=_ctbr_quality)
-register_metric(name="controller-quality", metric=_controller_quality)
+register_metric(name="translational-controller-quality", metric=_translation_metrics)
+register_metric(name="ctbr-controller-quality", metric=_ctbr_metrics)
+register_metric(name="controller-quality", metric=_controller_metrics)

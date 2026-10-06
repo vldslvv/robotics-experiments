@@ -126,7 +126,7 @@ def load_flight_dataset(path: str | Path, /) -> FlightDataset:
     return _read_dataset(run=run, artifact=artifact)
 
 
-def _stage_views(flight: FlightRecording, /) -> tuple[dict[str, Any], ...]:
+def flight_stage_views(flight: FlightRecording, /) -> tuple[dict[str, Any], ...]:
     """Read original sample ranges without interpolation or shifted windows."""
     with (flight.directory / "motion.jsonl").open() as stream:
         rows = tuple(json.loads(line) for line in stream)
@@ -161,17 +161,26 @@ def _stage_views(flight: FlightRecording, /) -> tuple[dict[str, Any], ...]:
             view[key] = [row[key] for row in stage_rows]
         if metadata["kind"] == "controller-response":
             commands = [row["requested_command"] for row in stage_rows]
+            view["command_time_s"] = [
+                (row["requested_at_us"] - metadata["start_sim_time_us"]) * 1e-6
+                for row in stage_rows
+            ]
             view["command_velocity_body_flu_mps"] = [
                 (c.get("forward_mps", 0.0), -c.get("right_mps", 0.0), -c.get("down_mps", 0.0))
                 for c in commands
             ]
-            view["command_yaw_rate_radps"] = [-c.get("yaw_rate_radps", 0.0) for c in commands]
+            view["command_yaw_rate_radps"] = [
+                -c.get("yaw_rate_radps", 0.0) if metadata["control_mode"] == "velocity" else 0.0
+                for c in commands
+            ]
             view["command_body_rate_flu_radps"] = [
                 (
                     c.get("roll_rate_radps", 0.0),
                     -c.get("pitch_rate_radps", 0.0),
                     -c.get("yaw_rate_radps", 0.0),
                 )
+                if metadata["control_mode"] == "ctbr"
+                else (0.0, 0.0, 0.0)
                 for c in commands
             ]
             view["command_collective_thrust_normalized"] = [c.get("thrust", 0.0) for c in commands]

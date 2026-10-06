@@ -106,7 +106,9 @@ and backlogs describe future work, not current implementation requirements.
   neutral fallback defaults, but must not duplicate project values.
 - Invalid config and unexpected state must not fail silently. Raise for invalid
   config; warn on recoverable runtime fallbacks. Add checks only to prevent
-  silent incorrect results or represent distinct states. Prefer concrete values
+  silent incorrect results or represent distinct states. Validate at the owning
+  boundary; do not repeat defensive checks on already validated internal data.
+  Prefer concrete values
   or domain-appropriate sentinels over unnecessary `Optional`, routine `None`
   checks, and `<= 0 disables` conventions. Use `None` for genuine absence.
 - `VehicleState` contains pose, velocity, angular velocity, and simulation time
@@ -116,9 +118,10 @@ and backlogs describe future work, not current implementation requirements.
 ## Artifacts and execution
 
 - Input artifacts are immutable, producer-owned evidence. Resolve and validate
-  exact paths; pin digests across process boundaries. Resolve `latest`/`best`
-  once and record the canonical producer `run_id` and digest/fingerprint as
-  lineage. Reference the producer files directly; if a consumer filename is
+  exact paths and reuse existing producer identifiers and digests. Resolve
+  `latest`/`best` once and reference the canonical producer run. Do not add
+  tracing, fingerprints, or provenance machinery unless explicitly requested.
+  Reference the producer files directly; if a consumer filename is
   required, use a relative symlink. Never copy, rewrite, migrate, or mutate input
   artifact bytes into a consumer run.
 - Do not commit new binary files. The three LightSwitchWarehouse USD crates in
@@ -155,9 +158,11 @@ and backlogs describe future work, not current implementation requirements.
   indirect or verbose just to appease a checker that cannot express it.
 - Use `# fmt: off` / `# fmt: on` around the smallest intentionally aligned Python
   table so formatters preserve its spacing.
-- Refactoring must reduce maintenance cost or leave it unchanged. Prefer modifying
-  existing files and deleting redundant code, tests, wrappers, and docs over
-  adding abstractions, entrypoints, or parallel models.
+- Refactoring must reduce code and complexity. Justify any net increase with
+  concrete, explicitly requested functionality. Delete redundant code, tests,
+  wrappers, and docs; do not add speculative abstractions, entrypoints, or
+  parallel models. Fewer lines must not come from obscuring code or removing
+  required behavior and meaningful tests.
 - Use simple, concrete language and ASCII; avoid vague jargon. Comments and
   living docs describe current behavior, invariants, and intent, not change history.
 - Update the owning doc when behavior changes affect conventions, error handling,

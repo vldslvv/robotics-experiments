@@ -130,7 +130,8 @@ only after all flights complete. See `docs/FLIGHT_PARAMETERS.md`.
   tests the provisional run-local controller and writes `integration.json` through
   the existing script's `--alignment-report` option. The report binds pass/fail to
   the selected settings and flight-parameters fingerprints; finalization requires
-  that matching passing report.
+  that matching complete report. Numerical rejection is recorded in the published
+  artifact; incomplete execution still fails the workflow.
 - `make test-integration-press-policy-transfer` runs the trained press actor
   through three PX4 policy stages at distinct entry ranges in the production
   warehouse. Physical wall and switch contact remain enabled, and the gate

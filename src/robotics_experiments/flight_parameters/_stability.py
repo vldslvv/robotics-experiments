@@ -16,7 +16,7 @@ from robotics_experiments.config import FlightStabilityConfig
 from robotics_experiments.flight_parameters._dataset import (
     FlightDataset,
     _hover_trace,
-    _stage_views,
+    flight_stage_views,
     load_flight_dataset,
 )
 from robotics_experiments.flight_parameters._derive import _trace_signal_values, summarize_signal
@@ -520,7 +520,7 @@ def _load_run(
     hover = []
     response = []
     for flight in dataset.flights:
-        views = _stage_views(flight)
+        views = flight_stage_views(flight)
         hover.append(_hover_trace(dataset=dataset, flight=flight, view=views[0]))
         response.append(
             {
