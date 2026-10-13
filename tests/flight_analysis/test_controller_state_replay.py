@@ -215,19 +215,48 @@ def test_allocator_collective_recovers_missing_unsaturated_publications() -> Non
     np.testing.assert_allclose(collective, [0.57, 0.56, 0.56])
 
 
-def test_controller_handoff_join_reproduces_independent_work_queue_order() -> None:
+@pytest.mark.parametrize(
+    ("attitude", "previous_attitude", "rates", "previous_rates", "allocator", "expected_delays"),
+    [
+        pytest.param(0.6, 0.5, 0.6, 0.5, 0.6, (0, 0), id="same-tick"),
+        pytest.param(0.7, 0.6, 0.6, 0.5, 0.6, (1, 0), id="attitude-delay"),
+        pytest.param(0.8, 0.7, 0.8, 0.7, 0.7, (0, 1), id="allocator-delay"),
+        pytest.param(0.9, 0.8, 0.8, 0.7, 0.7, (1, 1), id="both-delays"),
+        pytest.param(
+            0.5715836882591248,
+            0.5715805292129517,
+            0.5715805292129517,
+            0.5715818405151367,
+            0.5715836882591248,
+            (0, 0),
+            id="unlogged-rate-false-two-tick-delay",
+        ),
+        pytest.param(0.7, 0.6, 0.6, 0.5, 0.7, (0, 0), id="unlogged-rate-false-one-tick-delay"),
+        pytest.param(0.9, 0.8, 0.8, 0.9, 0.9, (1, 1), id="repeated-logged-value"),
+        pytest.param(0.7, 0.6, 0.6, 0.5, 0.7000001, (1, 0), id="no-exact-source-match"),
+    ],
+)
+def test_controller_handoff_join_reproduces_independent_work_queue_order(
+    *,
+    attitude: float,
+    previous_attitude: float,
+    rates: float,
+    previous_rates: float,
+    allocator: float,
+    expected_delays: tuple[int, int],
+) -> None:
     joined, attitude_delay, allocator_delay = _controller_handoff_indices(
-        replay_indices=np.array([2, 3, 4, 5]),
-        current_attitude_collective=np.array([0.6, 0.7, 0.8, 0.9]),
-        previous_attitude_collective=np.array([0.5, 0.6, 0.7, 0.8]),
-        current_rates_collective=np.array([0.6, 0.6, 0.8, 0.8]),
-        previous_rates_collective=np.array([0.5, 0.5, 0.7, 0.7]),
-        allocator_collective=np.array([0.6, 0.6, 0.7, 0.7]),
+        replay_indices=np.array([2]),
+        current_attitude_collective=np.array([attitude]),
+        previous_attitude_collective=np.array([previous_attitude]),
+        current_rates_collective=np.array([rates]),
+        previous_rates_collective=np.array([previous_rates]),
+        allocator_collective=np.array([allocator]),
     )
 
-    assert joined.tolist() == [2, 2, 3, 3]
-    assert attitude_delay.tolist() == [0, 1, 0, 1]
-    assert allocator_delay.tolist() == [0, 0, 1, 1]
+    assert joined.tolist() == [2 - sum(expected_delays)]
+    assert attitude_delay.tolist() == [expected_delays[0]]
+    assert allocator_delay.tolist() == [expected_delays[1]]
 
 
 def test_vertical_setpoint_delay_scan_finds_two_tick_outer_phase() -> None:

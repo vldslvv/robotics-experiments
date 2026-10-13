@@ -1898,6 +1898,30 @@ def test_incomplete_reports_cannot_finalize(tmp_path):
         assert not (run / "manifest.json").exists()
 
 
+@pytest.mark.parametrize(
+    "join_field",
+    ["physical_state_timestamp_join_error_us", "actuator_handoff_join_error_us"],
+)
+def test_completed_timestamp_rejection_can_publish(tmp_path, join_field):
+    result = align(
+        _definition(backend="isaac-lab", evaluator=_Evaluator()),
+        _definition(backend="px4-sitl", evaluator=_Evaluator()),
+    )
+    run = _completed_run(root=tmp_path, name="timestamp-rejected", result=result, score=0.0)
+    path = run / "test/controller_boundary_replay.json"
+    replay = json.loads(path.read_text())
+    replay["flights"][0]["profiles"][0][join_field] = 8000
+    path.write_text(json.dumps(replay))
+    finalize_alignment_bundle(run_dir=run)
+    publish_controller(run_dir=run)
+    controller = load_controller_artifact(run)
+    assert not controller.advisory_quality_passed
+    assert controller.advisory_quality_reasons == (
+        f"replay.flight-0.probe.{join_field}=8000 exceeds 4000",
+    )
+    assert (tmp_path / "latest").resolve() == run
+
+
 def test_best_starts_again_when_comparison_inputs_change(tmp_path):
     result = align(
         _definition(backend="isaac-lab", evaluator=_Evaluator()),

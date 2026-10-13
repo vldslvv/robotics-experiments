@@ -50,6 +50,13 @@ The replay/audit tool accepts plain or gzip ULogs and bridge logs, including
 compressed producer files reached through the existing alignment symlinks.
 It streams decompression without creating uncompressed evidence copies.
 
+Controller replay is an offline calculation over simulation timestamps. Its
+handoff errors describe inferred shifts of the predicted motor output on the
+physics grid. When allocator collective exactly matches the latest attitude
+collective but neither logged rate candidate, replay recovers the missing rate
+collective only for handoff inference. Intermediate-error metrics retain the
+original logged values; physical-state and bridge timestamp joins remain separate.
+
 Alignment trace schema 1 records every profile's absolute PX4 simulation start
 time, exact command cadence, physical and PX4-estimated initial velocity, and
 controller acceleration, rate-integral, and normalized hover-thrust state at

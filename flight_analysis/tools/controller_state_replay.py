@@ -525,6 +525,14 @@ def _controller_handoff_indices(
         )
     ):
         raise ValueError("controller handoff samples must match the replay indices")
+    # PX4 copies collective unchanged; allocator evidence can recover an unlogged rate publication.
+    current_rates = np.where(
+        (allocator == current_attitude)
+        & (allocator != current_rates)
+        & (allocator != previous_rates),
+        allocator,
+        current_rates,
+    )
     attitude_delay = (
         np.abs(current_rates - current_attitude) > np.abs(current_rates - previous_attitude)
     ).astype(np.int64)

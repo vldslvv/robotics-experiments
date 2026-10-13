@@ -188,6 +188,8 @@ Training inputs and outputs use the run root; validation and test use
 controller is then replayed against original ULog/bridge evidence and run through
 the live hover/goto integration. Finalization consumes the completed replay and live evaluation reports. It compresses target outputs in
 place, preserving relative input references, and inventories the completed run.
+Replay timestamp-join errors above the physics-tick limit reject qualification;
+they do not prevent a completed evaluation from publishing its evidence.
 Compression errors propagate; finalization does not decompress outputs to verify
 the compressor or repeat producer digest and manifest checks.
 
@@ -263,8 +265,14 @@ controller on the same physics tick. PX4 runs attitude, rate, and allocation on
 independent work queues, so an adjacent subscriber can observe that publication
 on either the same tick or the next one. Replay derives those source-age choices
 from the recorded attitude, rate, and thrust topics, then joins the target motor
-prediction by at most one 4 ms physics tick. It reports both adjacent handoffs,
-the total actuator join offset distribution, and the peak collective window.
+prediction and qualifies the inferred shift against one 4 ms physics tick.
+The reported handoff error is this inferred replay offset, not elapsed time
+between topic publications. It reports both adjacent handoffs, the total actuator
+join offset distribution, and the peak collective window. PX4 copies collective
+thrust unchanged through the rate controller. If allocator thrust exactly matches
+the latest attitude collective but neither held rate candidate, replay uses it
+as the missing rate collective for handoff inference. Original logged rate values
+remain in intermediate-error metrics.
 When the thrust topic has no publication at a motor timestamp, replay recovers
 that collective by inverting unsaturated PX4 motor allocation. A neighboring
 logged thrust value must not introduce a spurious handoff delay. Saturated

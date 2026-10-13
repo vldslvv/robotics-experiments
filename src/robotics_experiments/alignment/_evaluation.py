@@ -107,31 +107,30 @@ def evaluate_final(
     for flight in replay["flights"]:
         for profile in flight["profiles"]:
             prefix = f"replay.flight-{flight['flight_index']}.{profile['profile']}"
-            if (
-                profile["physical_state_timestamp_join_error_us"]
-                > flight["timestamp_join_limit_us"]
-                or profile["actuator_handoff_join_error_us"] > flight["timestamp_join_limit_us"]
-            ):
-                raise ValueError(f"{prefix}: timestamp association is invalid")
-            for name, values, limit_name in (
-                ("normalized_motor_rmse", profile["metrics"], "normalized_motor_rmse"),
-                ("collective_thrust_rmse_n", profile["metrics"], "collective_thrust_rmse_n"),
-                (
-                    "physical_normalized_motor_rmse",
-                    profile["physical_state_metrics"],
-                    "normalized_motor_rmse",
-                ),
-            ):
-                check = QualityGateResult(
-                    f"{prefix}.{name}", values[limit_name], flight["limits"][limit_name]
-                )
-                evaluate_metrics(
-                    measurements={check.name: check.value}, limits={check.name: check.limit}
-                )
+            measurements = {
+                **{name: profile["metrics"][name] for name in flight["limits"]},
+                "physical_normalized_motor_rmse": profile["physical_state_metrics"][
+                    "normalized_motor_rmse"
+                ],
+                "physical_state_timestamp_join_error_us": profile[
+                    "physical_state_timestamp_join_error_us"
+                ],
+                "actuator_handoff_join_error_us": profile["actuator_handoff_join_error_us"],
+            }
+            limits = {
+                **flight["limits"],
+                "physical_normalized_motor_rmse": flight["limits"]["normalized_motor_rmse"],
+                "physical_state_timestamp_join_error_us": flight["timestamp_join_limit_us"],
+                "actuator_handoff_join_error_us": flight["timestamp_join_limit_us"],
+            }
+            evaluated = evaluate_metrics(measurements=measurements, limits=limits)
+            for check in evaluated.checks:
+                name = check.name
+                check = replace(check, name=f"{prefix}.{name}")
                 previous = worst_replay.get(name)
                 if previous is None or check.value / check.limit > previous.value / previous.limit:
                     worst_replay[name] = check
-    if len(worst_replay) != 3:
+    if len(worst_replay) != 5:
         raise ValueError("test replay has no complete performance measurements")
     checks.extend(worst_replay.values())
     if len({c.name for c in checks}) != len(checks):
